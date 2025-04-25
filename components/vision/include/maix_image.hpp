@@ -173,11 +173,12 @@ namespace maix::image
          *
          * @maixpy maix.image.Image.get_pixel
         */
-        std::vector<int> get_pixel(int x, int y, bool rgbtuple = false) {
-            std::vector<int> pixels;
+        std::vector<uint32_t> get_pixel(int x, int y, bool rgbtuple = false) {
+            std::vector<uint32_t> pixels;
             if (!(_format == image::Format::FMT_RGB888 || _format == image::Format::FMT_BGR888 ||
                 _format == image::Format::FMT_RGB565 || _format == image::Format::FMT_BGR565 ||
-                _format == image::Format::FMT_GRAYSCALE)) {
+                _format == image::Format::FMT_GRAYSCALE ||
+                _format == image::Format::FMT_RGBA8888 || _format == image::Format::FMT_BGRA8888)) {
                 log::error("get_pixel not support format: %d\r\n", _format);
                 return pixels;
             }
@@ -195,7 +196,7 @@ namespace maix::image
                 uint8_t v1 = ((uint8_t *)_data)[y * _width * 3 + x * 3 + 1];
                 uint8_t v2 = ((uint8_t *)_data)[y * _width * 3 + x * 3 + 2];
                 if (!rgbtuple) {
-                    int value = v0 << 16 | v1 << 8 | v2;
+                    uint32_t value = v2 << 16 | v1 << 8 | v0;
                     pixels.push_back(value);
                 } else {
                     pixels.push_back(v0);
@@ -211,19 +212,36 @@ namespace maix::image
             case image::Format::FMT_RGB565:
             {
                 if (!rgbtuple) {
-                    int value = ((uint16_t *)_data)[y * _width + x] & 0xffff;
+                    uint32_t value = ((uint16_t *)_data)[y * _width + x] & 0xffff;
                     pixels.push_back(value);
                 } else {
-                    int value = ((uint16_t *)_data)[y * _width + x] & 0xffff;
-                    int v0 = (value >> 11) & 0x1F;
-                    int v1 = (value >> 5) & 0x3F;
-                    int v2 = value & 0x1F;
+                    uint32_t value = ((uint16_t *)_data)[y * _width + x] & 0xffff;
+                    uint32_t v0 = (value >> 11) & 0x1F;
+                    uint32_t v1 = (value >> 5) & 0x3F;
+                    uint32_t v2 = value & 0x1F;
                     pixels.push_back(v0);
                     pixels.push_back(v1);
                     pixels.push_back(v2);
                 }
                 break;
             }
+            case image::Format::FMT_RGBA8888: // fall through
+            case image::Format::FMT_BGRA8888:
+                if (!rgbtuple) {
+                    uint32_t value = ((uint32_t *)_data)[y * _width + x] & 0xffffffff;
+                    pixels.push_back(value);
+                } else {
+                    uint32_t value = ((uint32_t *)_data)[y * _width + x] & 0xffffffff;
+                    uint32_t v0 = value & 0xFF;
+                    uint32_t v1 = (value >> 8) & 0xFF;
+                    uint32_t v2 = (value >> 16) & 0xFF;
+                    uint32_t v3 = (value >> 24) & 0xFF;
+                    pixels.push_back(v0);
+                    pixels.push_back(v1);
+                    pixels.push_back(v2);
+                    pixels.push_back(v3);
+                }
+                break;
             default:
                 log::error("get_pixel not support format: %d\r\n", _format);
                 break;
