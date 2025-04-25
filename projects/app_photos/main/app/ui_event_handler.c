@@ -4,7 +4,7 @@
 #include "ui_utils.h"
 #include "ui_event_handler.h"
 
-// #define DEBUG_ENABLE
+#define DEBUG_ENABLE
 #ifdef DEBUG_ENABLE
 #define DEBUG_EN(x)                                                         \
     bool g_debug_flag = x;
@@ -27,6 +27,9 @@ extern lv_obj_t *g_small_photo_screen;
 extern lv_obj_t *g_switch_left;
 extern lv_obj_t *g_switch_right;
 extern lv_obj_t *g_video_bar;
+
+extern lv_obj_t *g_btn_select;
+extern lv_obj_t *g_btn_cancel;
 
 static struct {
     unsigned int exit_flag : 1;
@@ -98,11 +101,47 @@ void event_touch_small_image_cb(lv_event_t * e)
             ui_photo_list_screen_update();
             if (g_lower_screen) {
                 lv_obj_remove_flag(g_lower_screen, LV_OBJ_FLAG_HIDDEN);
+		lv_obj_remove_flag(g_btn_cancel, LV_OBJ_FLAG_HIDDEN);
+            	lv_obj_add_flag(g_btn_select, LV_OBJ_FLAG_HIDDEN);
             }
         } else {
             DEBUG_PRT("unknow error!\r\n");
         }
     }
+}
+
+
+void event_touch_select_btn_cb(lv_event_t * e)
+{
+	DEBUG_EN(1);
+	static uint8_t ignore_after_long_press = 0;	
+	ignore_after_long_press = 1;
+        ui_set_need_bulk_delete(1);
+        ui_photo_list_screen_update();
+        if (g_lower_screen) {
+            lv_obj_remove_flag(g_lower_screen, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_remove_flag(g_btn_cancel, LV_OBJ_FLAG_HIDDEN);
+	    lv_obj_add_flag(g_btn_select, LV_OBJ_FLAG_HIDDEN);
+	}
+	
+	DEBUG_PRT("SELECT BTN\r\n");
+}
+
+void event_touch_cancel_btn_cb(lv_event_t * e)
+{
+	DEBUG_EN(1);
+        
+	priv.touch_bulk_delete_cancel = 1;
+        ui_set_need_bulk_delete(0);
+        ui_photo_list_screen_update();
+        ui_photo_clear_all_photo_flag();
+        if (g_lower_screen) {
+            lv_obj_add_flag(g_lower_screen, LV_OBJ_FLAG_HIDDEN);
+       	    lv_obj_add_flag(g_btn_cancel, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_remove_flag(g_btn_select, LV_OBJ_FLAG_HIDDEN);
+	}
+
+	DEBUG_PRT("CANCEL BTN\r\n");
 }
 
 void event_touch_big_image_cb(lv_event_t * e)

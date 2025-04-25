@@ -13,6 +13,9 @@ void event_touch_small_image_cb(lv_event_t * e);
 void event_video_bar_event_cb(lv_event_t * e);
 void event_video_view_event_cb(lv_event_t * e);
 
+void event_touch_select_btn_cb(lv_event_t * e);
+void event_touch_select_btn_cb(lv_event_t * e);
+
 bool ui_get_exit_flag(void);
 bool ui_get_touch_small_image_flag(void);
 void ui_get_touch_small_image_path(char **dir_name, char **img_path);
