@@ -22,13 +22,78 @@
 #include "maix_fp5510.hpp"
 #include "focus.hpp"
 
+#include "maix_key.hpp"
+
 #include <numeric>
 #include <future>
 #include <filesystem>
 #include <ctime>
+#include <sys/mman.h>
 
 #include <mutex>
 #include <thread>
+
+#define PAGE_SIZE       4096
+#define GPIO_BASE       0x03020000
+#define GPIO_CFG_OFFSET 0x0004     // 配置寄存器偏移
+#define GPIO_DATA_OFFSET 0x0050    // 数据寄存器偏移
+
+// 物理地址映射到虚拟地址
+volatile uint32_t *map_physical_address(off_t phys_addr) {
+    int mem_fd = open("/dev/mem", O_RDWR | O_SYNC);
+    if (mem_fd < 0) {
+        perror("open /dev/mem");
+        exit(1);
+    }
+
+    void *map_base = mmap(
+        NULL,
+        PAGE_SIZE,
+        PROT_READ | PROT_WRITE,
+        MAP_SHARED,
+        mem_fd,
+        phys_addr & ~(PAGE_SIZE - 1)
+    );
+
+    close(mem_fd);
+
+    if (map_base == MAP_FAILED) {
+        perror("mmap");
+        exit(1);
+    }
+
+    return (volatile uint32_t *)((char *)map_base + (phys_addr & (PAGE_SIZE - 1)));
+}
+
+// 写32位值
+void mmio_write_32(off_t addr, uint32_t value) {
+    volatile uint32_t *ptr = map_physical_address(addr);
+    *ptr = value;
+    munmap((void *)((uintptr_t)ptr & ~(PAGE_SIZE - 1)), PAGE_SIZE);
+}
+
+// 读32位值
+uint32_t mmio_read_32(off_t addr) {
+    volatile uint32_t *ptr = map_physical_address(addr);
+    uint32_t value = *ptr;
+    munmap((void *)((uintptr_t)ptr & ~(PAGE_SIZE - 1)), PAGE_SIZE);
+    return value;
+}
+
+// 初始化 GPIO 输入功能（将某位设为0，配置为输入）
+void init_input_gpio_a(int num) {
+    off_t address = GPIO_BASE + GPIO_CFG_OFFSET;
+    uint32_t val = mmio_read_32(address);
+    val &= ~(1 << num);  // 清除该位，设为输入
+    mmio_write_32(address, val);
+}
+
+// 读取 GPIO 输入值
+int read_input_gpio_a(int num) {
+    off_t address = GPIO_BASE + GPIO_DATA_OFFSET;
+    uint32_t val = mmio_read_32(address);
+    return (val >> num) & 0x1;
+}
 
 using namespace maix;
 using namespace maix::peripheral;
@@ -85,6 +150,27 @@ static struct {
     int timelapse_s;
     bool audio_en;
 } priv;
+
+void on_key(int key, int state)
+{
+    printf("Key!!!\n");
+    log::info("key: %d, state: %d\n", key, state);
+}
+
+void init_key()
+{
+	init_input_gpio_a(22);
+    	int key_switch_mid_value = read_input_gpio_a(22);
+    	printf("GPIO[22] value: %d\n", key_switch_mid_value);
+	// using namespace maix::peripheral::key;
+	//printf("INIT KEY2\n");
+
+	//Key key(my_key_callback);
+	//log::info("init key\n");
+	//key::Key key = key::Key(on_key);
+	
+	//printf("INIT COMPLETE2\n");
+}
 
 static void __find_fp5510(bool& flag, int id=-1, int slave_addr=-1, int freq=-1)
 {
@@ -869,8 +955,25 @@ void slide_run_main(int& pic_cnt)
 //     ltime = rtime;
 // }
 
+int key_down_count = 0;
+
 int app_base_loop(void)
 {
+	int key_switch_mid_value = read_input_gpio_a(22);
+	//log::info("Key %d", key_switch_mid_value);
+	if(key_switch_mid_value == 0)
+	{
+		key_down_count += 1;
+		if(key_down_count >= 10)
+		{
+			printf(":: EXIT\n");
+			app::set_exit_flag(true);
+		}
+	} else {
+		key_down_count = 0;
+	}
+
+	//printf("loop %d", 1);
     // auto fps = time::fps();
     // log::info("curr fps: %0.2f", fps);
 
@@ -1362,6 +1465,12 @@ int app_base_loop(void)
 
 int app_init(camera::Camera &cam)
 {
+	sys::register_default_signal_handle();
+
+	printf("App Init\n");
+
+	init_key();
+
     ui_all_screen_init();
     ui_camera_config_t ui_camera_cfg;
     ui_camera_config_read(&ui_camera_cfg);
