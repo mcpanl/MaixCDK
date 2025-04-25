@@ -23,6 +23,8 @@ typedef struct {
 static priv_t priv;
 
 lv_obj_t *g_camera_video_button;
+lv_obj_t *g_camera_image_button;
+
 lv_obj_t *g_start_snap_button;
 lv_obj_t *g_exit_button;
 lv_obj_t *g_delay_button;
@@ -84,6 +86,11 @@ LV_IMG_DECLARE(img_timestamp);
 LV_IMG_DECLARE(img_timelapse);
 LV_IMG_DECLARE(img_stack);
 LV_IMG_DECLARE(img_stack2);
+LV_IMG_DECLARE(img_back);
+LV_IMG_DECLARE(img_image_tab);
+LV_IMG_DECLARE(img_image_tab_active);
+LV_IMG_DECLARE(img_video_tab);
+LV_IMG_DECLARE(img_video_tab_active);
 
 extern void event_touch_exit_cb(lv_event_t * e);
 extern void event_touch_delay_cb(lv_event_t * e);
@@ -188,16 +195,18 @@ static void left_screen_init(void)
     lv_obj_set_style_line_width(scr, 0, 0);
     lv_obj_set_style_outline_width(scr, 0, 0);
     lv_obj_set_style_bg_color(scr, lv_color_hex(0x000000), 0);
-    // lv_obj_remove_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_remove_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_scrollbar_mode(scr, LV_SCROLLBAR_MODE_OFF);
     lv_obj_set_style_pad_hor(scr, 1, 0);
     lv_obj_add_event_cb(scr, event_left_screen_scroll_cb, LV_EVENT_SCROLL, NULL);
-
+    lv_obj_set_style_bg_opa(scr, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_add_flag(scr, LV_OBJ_FLAG_HIDDEN);
     lv_obj_t *img;
+
     {
-        lv_obj_t *obj = lv_obj_create(scr);
-        lv_obj_set_size(obj, lv_pct(100), lv_pct(25));
-        lv_obj_set_pos(obj, 0, 0);
+        lv_obj_t *obj = lv_obj_create(lv_scr_act());
+        lv_obj_set_size(obj, 72, 72);
+        lv_obj_set_pos(obj, 12, 12);
         lv_obj_set_style_bg_color(obj, lv_color_hex(0), 0);
         lv_obj_set_style_bg_color(obj, lv_color_hex(0x2e2e2e), LV_STATE_PRESSED);
         lv_obj_set_style_border_side(obj, LV_BORDER_SIDE_NONE, 0);
@@ -205,10 +214,11 @@ static void left_screen_init(void)
         lv_obj_remove_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
         lv_obj_add_flag(obj, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE);
         lv_obj_add_event_cb(obj, event_touch_exit_cb, LV_EVENT_CLICKED, NULL);
-        g_exit_button = obj;
+    	lv_obj_set_style_bg_opa(obj, LV_OPA_TRANSP, LV_PART_MAIN);
+	g_exit_button = obj;
 
         img = lv_image_create(obj);
-        lv_image_set_src(img, &img_exit);
+        lv_image_set_src(img, &img_back);
         lv_obj_center(img);
     }
 
@@ -216,6 +226,7 @@ static void left_screen_init(void)
     lv_obj_set_style_bg_color(down_icon, lv_color_hex(0x2e2e2e), 0);
     lv_obj_align(down_icon, LV_ALIGN_BOTTOM_LEFT, (lv_pct_to_px(lv_pct(w), lv_disp_get_hor_res(NULL)) - img_drop_down.header.w) / 2, 0);
     lv_img_set_src(down_icon, &img_drop_down);
+    lv_obj_add_flag(down_icon, LV_OBJ_FLAG_HIDDEN);
     g_drop_down_img = down_icon;
 
     {
@@ -229,7 +240,8 @@ static void left_screen_init(void)
         lv_obj_remove_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
         lv_obj_add_flag(obj, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE);
         lv_obj_add_event_cb(obj, event_touch_delay_cb, LV_EVENT_CLICKED, NULL);
-        g_delay_button = obj;
+        lv_obj_add_flag(obj, LV_OBJ_FLAG_HIDDEN);
+	g_delay_button = obj;
 
         img = lv_image_create(obj);
         lv_image_set_src(img, &img_delay);
@@ -248,7 +260,8 @@ static void left_screen_init(void)
         // lv_obj_set_style_opa(obj, LV_OPA_0, 0);
         lv_obj_add_flag(obj, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE);
         lv_obj_add_event_cb(obj, event_touch_resolution_cb, LV_EVENT_CLICKED, NULL);
-        g_resolution_button = obj;
+        lv_obj_add_flag(obj, LV_OBJ_FLAG_HIDDEN);
+	g_resolution_button = obj;
 
         img = lv_image_create(obj);
         lv_image_set_src(img, &img_resolution);
@@ -266,7 +279,8 @@ static void left_screen_init(void)
         lv_obj_remove_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
         lv_obj_add_flag(obj, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE);
         lv_obj_add_event_cb(obj, event_touch_option_cb, LV_EVENT_CLICKED, NULL);
-        g_menu_button = obj;
+        lv_obj_add_flag(obj, LV_OBJ_FLAG_HIDDEN);
+	g_menu_button = obj;
 
         img = lv_image_create(obj);
         lv_image_set_src(img, &img_option);
@@ -284,7 +298,8 @@ static void left_screen_init(void)
         lv_obj_remove_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
         lv_obj_add_flag(obj, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE);
         lv_obj_add_event_cb(obj, event_touch_focus_cb, LV_EVENT_CLICKED, NULL);
-        g_focus_button = obj;
+        lv_obj_add_flag(obj, LV_OBJ_FLAG_HIDDEN);
+	g_focus_button = obj;
 
         img = lv_image_create(obj);
         lv_image_set_src(img, &img_focus);
@@ -302,8 +317,9 @@ static void left_screen_init(void)
         lv_obj_remove_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
         lv_obj_add_flag(obj, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE);
         lv_obj_add_event_cb(obj, event_touch_raw_cb, LV_EVENT_CLICKED, NULL);
-        g_raw_button = obj;
-        lv_obj_set_flex_flow(obj, LV_FLEX_FLOW_COLUMN);
+        lv_obj_add_flag(obj, LV_OBJ_FLAG_HIDDEN);
+	g_raw_button = obj;
+	lv_obj_set_flex_flow(obj, LV_FLEX_FLOW_COLUMN);
         lv_obj_set_flex_align(obj, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
         lv_obj_set_style_pad_column(obj, 0, 0);
 
@@ -329,7 +345,8 @@ static void left_screen_init(void)
         lv_obj_remove_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
         lv_obj_add_flag(obj, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE);
         lv_obj_add_event_cb(obj, event_touch_light_cb, LV_EVENT_CLICKED, NULL);
-        g_light_button = obj;
+        lv_obj_add_flag(obj, LV_OBJ_FLAG_HIDDEN);
+	g_light_button = obj;
 
         img = lv_image_create(obj);
         lv_image_set_src(img, &img_light_off);
@@ -347,7 +364,8 @@ static void left_screen_init(void)
         lv_obj_remove_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
         lv_obj_add_flag(obj, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE);
         lv_obj_add_event_cb(obj, event_touch_bitrate_cb, LV_EVENT_CLICKED, NULL);
-        g_bitrate_button = obj;
+        lv_obj_add_flag(obj, LV_OBJ_FLAG_HIDDEN);
+	g_bitrate_button = obj;
         lv_obj_set_flex_flow(obj, LV_FLEX_FLOW_COLUMN);
         lv_obj_set_flex_align(obj, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
         lv_obj_set_style_pad_column(obj, 0, 0);
@@ -374,7 +392,8 @@ static void left_screen_init(void)
         lv_obj_remove_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
         lv_obj_add_flag(obj, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE);
         lv_obj_add_event_cb(obj, event_touch_timestamp_cb, LV_EVENT_CLICKED, NULL);
-        g_timestamp_button = obj;
+        lv_obj_add_flag(obj, LV_OBJ_FLAG_HIDDEN);
+	g_timestamp_button = obj;
         lv_obj_set_flex_flow(obj, LV_FLEX_FLOW_COLUMN);
         lv_obj_set_flex_align(obj, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
         lv_obj_set_style_pad_column(obj, 0, 0);
@@ -385,7 +404,7 @@ static void left_screen_init(void)
     }
 
     {
-        lv_obj_t *obj = lv_obj_create(scr);
+    	lv_obj_t *obj = lv_obj_create(scr);
         lv_obj_set_size(obj, lv_pct(100), lv_pct(25));
         lv_obj_set_pos(obj, 0, lv_pct(225));
         lv_obj_set_style_bg_color(obj, lv_color_hex(0), 0);
@@ -395,7 +414,8 @@ static void left_screen_init(void)
         lv_obj_remove_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
         lv_obj_add_flag(obj, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CHECKABLE);
         lv_obj_add_event_cb(obj, event_touch_timelapse_cb, LV_EVENT_CLICKED, NULL);
-        g_timelapse_button = obj;
+        lv_obj_add_flag(obj, LV_OBJ_FLAG_HIDDEN);
+	g_timelapse_button = obj;
         lv_obj_set_flex_flow(obj, LV_FLEX_FLOW_COLUMN);
         lv_obj_set_flex_align(obj, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
         lv_obj_set_style_pad_column(obj, 0, 0);
@@ -452,7 +472,8 @@ static void right_screen_init(void)
     lv_obj_set_size(scr, lv_pct(w) + 1, lv_pct(100));
     lv_obj_set_style_border_side(scr, LV_BORDER_SIDE_NONE, 0);
     lv_obj_set_style_radius(scr, 0, 0);
-    lv_obj_set_style_bg_color(scr, lv_color_hex(0x000000), 0);
+    //lv_obj_set_style_bg_color(scr, lv_color_hex(0xFF0000), 0);
+    lv_obj_set_style_bg_opa(scr, LV_OPA_TRANSP, LV_PART_MAIN);
     lv_obj_set_flex_flow(scr, LV_FLEX_FLOW_COLUMN);
     lv_obj_remove_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_flex_align(scr, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
@@ -488,28 +509,97 @@ static void right_screen_init(void)
         lv_obj_center(label);
     }
 
-    {
-        static lv_style_t click_style, release_style;
-        lv_style_init(&click_style);
-        lv_style_set_bg_image_src(&click_style, &img_video);
-        lv_style_set_bg_image_opa(&click_style, LV_OPA_100);
-        lv_style_set_bg_color(&click_style, lv_color_hex(0x0));
 
-        lv_style_init(&release_style);
-        lv_style_set_bg_image_src(&release_style, &img_camera);
-        lv_style_set_bg_image_opa(&release_style, LV_OPA_100);
-        lv_style_set_border_side(&release_style, LV_BORDER_SIDE_NONE);
-        lv_style_set_bg_color(&release_style, lv_color_hex(0x0));
+{
+    static lv_style_t style_video_default, style_video_active;
+    static lv_style_t style_image_default, style_image_active;
 
-        lv_obj_t *obj = lv_obj_create(scr);
-        lv_obj_set_size(obj, 64, 64);
-        lv_obj_add_flag(obj, LV_OBJ_FLAG_CHECKABLE);
-        lv_obj_add_event_cb(obj, event_touch_video_camera_cb, LV_EVENT_CLICKED, NULL);
-        lv_obj_add_style(obj, &click_style, LV_STATE_CHECKED);
-        lv_obj_add_style(obj, &release_style, LV_STATE_DEFAULT);
+    // 初始化样式
+    lv_style_init(&style_video_default);
+    lv_style_set_bg_image_src(&style_video_default, &img_video_tab);
+    lv_style_set_bg_image_opa(&style_video_default, LV_OPA_100);
 
-        g_camera_video_button = obj;
-    }
+    lv_style_init(&style_video_active);
+    lv_style_set_bg_image_src(&style_video_active, &img_video_tab_active);
+    lv_style_set_bg_image_opa(&style_video_active, LV_OPA_100);
+
+    lv_style_init(&style_image_default);
+    lv_style_set_bg_image_src(&style_image_default, &img_image_tab);
+    lv_style_set_bg_image_opa(&style_image_default, LV_OPA_100);
+
+    lv_style_init(&style_image_active);
+    lv_style_set_bg_image_src(&style_image_active, &img_image_tab_active);
+    lv_style_set_bg_image_opa(&style_image_active, LV_OPA_100);
+
+    // 视频按钮
+    lv_obj_t *btn_video = lv_obj_create(lv_scr_act());
+    lv_obj_set_size(btn_video, 102, 48);
+    lv_obj_add_flag(btn_video, LV_OBJ_FLAG_CHECKABLE);
+    lv_obj_add_event_cb(btn_video, event_touch_video_camera_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_style(btn_video, &style_video_default, LV_STATE_DEFAULT);
+    lv_obj_add_style(btn_video, &style_video_active, LV_STATE_CHECKED);
+    lv_obj_set_style_bg_opa(btn_video, LV_OPA_TRANSP, LV_PART_MAIN);
+
+    // 图片按钮
+    lv_obj_t *btn_image = lv_obj_create(lv_scr_act());
+    lv_obj_set_size(btn_image, 104, 48);
+    lv_obj_add_flag(btn_image, LV_OBJ_FLAG_CHECKABLE);
+    lv_obj_add_event_cb(btn_image, event_touch_video_camera_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_style(btn_image, &style_image_default, LV_STATE_DEFAULT);
+    lv_obj_add_style(btn_image, &style_image_active, LV_STATE_CHECKED);
+    lv_obj_set_style_bg_opa(btn_image, LV_OPA_TRANSP, LV_PART_MAIN);
+
+    // 水平布局居中
+    lv_obj_t *cont = lv_obj_create(lv_scr_act());
+    lv_obj_set_size(cont, 102 + 104 + 24, 48); // 根据需要调整
+    lv_obj_set_flex_flow(cont, LV_FLEX_FLOW_ROW);
+    lv_obj_set_style_pad_all(cont, 0, 0);
+    lv_obj_set_style_pad_column(cont, 24, 0);
+    lv_obj_align(cont, LV_ALIGN_TOP_MID, 0, 24);
+    lv_obj_clear_flag(cont, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_bg_opa(cont, LV_OPA_TRANSP, LV_PART_MAIN);
+ 
+    lv_obj_set_style_border_width(btn_video, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_width(btn_image, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_width(cont, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+
+    lv_obj_clear_flag(btn_video, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(btn_image, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_set_parent(btn_image, cont);
+    lv_obj_set_parent(btn_video, cont);
+
+    g_camera_video_button = btn_video;
+    g_camera_image_button = btn_image;
+
+    // 默认激活视频按钮
+    lv_obj_add_state(g_camera_image_button, LV_STATE_CHECKED);
+    lv_obj_clear_state(g_camera_video_button, LV_STATE_CHECKED);
+}
+
+
+//    {
+//        static lv_style_t click_style, release_style;
+//        lv_style_init(&click_style);
+//        lv_style_set_bg_image_src(&click_style, &img_video_tab);
+//        lv_style_set_bg_image_opa(&click_style, LV_OPA_100);
+//        //lv_style_set_bg_color(&click_style, lv_color_hex(0x0));
+//
+//        lv_style_init(&release_style);
+//        lv_style_set_bg_image_src(&release_style, &img_image_tab);
+//        lv_style_set_bg_image_opa(&release_style, LV_OPA_100);
+//        lv_style_set_border_side(&release_style, LV_BORDER_SIDE_NONE);
+//	//lv_style_set_bg_color(&release_style, lv_color_hex(0x0));
+//
+//        lv_obj_t *obj = lv_obj_create(scr);
+//        lv_obj_set_size(obj, 64, 64);
+//        lv_obj_add_flag(obj, LV_OBJ_FLAG_CHECKABLE);
+//        lv_obj_add_event_cb(obj, event_touch_video_camera_cb, LV_EVENT_CLICKED, NULL);
+//        lv_obj_add_style(obj, &click_style, LV_STATE_CHECKED);
+//        lv_obj_add_style(obj, &release_style, LV_STATE_DEFAULT);
+//
+//        g_camera_video_button = obj;
+//    }
 
     {
         static lv_style_t click_style, release_style, check_style, video_ready_style;
@@ -544,18 +634,20 @@ static void right_screen_init(void)
         lv_obj_add_style(obj, &click_style, LV_STATE_PRESSED);
         lv_obj_add_style(obj, &check_style, LV_STATE_CHECKED);
         lv_obj_add_style(obj, &video_ready_style, LV_STATE_USER_1);
+	lv_obj_set_style_bg_opa(obj, LV_OPA_TRANSP, LV_PART_MAIN);
 
         g_start_snap_button = obj;
     }
 
     {
-        lv_obj_t *obj = lv_obj_create(scr);
+        lv_obj_t *obj = lv_obj_create(lv_scr_act());
         lv_obj_set_size(obj, 64, 64);
         lv_obj_set_style_radius(obj, 5, 0);
+	lv_obj_align(obj, LV_ALIGN_TOP_RIGHT, -24, 24);	
         lv_obj_add_flag(obj, LV_OBJ_FLAG_CLICKABLE);
         lv_obj_remove_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
         lv_obj_set_style_border_side(obj, 0, 0);
-        lv_obj_set_style_bg_color(obj, lv_color_hex(0x0), 0);
+        lv_obj_set_style_bg_color(obj, lv_color_hex(0xe5e5e5), 0);
         lv_obj_add_event_cb(obj, event_touch_small_img_cb, LV_EVENT_CLICKED, NULL);
         g_small_img = obj;
 
@@ -1738,20 +1830,20 @@ static void screen_video_running(void)
     lv_obj_set_size(scr, lv_pct(15), lv_pct(5));
     lv_obj_set_style_border_side(scr, LV_BORDER_SIDE_NONE, 0);
     lv_obj_set_style_radius(scr, 0, 0);
-    lv_obj_set_style_bg_color(scr, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_color(scr, lv_color_hex(0xFF3C3C), 0);
     lv_obj_remove_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_style_pad_hor(scr, 1, 0);
-    lv_obj_align(scr, LV_ALIGN_TOP_MID, 0, 3);
+    lv_obj_align(scr, LV_ALIGN_BOTTOM_MID, 0, -24);
     lv_obj_add_flag(scr, LV_OBJ_FLAG_HIDDEN);
 
     g_video_running_screen = scr;
 
-    lv_obj_t *img = lv_image_create(scr);
-    lv_obj_align(img, LV_ALIGN_LEFT_MID, 1, 0);
-    lv_image_set_src(img, &img_small_recording);
+    //lv_obj_t *img = lv_image_create(scr);
+    //lv_obj_align(img, LV_ALIGN_LEFT_MID, 1, 0);
+    //lv_image_set_src(img, &img_small_recording);
 
     lv_obj_t *label = lv_label_create(scr);
-    lv_obj_align(label, LV_ALIGN_RIGHT_MID, -1, 0);
+    lv_obj_align(label, LV_ALIGN_CENTER, 0, 0);
     lv_obj_set_style_text_color(label, lv_color_hex(0xffffff), 0);
     lv_label_set_text(label, "00:00:00");
 }

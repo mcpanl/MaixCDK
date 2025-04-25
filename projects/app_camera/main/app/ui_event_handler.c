@@ -22,6 +22,7 @@ LV_IMG_DECLARE(img_light_on);
 LV_IMG_DECLARE(img_light_off);
 
 extern lv_obj_t *g_camera_video_button;
+extern lv_obj_t *g_camera_image_button;
 extern lv_obj_t *g_start_snap_button;
 extern lv_obj_t *g_exit_button;
 extern lv_obj_t *g_delay_button;
@@ -260,37 +261,56 @@ void event_touch_option_cb(lv_event_t * e)
     }
 }
 
-void touch_video_camera()
+void touch_video_camera(lv_obj_t *clicked_btn)
 {
     DEBUG_EN(0);
-    if (lv_obj_has_flag(g_start_snap_button, LV_OBJ_FLAG_CHECKABLE)) {
-        if (lv_obj_get_state(g_start_snap_button) == LV_STATE_CHECKED) {
-            lv_obj_send_event(g_start_snap_button, LV_EVENT_RELEASED, NULL);
-            lv_obj_add_flag(g_video_running_screen, LV_OBJ_FLAG_HIDDEN);
-            DEBUG_PRT("video try stop!\n");
 
-            priv.camera_video_try_stop_flag = 1;
-        }
-        lv_obj_remove_flag(g_start_snap_button, LV_OBJ_FLAG_CHECKABLE);
-        lv_obj_remove_state(g_start_snap_button, LV_STATE_USER_1);
-        DEBUG_PRT("ready to snap photo!\n");
-        g_camera_mode = 0;
-    } else {
+    if (clicked_btn == g_camera_video_button) {
+        // 切换到视频模式
+        lv_obj_add_state(g_camera_video_button, LV_STATE_CHECKED);
+        lv_obj_clear_state(g_camera_image_button, LV_STATE_CHECKED);
+
         lv_obj_add_flag(g_start_snap_button, LV_OBJ_FLAG_CHECKABLE);
         lv_obj_add_state(g_start_snap_button, LV_STATE_CHECKED);
+	
+	lv_obj_add_flag(g_small_img, LV_OBJ_FLAG_HIDDEN);
+
         DEBUG_PRT("ready to record video!\n");
         g_camera_mode = 1;
     }
+    else if (clicked_btn == g_camera_image_button) {
+        // 切换到拍照模式
+        if (lv_obj_has_flag(g_start_snap_button, LV_OBJ_FLAG_CHECKABLE)) {
+            if (lv_obj_get_state(g_start_snap_button) == LV_STATE_CHECKED) {
+                lv_obj_send_event(g_start_snap_button, LV_EVENT_RELEASED, NULL);
+                lv_obj_add_flag(g_video_running_screen, LV_OBJ_FLAG_HIDDEN);
+                DEBUG_PRT("video try stop!\n");
+
+                priv.camera_video_try_stop_flag = 1;
+            }
+            lv_obj_remove_flag(g_start_snap_button, LV_OBJ_FLAG_CHECKABLE);
+            lv_obj_remove_state(g_start_snap_button, LV_STATE_USER_1);
+        }
+
+        lv_obj_add_state(g_camera_image_button, LV_STATE_CHECKED);
+        lv_obj_clear_state(g_camera_video_button, LV_STATE_CHECKED);
+	lv_obj_remove_flag(g_small_img, LV_OBJ_FLAG_HIDDEN);
+
+        DEBUG_PRT("ready to snap photo!\n");
+        g_camera_mode = 0;
+    }
 }
 
-void event_touch_video_camera_cb(lv_event_t * e)
+void event_touch_video_camera_cb(lv_event_t *e)
 {
     DEBUG_EN(0);
     lv_event_code_t code = lv_event_get_code(e);
     if (code == LV_EVENT_CLICKED) {
-        touch_video_camera();
+        lv_obj_t *btn = lv_event_get_target(e);
+        touch_video_camera(btn);
     }
 }
+
 
 static void touch_start_video_start(void)
 {
