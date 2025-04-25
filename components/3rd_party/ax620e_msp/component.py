@@ -5,6 +5,8 @@ def add_file_downloads(confs : dict) -> list:
         @return list type, items is dict type
     '''
 
+    return []
+
     return [
         {
             'url': f"https://github.com/sipeed/MaixCDK/releases/download/v0.0.0/ax620e_msp_arm64_glibc_v3.0.0_20241120230136.tar.xz",
