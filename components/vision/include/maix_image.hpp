@@ -69,13 +69,10 @@ namespace maix::image
          * @param width image width, should > 0
          * @param height image height, should > 0
          * @param format image format @see image::Format
-         * @param bg background color, default is black, grayscale color will be faster,
-         *           if bg is image.COLOR_INVALID, will not fill background color, so background may be garbage(random content).
-         *           So you can set to image.COLOR_INVALID to save time in some case.
          * @maixpy maix.image.Image.__init__
          * @maixcdk maix.image.Image.Image
          */
-        Image(int width, int height, image::Format format = image::Format::FMT_RGB888, const image::Color &bg = image::FMT_INVALID);
+        Image(int width, int height, image::Format format = image::Format::FMT_RGB888);
         // Image(int width, int height, image::Format format = image::Format::FMT_RGB888, Bytes *data = nullptr, bool copy = true);
 
         /**
@@ -88,12 +85,9 @@ namespace maix::image
          * If the image is in jpeg format, data must be filled in.
          * @param data_size image data size, only for compressed format like jpeg png, data_size must be filled in, or should be -1, default is -1.
          * @param copy if true and data is not nullptr, will copy data to new buffer, else will use data directly. default is true to avoid memory leak.
-         * @param bg background color, default is black, grayscale color will be faster,
-         *           if bg is image.COLOR_INVALID, will not fill background color, so background may be garbage(random content).
-         *           So you can set to image.COLOR_INVALID to save time in some case.
          * @maixcdk maix.image.Image.Image
          */
-        Image(int width, int height, image::Format format, uint8_t *data, int data_size, bool copy, const image::Color &bg = image::FMT_INVALID);
+        Image(int width, int height, image::Format format, uint8_t *data, int data_size, bool copy);
 
         Image() {
             _width = 0;
@@ -179,12 +173,11 @@ namespace maix::image
          *
          * @maixpy maix.image.Image.get_pixel
         */
-        std::vector<uint32_t> get_pixel(int x, int y, bool rgbtuple = false) {
-            std::vector<uint32_t> pixels;
+        std::vector<int> get_pixel(int x, int y, bool rgbtuple = false) {
+            std::vector<int> pixels;
             if (!(_format == image::Format::FMT_RGB888 || _format == image::Format::FMT_BGR888 ||
                 _format == image::Format::FMT_RGB565 || _format == image::Format::FMT_BGR565 ||
-                _format == image::Format::FMT_GRAYSCALE ||
-                _format == image::Format::FMT_RGBA8888 || _format == image::Format::FMT_BGRA8888)) {
+                _format == image::Format::FMT_GRAYSCALE)) {
                 log::error("get_pixel not support format: %d\r\n", _format);
                 return pixels;
             }
@@ -202,7 +195,7 @@ namespace maix::image
                 uint8_t v1 = ((uint8_t *)_data)[y * _width * 3 + x * 3 + 1];
                 uint8_t v2 = ((uint8_t *)_data)[y * _width * 3 + x * 3 + 2];
                 if (!rgbtuple) {
-                    uint32_t value = v2 << 16 | v1 << 8 | v0;
+                    int value = v0 << 16 | v1 << 8 | v2;
                     pixels.push_back(value);
                 } else {
                     pixels.push_back(v0);
@@ -218,36 +211,19 @@ namespace maix::image
             case image::Format::FMT_RGB565:
             {
                 if (!rgbtuple) {
-                    uint32_t value = ((uint16_t *)_data)[y * _width + x] & 0xffff;
+                    int value = ((uint16_t *)_data)[y * _width + x] & 0xffff;
                     pixels.push_back(value);
                 } else {
-                    uint32_t value = ((uint16_t *)_data)[y * _width + x] & 0xffff;
-                    uint32_t v0 = (value >> 11) & 0x1F;
-                    uint32_t v1 = (value >> 5) & 0x3F;
-                    uint32_t v2 = value & 0x1F;
+                    int value = ((uint16_t *)_data)[y * _width + x] & 0xffff;
+                    int v0 = (value >> 11) & 0x1F;
+                    int v1 = (value >> 5) & 0x3F;
+                    int v2 = value & 0x1F;
                     pixels.push_back(v0);
                     pixels.push_back(v1);
                     pixels.push_back(v2);
                 }
                 break;
             }
-            case image::Format::FMT_RGBA8888: // fall through
-            case image::Format::FMT_BGRA8888:
-                if (!rgbtuple) {
-                    uint32_t value = ((uint32_t *)_data)[y * _width + x] & 0xffffffff;
-                    pixels.push_back(value);
-                } else {
-                    uint32_t value = ((uint32_t *)_data)[y * _width + x] & 0xffffffff;
-                    uint32_t v0 = value & 0xFF;
-                    uint32_t v1 = (value >> 8) & 0xFF;
-                    uint32_t v2 = (value >> 16) & 0xFF;
-                    uint32_t v3 = (value >> 24) & 0xFF;
-                    pixels.push_back(v0);
-                    pixels.push_back(v1);
-                    pixels.push_back(v2);
-                    pixels.push_back(v3);
-                }
-                break;
             default:
                 log::error("get_pixel not support format: %d\r\n", _format);
                 break;
@@ -267,11 +243,10 @@ namespace maix::image
          * @return error code, Err::ERR_NONE is ok, other is error
          * @maixpy maix.image.Image.set_pixel
         */
-        err::Err set_pixel(int x, int y, std::vector<uint32_t> pixel) {
+        err::Err set_pixel(int x, int y, std::vector<int> pixel) {
             if (!(_format == image::Format::FMT_RGB888 || _format == image::Format::FMT_BGR888 ||
                 _format == image::Format::FMT_RGB565 || _format == image::Format::FMT_BGR565 ||
-                _format == image::Format::FMT_GRAYSCALE ||
-                _format == image::Format::FMT_RGBA8888 || _format == image::Format::FMT_BGRA8888)) {
+                _format == image::Format::FMT_GRAYSCALE)) {
                 log::error("get_pixel not support format: %d\r\n", _format);
                 return err::Err::ERR_RUNTIME;
             }
@@ -320,20 +295,7 @@ namespace maix::image
                 }
                 break;
             }
-            case image::Format::FMT_RGBA8888: // fall through
-            case image::Format::FMT_BGRA8888:
-                if (pixel.size() == 1) {
-                    ((uint32_t *)_data)[y * _width + x] = (uint32_t)pixel[0];
-                } else if (pixel.size() == 4) {
-                    ((uint8_t *)_data)[(y * _width << 2) + (x << 2) + 0] = pixel[0];
-                    ((uint8_t *)_data)[(y * _width << 2) + (x << 2) + 1] = pixel[1];
-                    ((uint8_t *)_data)[(y * _width << 2) + (x << 2) + 2] = pixel[2];
-                    ((uint8_t *)_data)[(y * _width << 2) + (x << 2) + 3] = pixel[3];
-                } else {
-                    log::error("set_pixel pixel size must be 1 or 4, but %d\r\n", pixel.size());
-                    return err::Err::ERR_RUNTIME;
-                }
-                break;
+
             default:
                 log::error("get_pixel not support format: %d\r\n", _format);
                 break;
@@ -388,13 +350,11 @@ namespace maix::image
         /**
          * Convert image to jpeg
          * @param quality the quality of jpg, default is 95. For MaixCAM supported range is (50, 100], if <= 50 will be fixed to 51.
-         * @param buff user's buffer, if buff is nullptr, will malloc memory for new image data, else will use buff directly
-         * @param buff_size the size of buff, if buff is nullptr, buff_size is ignored.
          * @return new image object. Need be delete by caller in C++.
          * @throw err.Exception, if two images' format not support, **or already the format**, will raise exception
          * @maixpy maix.image.Image.to_jpeg
         */
-        image::Image *to_jpeg(int quality = 95, void *buff = nullptr, size_t buff_size = 0);
+        image::Image *to_jpeg(int quality = 95);
 
         //************************** draw **************************//
 
@@ -1564,7 +1524,7 @@ namespace maix::image
 
         int _get_cv_pixel_num(image::Format &format);
         std::vector<int> _get_available_roi(std::vector<int> roi, std::vector<int> other_roi = std::vector<int>());
-        void _create_image(int width, int height, image::Format format, uint8_t *data, int data_size, bool copy, const image::Color &bg = image::FMT_INVALID);
+        void _create_image(int width, int height, image::Format format, uint8_t *data, int data_size, bool copy);
     }; // class Image
 
     /**
