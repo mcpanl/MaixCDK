@@ -316,7 +316,7 @@ void on_iofo_gui(Maix_GUI_Activity *activity, void *obj, Maix_Activity_MSG *msg,
     lv_obj_set_flex_align(container, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
     lv_obj_t *label = lv_label_create(container);
-    lv_label_set_text(label, _("Device Info"));
+    lv_label_set_text(label, _("My Device"));
 
     // all items flex row layout， 2 columns， first column is label(50% width of layout)， second column is content
     // first label right align， second content left align
@@ -345,7 +345,7 @@ void on_iofo_gui(Maix_GUI_Activity *activity, void *obj, Maix_Activity_MSG *msg,
     lv_obj_set_flex_align(layout_host_domain, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_clear_flag(layout_host_domain, LV_OBJ_FLAG_SCROLLABLE);
     label_host_domain = lv_label_create(layout_host_domain);
-    lv_label_set_text(label_host_domain, (_("Host Domain") + split_str).c_str());
+    lv_label_set_text(label_host_domain, (_("FQDN") + split_str).c_str());
     lv_obj_set_width(label_host_domain, lv_pct(35));
     lv_obj_set_style_text_align(label_host_domain, LV_TEXT_ALIGN_RIGHT, LV_PART_MAIN);
     content_host_domain = lv_label_create(layout_host_domain);
@@ -405,7 +405,7 @@ void on_iofo_gui(Maix_GUI_Activity *activity, void *obj, Maix_Activity_MSG *msg,
     lv_obj_set_flex_align(layout_device_key, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_clear_flag(layout_device_key, LV_OBJ_FLAG_SCROLLABLE);
     label_device_key = lv_label_create(layout_device_key);
-    lv_label_set_text(label_device_key, (_("Device Key") + split_str).c_str());
+    lv_label_set_text(label_device_key, (_("Device Code") + split_str).c_str());
     lv_obj_set_width(label_device_key, lv_pct(35));
     lv_obj_set_style_text_align(label_device_key, LV_TEXT_ALIGN_RIGHT, LV_PART_MAIN);
     content_device_key = lv_label_create(layout_device_key);
@@ -451,7 +451,7 @@ void on_iofo_gui(Maix_GUI_Activity *activity, void *obj, Maix_Activity_MSG *msg,
     lv_obj_set_flex_align(layout_space, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_clear_flag(layout_space, LV_OBJ_FLAG_SCROLLABLE);
     label_space = lv_label_create(layout_space);
-    lv_label_set_text(label_space, (_("Space") + split_str).c_str());
+    lv_label_set_text(label_space, (_("Storage") + split_str).c_str());
     lv_obj_set_width(label_space, lv_pct(35));
     lv_obj_set_style_text_align(label_space, LV_TEXT_ALIGN_RIGHT, LV_PART_MAIN);
     content_space = lv_label_create(layout_space);
@@ -466,7 +466,7 @@ void on_iofo_gui(Maix_GUI_Activity *activity, void *obj, Maix_Activity_MSG *msg,
     lv_obj_set_flex_align(layout_temp_cpu, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_clear_flag(layout_temp_cpu, LV_OBJ_FLAG_SCROLLABLE);
     label_temp_cpu = lv_label_create(layout_temp_cpu);
-    lv_label_set_text(label_temp_cpu, (std::string("CPU ") + _("Temp") + split_str).c_str());
+    lv_label_set_text(label_temp_cpu, (std::string("CPU ") + _("Temperature") + split_str).c_str());
     lv_obj_set_width(label_temp_cpu, lv_pct(35));
     lv_obj_set_style_text_align(label_temp_cpu, LV_TEXT_ALIGN_RIGHT, LV_PART_MAIN);
     content_temp_cpu = lv_label_create(layout_temp_cpu);
@@ -481,7 +481,7 @@ void on_iofo_gui(Maix_GUI_Activity *activity, void *obj, Maix_Activity_MSG *msg,
     lv_obj_set_flex_align(layout_freq_cpu, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_clear_flag(layout_freq_cpu, LV_OBJ_FLAG_SCROLLABLE);
     label_freq_cpu = lv_label_create(layout_freq_cpu);
-    lv_label_set_text(label_freq_cpu, (std::string("CPU ") + _("Freq") + split_str).c_str());
+    lv_label_set_text(label_freq_cpu, (std::string("CPU ") + _("Frequency") + split_str).c_str());
     lv_obj_set_width(label_freq_cpu, lv_pct(35));
     lv_obj_set_style_text_align(label_freq_cpu, LV_TEXT_ALIGN_RIGHT, LV_PART_MAIN);
     content_freq_cpu = lv_label_create(layout_freq_cpu);
@@ -496,7 +496,7 @@ void on_iofo_gui(Maix_GUI_Activity *activity, void *obj, Maix_Activity_MSG *msg,
     lv_obj_set_flex_align(layout_freq_npu, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_clear_flag(layout_freq_npu, LV_OBJ_FLAG_SCROLLABLE);
     label_freq_npu = lv_label_create(layout_freq_npu);
-    lv_label_set_text(label_freq_npu, (std::string("NPU ") + _("Freq") + split_str).c_str());
+    lv_label_set_text(label_freq_npu, (std::string("NPU ") + _("Frequency") + split_str).c_str());
     lv_obj_set_width(label_freq_npu, lv_pct(35));
     lv_obj_set_style_text_align(label_freq_npu, LV_TEXT_ALIGN_RIGHT, LV_PART_MAIN);
     content_freq_npu = lv_label_create(layout_freq_npu);

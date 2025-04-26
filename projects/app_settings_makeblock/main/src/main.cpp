@@ -36,7 +36,7 @@ static Maix_GUI_Activity *upgrade_maixpy = NULL, *upgrade_lib_activity = NULL, *
 static Maix_GUI_Activity *datetime = NULL;
 static std::vector<Maix_GUI_Activity *> settings_activities;
 static const std::vector<string> icons = {"info.png", "wifi.png", "install_lib.png", "auto_start.png", "backlight.png", "volume.png", "language.png", "datetime.png", "usb.png", "about.png", "power.png"};
-static const std::vector<std::string> names = {"Device Info", "WiFi", "Install Runtime", "Auto Start", "Backlight", "Volume", "Language", "Datetime", "USB Settings", "Privacy and Usage", "Power"};
+static const std::vector<std::string> names = {"My Device", "WIFI", "Install Runtime", "Auto Start", "Brightness", "Volume", "Language", "Date", "USB Settings", "Privacy and Usage", "Power"};
 
 
 lv_obj_t *create_img_item(lv_obj_t *parent, string path, int w, int h)
