@@ -183,7 +183,76 @@ void event_touch_show_right_big_photo_cb(lv_event_t * e)
     }
 }
 
+static void confirm_btn_event_cb(lv_event_t * e) {
+	lv_obj_remove_flag(g_lower_screen, LV_OBJ_FLAG_HIDDEN);
+    const char * action = lv_event_get_user_data(e);
+    lv_obj_t * dialog = lv_obj_get_parent(lv_event_get_target(e));
+
+    if (strcmp(action, "delete_big_photo") == 0) {
+        priv.touch_delete_big_photo = 1;
+    } else if (strcmp(action, "bulk_delete") == 0) {
+        priv.touch_bulk_delete = 1;
+    }
+
+    lv_obj_del(dialog);
+}
+
+static void cancel_btn_event_cb(lv_event_t * e) {
+	lv_obj_remove_flag(g_lower_screen, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_del(lv_obj_get_parent(lv_event_get_target(e))); // 删除弹窗
+}
+
+void show_confirm_dialog(const char * message, const char * action) {
+	lv_obj_add_flag(g_lower_screen, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_t * dialog = lv_obj_create(lv_layer_sys());
+    lv_obj_set_size(dialog, 640, 480);
+    lv_obj_center(dialog);
+    lv_obj_set_style_radius(dialog, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    
+    lv_obj_move_foreground(dialog);
+    lv_obj_set_style_pad_all(dialog, 10, 0);
+
+    lv_obj_t * label = lv_label_create(dialog);
+    lv_label_set_text(label, message);
+    lv_obj_set_style_text_font(label, &lv_font_montserrat_32, 0);
+    lv_obj_center(label);
+
+    // 确认按钮
+    lv_obj_t * btn_ok = lv_btn_create(dialog);
+    lv_obj_set_size(btn_ok, 120, 50);
+    lv_obj_align(btn_ok, LV_ALIGN_BOTTOM_RIGHT, -60, -90);
+    lv_obj_add_event_cb(btn_ok, confirm_btn_event_cb, LV_EVENT_CLICKED, (void *)action);
+
+    lv_obj_t * label_ok = lv_label_create(btn_ok);
+    lv_label_set_text(label_ok, "Confirm");
+    lv_obj_set_style_text_font(label_ok, &lv_font_montserrat_24, 0);
+    lv_obj_center(label_ok);
+
+    // 取消按钮
+    lv_obj_t * btn_cancel = lv_btn_create(dialog);
+    lv_obj_set_size(btn_cancel, 120, 50);
+    lv_obj_align(btn_cancel, LV_ALIGN_BOTTOM_LEFT, 60, -90);
+    lv_obj_add_event_cb(btn_cancel, cancel_btn_event_cb, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t * label_cancel = lv_label_create(btn_cancel);
+    lv_label_set_text(label_cancel, "Cancel");
+    lv_obj_set_style_text_font(label_cancel, &lv_font_montserrat_24, 0);
+    lv_obj_center(label_cancel);
+}
+
+
+
 void event_touch_delete_big_photo_cb(lv_event_t * e)
+{
+    DEBUG_EN(1);
+    if (lv_event_get_code(e) == LV_EVENT_CLICKED) {
+        DEBUG_PRT("touch delete big photo\n");
+        show_confirm_dialog("Confirm to Delete?", "delete_big_photo");
+    }
+}
+
+
+void event_touch_delete_big_photo_cb2(lv_event_t * e)
 {
     DEBUG_EN(0);
     lv_event_code_t code = lv_event_get_code(e);
@@ -212,6 +281,15 @@ void event_touch_show_big_photo_info_cb(lv_event_t * e)
 }
 
 void event_touch_bulk_delete_cb(lv_event_t * e)
+{
+    DEBUG_EN(1);
+    if (lv_event_get_code(e) == LV_EVENT_CLICKED) {
+        DEBUG_PRT("touch bulk delete\n");
+        show_confirm_dialog("Confirm to Delete?", "bulk_delete");
+    }
+}
+
+void event_touch_bulk_delete_cb2(lv_event_t * e)
 {
     DEBUG_EN(0);
     lv_event_code_t code = lv_event_get_code(e);

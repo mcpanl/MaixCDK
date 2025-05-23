@@ -596,24 +596,32 @@ static void _ui_left_right_init(void)
 {
     lv_obj_t *scr = lv_layer_sys();
     lv_obj_t *left = lv_image_create(scr);
-    lv_obj_set_align(left, LV_ALIGN_LEFT_MID);
-    lv_obj_set_pos(left, lv_pct(0), lv_pct(0));
+    lv_obj_align(left, LV_ALIGN_LEFT_MID, 0, 0);
+    lv_obj_set_pos(left, 12, lv_pct(0));
     lv_obj_add_flag(left, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_flag(left, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_set_style_pad_ver(left, 50, 0);
+    lv_obj_set_style_pad_ver(left, 12, 0);
     lv_obj_set_style_pad_right(left, 20, 0);
     lv_obj_add_event_cb(left, event_touch_show_left_big_photo_cb, LV_EVENT_SHORT_CLICKED, NULL);
     lv_image_set_src(left, &img_left);
 
+    lv_obj_set_style_bg_color(left, lv_color_make(0, 0, 0), 0);
+    lv_obj_set_style_bg_opa(left, LV_OPA_50, 0);
+    lv_obj_set_style_radius(left, 12, 0);
+
     lv_obj_t *right = lv_image_create(scr);
-    lv_obj_set_align(right, LV_ALIGN_RIGHT_MID);
-    lv_obj_set_pos(right, lv_pct(0), lv_pct(0));
+    lv_obj_align(right, LV_ALIGN_RIGHT_MID, 0, 0);
+    lv_obj_set_pos(right, -12, lv_pct(0));
     lv_obj_add_flag(right, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_flag(right, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_set_style_pad_ver(right, 50, 0);
+    lv_obj_set_style_pad_ver(right, 12, 0);
     lv_obj_set_style_pad_left(right, 20, 0);
     lv_obj_add_event_cb(right, event_touch_show_right_big_photo_cb, LV_EVENT_SHORT_CLICKED, NULL);
     lv_image_set_src(right, &img_right);
+
+    lv_obj_set_style_bg_color(right, lv_color_make(0, 0, 0), 0);
+    lv_obj_set_style_bg_opa(right, LV_OPA_50, 0);
+    lv_obj_set_style_radius(right, 12, 0);
 
     g_switch_right = right;
     g_switch_left = left;
