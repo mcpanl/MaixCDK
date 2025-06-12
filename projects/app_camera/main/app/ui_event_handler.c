@@ -92,7 +92,105 @@ static struct {
     .shutter_auto_flag = 1,
 };
 
+
+static void touch_start_video_start(void);
+static void touch_start_video_stop(void);
+
 int g_camera_mode = 0;
+
+static lv_obj_t *g_toast = NULL;
+
+
+void toast_ready_cb(lv_anim_t *a)
+{
+    lv_obj_t *obj = (lv_obj_t *)a->var;
+    if (obj && lv_obj_is_valid(obj)) {
+        lv_obj_del(obj);
+        g_toast = NULL;
+    }
+}
+
+void show_toast(const char *text, uint32_t duration_ms)
+{
+    if (g_toast && lv_obj_is_valid(g_toast)) {
+        lv_obj_del(g_toast);
+        g_toast = NULL;
+    }
+
+    lv_obj_t *toast = lv_label_create(lv_scr_act());
+    g_toast = toast;
+
+    lv_label_set_text(toast, text);
+
+    lv_obj_set_style_bg_color(toast, lv_color_make(0, 0, 0), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(toast, LV_OPA_30, LV_PART_MAIN);
+
+    lv_obj_set_style_text_color(toast, lv_color_white(), LV_PART_MAIN);
+
+    lv_obj_set_style_text_font(toast, &lv_font_montserrat_20, 0);
+
+    lv_obj_set_style_pad_all(toast, 12, 0);
+    lv_obj_set_style_radius(toast, 12, 0);
+    lv_obj_set_style_text_align(toast, LV_TEXT_ALIGN_CENTER, 0);
+
+    lv_obj_set_size(toast, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_align(toast, LV_ALIGN_TOP_MID, 0, 110);
+
+    lv_anim_t a;
+    lv_anim_init(&a);
+    lv_anim_set_var(&a, toast);
+    lv_anim_set_time(&a, 300);
+    lv_anim_set_delay(&a, duration_ms);
+    //lv_anim_set_values(&a, LV_OPA_100, LV_OPA_0);
+    //lv_anim_set_exec_cb(&a, (lv_anim_exec_xcb_t)lv_obj_set_style_opa);
+    lv_anim_set_ready_cb(&a, toast_ready_cb);
+    lv_anim_start(&a);
+}
+
+
+void trigger_left_button(void)
+{
+	DEBUG_EN(1);
+	DEBUG_PRT("LEFT CLICK on ui\n");
+
+    touch_video_camera(g_camera_image_button); // 切换到拍照模式
+}
+
+void trigger_right_button(void)
+{
+    DEBUG_EN(1);
+    DEBUG_PRT("RIGHT CLICK on ui\n");
+
+    touch_video_camera(g_camera_video_button); // 切换到录像模式
+}
+
+
+void trigger_user_button_safe(void * param)
+{
+        if (lv_obj_get_state(g_camera_video_button) == LV_STATE_CHECKED) {
+            
+            if (!lv_obj_has_state(g_start_snap_button, LV_STATE_USER_1)) {
+                touch_start_video_start();
+            } else {
+                touch_start_video_stop();
+            }
+        } else {
+            touch_start_pic();
+        }
+//    event_touch_start_cb(LV_EVENT_CLICKED);
+}
+
+
+void trigger_user_button(void)
+{
+    DEBUG_EN(1);
+    printf("g_start_snap_button = %p\n", g_start_snap_button);
+    //event_touch_start_cb(LV_EVENT_CLICKED);
+    lv_async_call(trigger_user_button_safe, NULL);
+    //lv_event_send(g_start_snap_button, LV_EVENT_CLICKED, NULL);   
+    DEBUG_PRT("USER CLICK on ui\n");
+}
+
 
 void event_touch_exit_cb(lv_event_t * e)
 {
@@ -265,6 +363,16 @@ void touch_video_camera(lv_obj_t *clicked_btn)
 {
     DEBUG_EN(0);
 
+    if (lv_obj_has_state(g_start_snap_button, LV_STATE_USER_1)) {
+        printf("Recording\n");
+        show_toast("Recording. Cannot switch.", 2000);
+
+lv_obj_add_state(g_camera_video_button, LV_STATE_CHECKED);
+lv_obj_clear_state(g_camera_image_button, LV_STATE_CHECKED);
+
+        return; 
+    }
+    
     if (clicked_btn == g_camera_video_button) {
         // 切换到视频模式
         lv_obj_add_state(g_camera_video_button, LV_STATE_CHECKED);
@@ -280,6 +388,7 @@ void touch_video_camera(lv_obj_t *clicked_btn)
     }
     else if (clicked_btn == g_camera_image_button) {
         // 切换到拍照模式
+
         if (lv_obj_has_flag(g_start_snap_button, LV_OBJ_FLAG_CHECKABLE)) {
             if (lv_obj_get_state(g_start_snap_button) == LV_STATE_CHECKED) {
                 lv_obj_send_event(g_start_snap_button, LV_EVENT_RELEASED, NULL);
@@ -1622,11 +1731,11 @@ void ui_anim_run_save_img(void)
     lv_anim_start(&a);
 
     lv_anim_set_exec_cb(&a, _save_img_anim_set_x_cb);
-    lv_anim_set_values(&a, lv_obj_get_x(obj), 235);
+    lv_anim_set_values(&a, lv_obj_get_x(obj), 265);
     lv_anim_start(&a);
 
     lv_anim_set_exec_cb(&a, _save_img_anim_set_y_cb);
-    lv_anim_set_values(&a, lv_obj_get_y(obj), 105);
+    lv_anim_set_values(&a, lv_obj_get_y(obj), -185);
     lv_anim_set_completed_cb(&a, _save_img_anim_completed_cb);
     lv_anim_start(&a);
 }
