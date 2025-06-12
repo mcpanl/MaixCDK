@@ -423,7 +423,7 @@ void on_wifi_gui(Maix_GUI_Activity *activity, void *obj, Maix_Activity_MSG *msg,
     {
         log::debug("-- cam buff: %p, %d x %d x %ld = %ld\n", args->img_buff, args->width, args->height, sizeof(lv_color32_t), args->width * args->height * sizeof(lv_color32_t));
         qr_scan_label = lv_label_create(layout_col);
-        lv_label_set_text(qr_scan_label, (std::string(_("QR shared by phone")) + ", " + std::string(_("or visit")) + " " + std::string("maixhub.com/wifi")).c_str());
+        lv_label_set_text(qr_scan_label, (std::string(_("QR shared by phone"))).c_str());
         lv_obj_t *canvas = lv_canvas_create(layout_col);
         lv_canvas_set_buffer(canvas, args->img_buff, args->width, args->height, LV_COLOR_FORMAT_ARGB8888);
         args->canvas = canvas;
