@@ -33,10 +33,21 @@
 #include <mutex>
 #include <thread>
 
+
+#include <functional>
+#include <unordered_map>
+
+
+#include "ui_event_handler.h"
+
 #define PAGE_SIZE       4096
 #define GPIO_BASE       0x03020000
 #define GPIO_CFG_OFFSET 0x0004     // 配置寄存器偏移
 #define GPIO_DATA_OFFSET 0x0050    // 数据寄存器偏移
+
+using namespace maix;
+using namespace maix::peripheral;
+
 
 // 物理地址映射到虚拟地址
 volatile uint32_t *map_physical_address(off_t phys_addr) {
@@ -47,13 +58,13 @@ volatile uint32_t *map_physical_address(off_t phys_addr) {
     }
 
     void *map_base = mmap(
-        NULL,
-        PAGE_SIZE,
-        PROT_READ | PROT_WRITE,
-        MAP_SHARED,
-        mem_fd,
-        phys_addr & ~(PAGE_SIZE - 1)
-    );
+            NULL,
+            PAGE_SIZE,
+            PROT_READ | PROT_WRITE,
+            MAP_SHARED,
+            mem_fd,
+            phys_addr & ~(PAGE_SIZE - 1)
+            );
 
     close(mem_fd);
 
@@ -95,8 +106,44 @@ int read_input_gpio_a(int num) {
     return (val >> num) & 0x1;
 }
 
-using namespace maix;
-using namespace maix::peripheral;
+
+class KeyDetector {
+    public:
+        using Callback = std::function<void()>;
+
+        struct KeyConfig {
+            int gpio_pin;
+            int trigger_count;
+            Callback callback;
+            int count = 0;
+        };
+
+        void add_key(int id, int gpio_pin, int trigger_count, Callback callback) {
+            printf("ADD KEY %d \n", gpio_pin);
+            keys_[id] = KeyConfig{gpio_pin, trigger_count, callback, 0};
+        }
+
+        void update() {
+            for (auto& [id, config] : keys_) {
+                int value = read_input_gpio_a(config.gpio_pin);
+                if (value == 0) {
+                    config.count++;
+                    if (config.count == config.trigger_count && config.callback) {
+                        config.callback();
+                    }
+                } else {
+                    config.count = 0;
+                }
+            }
+        }
+
+    private:
+        std::unordered_map<int, KeyConfig> keys_;
+};
+
+
+KeyDetector detector;
+
 
 #define MMF_VENC_CHN            (1)
 static struct {
@@ -151,25 +198,13 @@ static struct {
     bool audio_en;
 } priv;
 
-void on_key(int key, int state)
-{
-    printf("Key!!!\n");
-    log::info("key: %d, state: %d\n", key, state);
-}
 
 void init_key()
 {
-	init_input_gpio_a(22);
-    	int key_switch_mid_value = read_input_gpio_a(22);
-    	printf("GPIO[22] value: %d\n", key_switch_mid_value);
-	// using namespace maix::peripheral::key;
-	//printf("INIT KEY2\n");
-
-	//Key key(my_key_callback);
-	//log::info("init key\n");
-	//key::Key key = key::Key(on_key);
-	
-	//printf("INIT COMPLETE2\n");
+    init_input_gpio_a(22);
+    init_input_gpio_a(23);
+    init_input_gpio_a(25);
+    init_input_gpio_a(30);
 }
 
 static void __find_fp5510(bool& flag, int id=-1, int slave_addr=-1, int freq=-1)
@@ -253,11 +288,11 @@ int app_pre_init(void)
     /* app ex init */
     tmc2209_init();
     TMC2209_EXIST_DO(
-        log::info("found device: tmc2209");
-        hp_shot_init();
-        snap_init();
-    )
-    return 0;
+            log::info("found device: tmc2209");
+            hp_shot_init();
+            snap_init();
+            )
+        return 0;
 }
 
 static int _mmf_set_exp_mode(int ch, int mode)
@@ -268,48 +303,48 @@ static int _mmf_set_exp_mode(int ch, int mode)
         }
     }
 
-	CVI_U32 ret;
-	ISP_EXPOSURE_ATTR_S stExpAttr;
+    CVI_U32 ret;
+    ISP_EXPOSURE_ATTR_S stExpAttr;
 
-	memset(&stExpAttr, 0, sizeof(ISP_EXPOSURE_ATTR_S));
+    memset(&stExpAttr, 0, sizeof(ISP_EXPOSURE_ATTR_S));
 
-	ret = CVI_ISP_GetExposureAttr(ch, &stExpAttr);
-	if (ret != 0) {
-		printf("CVI_ISP_GetExposureAttr failed, ret: %#x.\r\n", ret);
-		return -1;
-	}
+    ret = CVI_ISP_GetExposureAttr(ch, &stExpAttr);
+    if (ret != 0) {
+        printf("CVI_ISP_GetExposureAttr failed, ret: %#x.\r\n", ret);
+        return -1;
+    }
 
-	if (stExpAttr.enOpType == mode) {
-		return 0;
-	}
+    if (stExpAttr.enOpType == mode) {
+        return 0;
+    }
 
-	stExpAttr.u8DebugMode = 0;
-	if (mode == 0) {
-		stExpAttr.bByPass = 0;
-		stExpAttr.enOpType = OP_TYPE_AUTO;
-		stExpAttr.stManual.enExpTimeOpType = OP_TYPE_AUTO;
-		stExpAttr.stManual.enISONumOpType = OP_TYPE_AUTO;
-		stExpAttr.stManual.enAGainOpType = OP_TYPE_AUTO;
-		stExpAttr.stManual.enDGainOpType = OP_TYPE_AUTO;
-		stExpAttr.stManual.enISPDGainOpType = OP_TYPE_AUTO;
-	} else if (mode == 1) {
-		stExpAttr.bByPass = 0;
-		stExpAttr.enOpType = OP_TYPE_MANUAL;
-		stExpAttr.stManual.enExpTimeOpType = OP_TYPE_MANUAL;
-		stExpAttr.stManual.enISONumOpType = OP_TYPE_MANUAL;
-		stExpAttr.stManual.enAGainOpType = OP_TYPE_MANUAL;
-		stExpAttr.stManual.enDGainOpType = OP_TYPE_MANUAL;
-		stExpAttr.stManual.enISPDGainOpType = OP_TYPE_MANUAL;
-		stExpAttr.stManual.enGainType = AE_TYPE_ISO;
-	}
+    stExpAttr.u8DebugMode = 0;
+    if (mode == 0) {
+        stExpAttr.bByPass = 0;
+        stExpAttr.enOpType = OP_TYPE_AUTO;
+        stExpAttr.stManual.enExpTimeOpType = OP_TYPE_AUTO;
+        stExpAttr.stManual.enISONumOpType = OP_TYPE_AUTO;
+        stExpAttr.stManual.enAGainOpType = OP_TYPE_AUTO;
+        stExpAttr.stManual.enDGainOpType = OP_TYPE_AUTO;
+        stExpAttr.stManual.enISPDGainOpType = OP_TYPE_AUTO;
+    } else if (mode == 1) {
+        stExpAttr.bByPass = 0;
+        stExpAttr.enOpType = OP_TYPE_MANUAL;
+        stExpAttr.stManual.enExpTimeOpType = OP_TYPE_MANUAL;
+        stExpAttr.stManual.enISONumOpType = OP_TYPE_MANUAL;
+        stExpAttr.stManual.enAGainOpType = OP_TYPE_MANUAL;
+        stExpAttr.stManual.enDGainOpType = OP_TYPE_MANUAL;
+        stExpAttr.stManual.enISPDGainOpType = OP_TYPE_MANUAL;
+        stExpAttr.stManual.enGainType = AE_TYPE_ISO;
+    }
 
-	ret = CVI_ISP_SetExposureAttr(ch, &stExpAttr);
-	if (ret != 0) {
-		printf("CVI_ISP_SetExposureAttr failed, ret: %#x.\r\n", ret);
-		return -1;
-	}
+    ret = CVI_ISP_SetExposureAttr(ch, &stExpAttr);
+    if (ret != 0) {
+        printf("CVI_ISP_SetExposureAttr failed, ret: %#x.\r\n", ret);
+        return -1;
+    }
 
-	return 0;
+    return 0;
 }
 
 static void _mmf_set_exptime_and_iso(int ch, int exp_time, int iso)
@@ -369,8 +404,8 @@ static int _mmf_vi_frame_pop(int ch, void **frame_info,  mmf_frame_info_t *frame
     memset(frame, 0, sizeof(VIDEO_FRAME_INFO_S));
     if ((ret = CVI_VPSS_GetChnFrame(0, ch, frame, (CVI_S32)block_ms)) == 0) {
         int image_size = frame->stVFrame.u32Length[0]
-                        + frame->stVFrame.u32Length[1]
-                        + frame->stVFrame.u32Length[2];
+            + frame->stVFrame.u32Length[1]
+            + frame->stVFrame.u32Length[2];
         CVI_VOID *vir_addr;
         vir_addr = CVI_SYS_MmapCache(frame->stVFrame.u64PhyAddr[0], image_size);
         CVI_SYS_IonInvalidateCache(frame->stVFrame.u64PhyAddr[0], vir_addr, image_size);
@@ -400,8 +435,8 @@ static void _mmf_vi_frame_free(int ch, void **frame_info)
 
     VIDEO_FRAME_INFO_S *frame = (VIDEO_FRAME_INFO_S *)*frame_info;
     int image_size = frame->stVFrame.u32Length[0]
-                        + frame->stVFrame.u32Length[1]
-                        + frame->stVFrame.u32Length[2];
+        + frame->stVFrame.u32Length[1]
+        + frame->stVFrame.u32Length[2];
     CVI_SYS_Munmap(frame->stVFrame.pu8VirAddr[0], image_size);
     if (CVI_VPSS_ReleaseChnFrame(0, ch, frame) != 0) {
         SAMPLE_PRT("CVI_VI_ReleaseChnFrame NG\n");
@@ -430,8 +465,32 @@ static void trim(std::string &str) {
     str.erase(str.find_last_not_of(" \t\n\r") + 1);
 }
 
+void setup_keys() {
+    detector.add_key(1, 25, 2, [](){
+        log::info("Key left trigger");
+        trigger_left_button();
+    });
+
+    detector.add_key(2, 22, 5, [](){
+        log::info("Key mid triggered");
+        app::set_exit_flag(true);
+    });
+
+    detector.add_key(3, 23, 2, [](){
+        log::info("Key right triggered");
+        trigger_right_button();
+    });
+
+    detector.add_key(4, 30, 1, [](){
+        log::info("Key user triggered");
+        trigger_user_button();
+    });
+}
+
+
 int app_base_init(void)
 {
+
     // FIXME: camera can't switch to other sensor config online.
     mmf_deinit_v2(true);
 
@@ -479,7 +538,9 @@ int app_base_init(void)
     priv.light->low();
 
     // init audio
+    printf("[U] init audio_recorder\n");
     priv.audio_recorder = new audio::Recorder();
+    printf("[U] init audio_recorder success!\n");
     err::check_null_raise(priv.audio_recorder, "audio recorder init failed!");
 
     // init ffmpeg packer
@@ -499,11 +560,14 @@ int app_base_init(void)
     err::check_bool_raise(!priv.ffmpeg_packer->config("audio_bitrate", 128000), "rtmp config failed!");
     err::check_bool_raise(!priv.ffmpeg_packer->config("audio_format", AV_SAMPLE_FMT_S16), "rtmp config failed!");
 
+    printf("[U] init ffmpeg success!\n");
+
     // init gui
     maix::lvgl_init(priv.other_disp, priv.touchscreen);
     app_init(*priv.camera);
 
     priv.loop_last_ms = time::ticks_ms();
+
     return 0;
 }
 
@@ -593,358 +657,358 @@ void auto_focus_main(const std::function<float(bool)>& get_clarity, bool& auto_f
     maix::log::info("focus_mode=%d", focus_mode);
 
     switch (focus_mode) {
-    case 0: {
-        /* skip fast mode */
-        focus_mode = 5;
-        break;
-        /* step0: init 2209 --> 1mm mode */
-        /* only support 1mmx1 */
-        tmc2209_init_with(__high_speed_1mmx1);
-        focus_mode = 1;
-        break;
-    }
-    case 1: {
-        /* step1: fast up, len<fast_up_len> */
-        if constexpr (!enable_filt) {
-            for (int i = 0; i < fast_up_len; i+=g_tmc2209_status.step_len) {
-                g_slide->move(g_tmc2209_status.step_len);
-            }
-            focus_mode = 2;
-        } else {
-            constexpr int filt_num = 10;
-            float filt_step_len = g_tmc2209_status.step_len / filt_num;
-            int cnt_max = fast_up_len / filt_step_len;
-            g_slide->move(filt_step_len);
-            filt_cnt++;
-            if (filt_cnt >= cnt_max) {
-                focus_mode = 2;
-                filt_cnt = 0;
-            }
-        }
-        break;
-    }
-    case 2: {
-        /* step2: reserve */
-        focus_mode = 3;
-        break;
-    }
-    case 3: {
-        /* step3: fast scan */
-        if constexpr (!enable_filt) {
-            cla = get_clarity(false);
-            maix::log::info("fast focus mode, cla: %f", cla);
-            max_cla_pos_with_focus_curr_pos += g_tmc2209_status.step_len;
-            if (cla > max_cla) {
-                max_cla = cla;
-                max_cla_pos_with_focus_curr_pos = 0;
-                _cnt = 0;
-            }
-            // else if (cla < max_cla-10.0) {
-            //     focus_mode = 4;
-            // }
-            // for (int i = 0; i < __low_speed_22um4x1.steps; ++i) {
-            //     g_slide->move(-__low_speed_22um4x1.step_len);
-            // }
-            g_slide->move(-g_tmc2209_status.step_len);
-            // time::sleep_ms(1);
-            _cnt++;
-            // focus_curr_pos += __low_speed_22um4x1.step_len * __low_speed_22um4x1.steps;
-            focus_curr_pos += g_tmc2209_status.step_len;
-            if (focus_curr_pos > fast_total_len || almost_eq(fast_total_len, focus_curr_pos, nomal_up_len)) {
-                focus_mode = 4;
-            }
-        } else {
-            constexpr int filt_num = 10;
-            float filt_step_len = g_tmc2209_status.step_len / filt_num;
-            // int cnt_max = fast_total_len / filt_step_len;
+        case 0: {
+                    /* skip fast mode */
+                    focus_mode = 5;
+                    break;
+                    /* step0: init 2209 --> 1mm mode */
+                    /* only support 1mmx1 */
+                    tmc2209_init_with(__high_speed_1mmx1);
+                    focus_mode = 1;
+                    break;
+                }
+        case 1: {
+                    /* step1: fast up, len<fast_up_len> */
+                    if constexpr (!enable_filt) {
+                        for (int i = 0; i < fast_up_len; i+=g_tmc2209_status.step_len) {
+                            g_slide->move(g_tmc2209_status.step_len);
+                        }
+                        focus_mode = 2;
+                    } else {
+                        constexpr int filt_num = 10;
+                        float filt_step_len = g_tmc2209_status.step_len / filt_num;
+                        int cnt_max = fast_up_len / filt_step_len;
+                        g_slide->move(filt_step_len);
+                        filt_cnt++;
+                        if (filt_cnt >= cnt_max) {
+                            focus_mode = 2;
+                            filt_cnt = 0;
+                        }
+                    }
+                    break;
+                }
+        case 2: {
+                    /* step2: reserve */
+                    focus_mode = 3;
+                    break;
+                }
+        case 3: {
+                    /* step3: fast scan */
+                    if constexpr (!enable_filt) {
+                        cla = get_clarity(false);
+                        maix::log::info("fast focus mode, cla: %f", cla);
+                        max_cla_pos_with_focus_curr_pos += g_tmc2209_status.step_len;
+                        if (cla > max_cla) {
+                            max_cla = cla;
+                            max_cla_pos_with_focus_curr_pos = 0;
+                            _cnt = 0;
+                        }
+                        // else if (cla < max_cla-10.0) {
+                        //     focus_mode = 4;
+                        // }
+                        // for (int i = 0; i < __low_speed_22um4x1.steps; ++i) {
+                        //     g_slide->move(-__low_speed_22um4x1.step_len);
+                        // }
+                        g_slide->move(-g_tmc2209_status.step_len);
+                        // time::sleep_ms(1);
+                        _cnt++;
+                        // focus_curr_pos += __low_speed_22um4x1.step_len * __low_speed_22um4x1.steps;
+                        focus_curr_pos += g_tmc2209_status.step_len;
+                        if (focus_curr_pos > fast_total_len || almost_eq(fast_total_len, focus_curr_pos, nomal_up_len)) {
+                            focus_mode = 4;
+                        }
+                    } else {
+                        constexpr int filt_num = 10;
+                        float filt_step_len = g_tmc2209_status.step_len / filt_num;
+                        // int cnt_max = fast_total_len / filt_step_len;
 
-            if (filt_cnt % filt_num == 0) {
-                cla = get_clarity(false);
-                maix::log::info("fast focus mode, cla: %f", cla);
-                if (filt_cnt != 0) {
-                    max_cla_pos_with_focus_curr_pos += g_tmc2209_status.step_len;
+                        if (filt_cnt % filt_num == 0) {
+                            cla = get_clarity(false);
+                            maix::log::info("fast focus mode, cla: %f", cla);
+                            if (filt_cnt != 0) {
+                                max_cla_pos_with_focus_curr_pos += g_tmc2209_status.step_len;
+                                if (cla > max_cla) {
+                                    max_cla = cla;
+                                    max_cla_pos_with_focus_curr_pos = 0;
+                                    _cnt = 0;
+                                }
+                                _cnt++;
+                                focus_curr_pos += g_tmc2209_status.step_len;
+                                if (focus_curr_pos > fast_total_len ||
+                                        almost_eq(fast_total_len, focus_curr_pos, nomal_up_len) ||
+                                        cla <= max_cla*0.75) {
+                                    focus_mode = 4;
+                                }
+                            }
+                        }
+                        if (focus_mode == 4) {
+                            maix::log::info("fast focus mode finish, max cla:%f, need return:%f",
+                                    max_cla, max_cla_pos_with_focus_curr_pos);
+                            filt_cnt = 0;
+                            break;
+                        }
+                        g_slide->move(-filt_step_len);
+                        filt_cnt++;
+                    }
+                    break;
+                }
+        case 4: {
+                    /* step4: backtrack */
+                    if constexpr (!enable_filt) {
+                        maix::log::info("fast focus mode finish, max cla:%f, need return:%f", max_cla, max_cla_pos_with_focus_curr_pos);
+                        g_slide->move(max_cla_pos_with_focus_curr_pos);
+                        focus_mode = 5; /* skip nomal mode */
+                        // focus_mode = 100; /* skip nomal mode */
+                    } else {
+                        constexpr float filt_step_len = 0.1;
+                        // int filt_num = static_cast<int>(g_tmc2209_status.step_len/filt_step_len);
+                        int cnt_max = max_cla_pos_with_focus_curr_pos / filt_step_len;
+                        g_slide->move(filt_step_len);
+                        filt_cnt++;
+                        if (filt_cnt >= cnt_max) {
+                            filt_cnt = 0;
+                            focus_mode = 5;
+                        }
+                    }
+                    break;
+                }
+        case 5: {
+                    /* step5: init 2209 --> 22um4x1 mode */
+                    tmc2209_init_with(__low_speed_22um4x1);
+                    max_cla_pos_with_focus_curr_pos = 0;
+                    // max_cla = std::numeric_limits<float>::min();
+                    focus_curr_pos = 0;
+                    focus_mode = 6;
+                    break;
+                }
+        case 6: {
+                    /* step6: nomal up, len<nomal_up_len> */
+                    if constexpr (!enable_filt) {
+                        for (float i = 0; i < nomal_up_len; i+=__low_speed_22um4x1.step_len) {
+                            g_slide->move(__low_speed_22um4x1.step_len);
+                        }
+                        focus_mode = 7;
+                    } else {
+                        auto __step_len = __low_speed_22um4x1.step_len;
+                        g_slide->move(__step_len);
+                        filt_cnt++;
+                        if (almost_eq(filt_cnt, nomal_up_len/__step_len) || filt_cnt > nomal_up_len/__step_len) {
+                            filt_cnt = 0;
+                            focus_mode = 7;
+                        }
+                    }
+                    break;
+                }
+        case 7: {
+                    /* step7: nomal scan */
+                    constexpr int skip_frame_max = 2;
+                    static int skip_frame = 0;
+                    if (skip_frame < skip_frame_max) {
+                        skip_frame++;
+                        break;
+                    }
+                    cla = get_clarity(false);
+                    maix::log::info("nomal focus mode, cla: %f", cla);
+                    max_cla_pos_with_focus_curr_pos += __low_speed_22um4x1.step_len;
                     if (cla > max_cla) {
                         max_cla = cla;
                         max_cla_pos_with_focus_curr_pos = 0;
                         _cnt = 0;
                     }
+                    // else if (cla < max_cla-10.0) {
+                    //     focus_mode = 8;
+                    // }
+                    g_slide->move(-__low_speed_22um4x1.step_len);
+                    time::sleep_ms(1);
                     _cnt++;
-                    focus_curr_pos += g_tmc2209_status.step_len;
-                    if (focus_curr_pos > fast_total_len ||
-                        almost_eq(fast_total_len, focus_curr_pos, nomal_up_len) ||
-                        cla <= max_cla*0.75) {
-                        focus_mode = 4;
+                    focus_curr_pos += __low_speed_22um4x1.step_len;
+                    if (focus_curr_pos > nomal_total_len ||
+                            almost_eq(nomal_total_len, focus_curr_pos) ||
+                            cla <= max_cla*0.75) {
+                        focus_mode = 8;
                     }
+                    skip_frame = 0;
+                    break;
                 }
-            }
-            if (focus_mode == 4) {
-                maix::log::info("fast focus mode finish, max cla:%f, need return:%f",
-                    max_cla, max_cla_pos_with_focus_curr_pos);
-                filt_cnt = 0;
-                break;
-            }
-            g_slide->move(-filt_step_len);
-            filt_cnt++;
-        }
-        break;
-    }
-    case 4: {
-        /* step4: backtrack */
-        if constexpr (!enable_filt) {
-            maix::log::info("fast focus mode finish, max cla:%f, need return:%f", max_cla, max_cla_pos_with_focus_curr_pos);
-            g_slide->move(max_cla_pos_with_focus_curr_pos);
-            focus_mode = 5; /* skip nomal mode */
-            // focus_mode = 100; /* skip nomal mode */
-        } else {
-            constexpr float filt_step_len = 0.1;
-            // int filt_num = static_cast<int>(g_tmc2209_status.step_len/filt_step_len);
-            int cnt_max = max_cla_pos_with_focus_curr_pos / filt_step_len;
-            g_slide->move(filt_step_len);
-            filt_cnt++;
-            if (filt_cnt >= cnt_max) {
-                filt_cnt = 0;
-                focus_mode = 5;
-            }
-        }
-        break;
-    }
-    case 5: {
-        /* step5: init 2209 --> 22um4x1 mode */
-        tmc2209_init_with(__low_speed_22um4x1);
-        max_cla_pos_with_focus_curr_pos = 0;
-        // max_cla = std::numeric_limits<float>::min();
-        focus_curr_pos = 0;
-        focus_mode = 6;
-        break;
-    }
-    case 6: {
-        /* step6: nomal up, len<nomal_up_len> */
-        if constexpr (!enable_filt) {
-            for (float i = 0; i < nomal_up_len; i+=__low_speed_22um4x1.step_len) {
-                g_slide->move(__low_speed_22um4x1.step_len);
-            }
-            focus_mode = 7;
-        } else {
-            auto __step_len = __low_speed_22um4x1.step_len;
-            g_slide->move(__step_len);
-            filt_cnt++;
-            if (almost_eq(filt_cnt, nomal_up_len/__step_len) || filt_cnt > nomal_up_len/__step_len) {
-                filt_cnt = 0;
-                focus_mode = 7;
-            }
-        }
-        break;
-    }
-    case 7: {
-        /* step7: nomal scan */
-        constexpr int skip_frame_max = 2;
-        static int skip_frame = 0;
-        if (skip_frame < skip_frame_max) {
-            skip_frame++;
-            break;
-        }
-        cla = get_clarity(false);
-        maix::log::info("nomal focus mode, cla: %f", cla);
-        max_cla_pos_with_focus_curr_pos += __low_speed_22um4x1.step_len;
-        if (cla > max_cla) {
-            max_cla = cla;
-            max_cla_pos_with_focus_curr_pos = 0;
-            _cnt = 0;
-        }
-        // else if (cla < max_cla-10.0) {
-        //     focus_mode = 8;
-        // }
-        g_slide->move(-__low_speed_22um4x1.step_len);
-        time::sleep_ms(1);
-        _cnt++;
-        focus_curr_pos += __low_speed_22um4x1.step_len;
-        if (focus_curr_pos > nomal_total_len ||
-            almost_eq(nomal_total_len, focus_curr_pos) ||
-            cla <= max_cla*0.75) {
-            focus_mode = 8;
-        }
-        skip_frame = 0;
-        break;
-    }
-    case 8:{
-        /* step8: backtract */
-        maix::log::info("nomal focus mode finish, max cla:%f, need return:%f", max_cla, max_cla_pos_with_focus_curr_pos);
-        g_slide->move(max_cla_pos_with_focus_curr_pos);
-        focus_mode = 9;
-        break;
-    }
-    default: {
-        /* finish: reset data and exit auto focus */
-        tmc2209_init_with(__low_speed_2um8x4);
-        focus_curr_pos = 0;
-        focus_mode = 0;
-        max_cla = std::numeric_limits<float>::min();
-        max_cla_pos_with_focus_curr_pos = 0;
-        auto_focus_start = false;
-        g_auto_focus = std::nullopt;
-        break;
-    }
+        case 8:{
+                   /* step8: backtract */
+                   maix::log::info("nomal focus mode finish, max cla:%f, need return:%f", max_cla, max_cla_pos_with_focus_curr_pos);
+                   g_slide->move(max_cla_pos_with_focus_curr_pos);
+                   focus_mode = 9;
+                   break;
+               }
+        default: {
+                     /* finish: reset data and exit auto focus */
+                     tmc2209_init_with(__low_speed_2um8x4);
+                     focus_curr_pos = 0;
+                     focus_mode = 0;
+                     max_cla = std::numeric_limits<float>::min();
+                     max_cla_pos_with_focus_curr_pos = 0;
+                     auto_focus_start = false;
+                     g_auto_focus = std::nullopt;
+                     break;
+                 }
     };
 }
 
 void shot_tp_main(void)
 {
     TMC2209_EXIST_DO(
-        constexpr uint64_t snap_check_time = 1000; /* 1s限制,防止误触一直拍摄/录像 */
-        static auto prev_snap_check_timepoint = time::ticks_ms();
-        auto curr_snap_check_timepoint = time::ticks_ms();
-        if (curr_snap_check_timepoint-prev_snap_check_timepoint>=snap_check_time && snap_check(1)) {
+            constexpr uint64_t snap_check_time = 1000; /* 1s限制,防止误触一直拍摄/录像 */
+            static auto prev_snap_check_timepoint = time::ticks_ms();
+            auto curr_snap_check_timepoint = time::ticks_ms();
+            if (curr_snap_check_timepoint-prev_snap_check_timepoint>=snap_check_time && snap_check(1)) {
             prev_snap_check_timepoint = curr_snap_check_timepoint;
             hp_shot_trigger();
             // priv.cam_snap_flag = true;
             if (g_camera_mode == 0) {
-                touch_start_pic();
+            touch_start_pic();
             } else if (g_camera_mode == 1) {
-                touch_start_video(4598);
+            touch_start_video(4598);
             }
-        }
-    )
+            }
+            )
 }
 
 void slide_run_main(int& pic_cnt)
 {
     TMC2209_EXIST_DO(
-        static TMC2209Status prev_tmc2209_status{
+            static TMC2209Status prev_tmc2209_status{
             .run = false, // ignore
             .step_len = 0.0,
             .steps = 0,
             .up = true, // ignore
-        };
+            };
 
-        if (g_tmc2209_status.run) {
+            if (g_tmc2209_status.run) {
             if (almost_eq(prev_tmc2209_status.step_len, g_tmc2209_status.step_len)
-                || prev_tmc2209_status.steps != g_tmc2209_status.steps) {
-                tmc2209_init_with(g_tmc2209_status);
-                prev_tmc2209_status.step_len = g_tmc2209_status.step_len;
-                prev_tmc2209_status.steps = g_tmc2209_status.steps;
+                    || prev_tmc2209_status.steps != g_tmc2209_status.steps) {
+            tmc2209_init_with(g_tmc2209_status);
+            prev_tmc2209_status.step_len = g_tmc2209_status.step_len;
+            prev_tmc2209_status.steps = g_tmc2209_status.steps;
             }
             float step_len = g_tmc2209_status.up ? g_tmc2209_status.step_len : -g_tmc2209_status.step_len;
             maix::log::info("step_len %d: %f", g_tmc2209_status.up?1:0, step_len);
             for (int i = 0; i < g_tmc2209_status.steps; ++i) {
-                g_slide->move(step_len);
-                if (g_ui_stack_status.is_set_start_point && !g_ui_stack_status.is_set_end_point) {
-                    g_ui_stack_status.move_len += step_len;
-                }
+            g_slide->move(step_len);
+            if (g_ui_stack_status.is_set_start_point && !g_ui_stack_status.is_set_end_point) {
+            g_ui_stack_status.move_len += step_len;
+            }
             }
             g_tmc2209_status.run = false;
-        }
-
-        if (g_camera_mode == 0) {
-            static bool __can_move = true;
-            static std::future<void> __fut = std::async([](){});
-            if (g_ui_stack_status.need_reset) {
-                maix::log::info("reset start");
-
-                g_ui_stack_status.reset_len = -g_ui_stack_status.move_len;
-                // g_ui_stack_status.reset_len = std::fabs(g_ui_stack_status.reset_len);
-                // g_ui_stack_status.reset_len = (g_ui_stack_status.move_len>=0) ?
-                //     -g_ui_stack_status.reset_len : g_ui_stack_status.reset_len;
-
-                float _fast_len = floor(g_ui_stack_status.reset_len);
-                float _nom_len = g_ui_stack_status.reset_len - static_cast<int>(g_ui_stack_status.reset_len);
-                int _nom_steps = static_cast<int>(_nom_len / 0.0028);
-
-                tmc2209_init_with(__high_speed_1mmx1);
-                for (int i = 0; i < std::fabs(_fast_len); ++i) {
-                    g_slide->move((g_ui_stack_status.reset_len>=0)?1:-1);
-                }
-                tmc2209_init_with(__low_speed_2um8x4);
-                for (int i = 0; i < std::fabs(_nom_steps); ++i) {
-                    g_slide->move((g_ui_stack_status.reset_len>=0)?0.0224:-0.0224);
-                }
-
-                g_ui_stack_status.reset_len = 4000;
-                g_ui_stack_status.run = 2;
-
-                ui_stack_status_reset();
-                g_ui_stack_status.need_reset = 0;
             }
-            do {if (g_ui_stack_status.run == 2) {
-                // auto rt = time::ticks_ms();
-                // if (rt - _stack_lt < static_cast<decltype(rt)>(g_ui_stack_status.wait_time_ms)) {
-                //     break;
-                // }
-                // _stack_lt = rt;
-                // maix::log::info("stack cap start, %d", g_ui_stack_status.shot_steps_cnt);
-                if (!__can_move) {
-                    break;
-                }
-                tmc2209_init_with(__low_speed_2um8x4);
-                if (pic_cnt >= g_ui_stack_status.shot_number) {
-                    pic_cnt = 0;
-                    g_ui_stack_status.run = 0;
-                    if (g_ui_stack_status.reset_at_end_mode)
-                        g_ui_stack_status.need_reset = 1;
-                    update_stack_start_btn();
-                    reset_stack_start_btn();
-                }
-                float _a = std::fabs(g_ui_stack_status.move_len / 0.0028 / g_ui_stack_status.shot_number);
-                float step_len = g_ui_stack_status.move_len>=0 ? __low_speed_2um8x4.step_len : -__low_speed_2um8x4.step_len;
-                // maix::log::info("steps cnt: %f, step: %f", _a, step_len);
-                for (int i = 0; i < _a; ++i) {
-                    g_slide->move(step_len);
-                }
-                g_ui_stack_status.reset_len += g_ui_stack_status.shot_steps_cnt*0.0028;
-                __fut.get();
-                __fut = std::move(std::async(std::launch::async, [&](){
-                    // maix::log::info("need wait %d ms, sleep start", g_ui_stack_status.wait_time_ms);
-                    // auto _slt = time::ticks_ms();
-                    // maix::log::info("sleep lt: %llu", _slt);
-                    time::sleep_ms(g_ui_stack_status.wait_time_ms);
-                    // auto _srt = time::ticks_ms();
-                    // maix::log::info("sleep rt: %llu, %llu", _srt, _srt-_slt);
-                    // time::sleep_ms(5);
-                    touch_start_pic();
-                    pic_cnt++;
-                    __can_move = true;
-                }));
-                __can_move = false;
-            }} while(0);
-            if (g_ui_stack_status.run == 1) {
-                if (!almost_eq(g_ui_stack_status.reset_len, 4000)) {
-                    maix::log::info("reset start point and start");
+
+            if (g_camera_mode == 0) {
+                static bool __can_move = true;
+                static std::future<void> __fut = std::async([](){});
+                if (g_ui_stack_status.need_reset) {
+                    maix::log::info("reset start");
+
                     g_ui_stack_status.reset_len = -g_ui_stack_status.move_len;
+                    // g_ui_stack_status.reset_len = std::fabs(g_ui_stack_status.reset_len);
+                    // g_ui_stack_status.reset_len = (g_ui_stack_status.move_len>=0) ?
+                    //     -g_ui_stack_status.reset_len : g_ui_stack_status.reset_len;
 
                     float _fast_len = floor(g_ui_stack_status.reset_len);
                     float _nom_len = g_ui_stack_status.reset_len - static_cast<int>(g_ui_stack_status.reset_len);
-                    int _nom_steps = std::abs(static_cast<int>(_nom_len / 0.0028));
-
-                    // maix::log::info("fast len: %f, nom len: %f, nom step: %d", _fast_len, _nom_len, _nom_steps);
+                    int _nom_steps = static_cast<int>(_nom_len / 0.0028);
 
                     tmc2209_init_with(__high_speed_1mmx1);
-                    for (int i = 0; i < std::fabs(floor(_fast_len)); ++i) {
+                    for (int i = 0; i < std::fabs(_fast_len); ++i) {
                         g_slide->move((g_ui_stack_status.reset_len>=0)?1:-1);
                     }
                     tmc2209_init_with(__low_speed_2um8x4);
-                    for (int i = 0; i < _nom_steps; ++i) {
+                    for (int i = 0; i < std::fabs(_nom_steps); ++i) {
                         g_slide->move((g_ui_stack_status.reset_len>=0)?0.0224:-0.0224);
                     }
-                }
-                g_ui_stack_status.reset_len = 0;
-                g_ui_stack_status.run = 2;
-                __can_move = true;
 
-                memset(_stack_buf, 0x00, std::size(_stack_buf));
-                std::time_t now = std::time(nullptr);
-                std::tm* local_time = std::localtime(&now);
-                int hour = local_time->tm_hour;
-                int minute = local_time->tm_min;
-                int second = local_time->tm_sec;
-                snprintf(_stack_buf, std::size(_stack_buf), "%d_%d_%d", hour, minute, second);
-                _stack_pic_cnt = 0;
+                    g_ui_stack_status.reset_len = 4000;
+                    g_ui_stack_status.run = 2;
+
+                    ui_stack_status_reset();
+                    g_ui_stack_status.need_reset = 0;
+                }
+                do {if (g_ui_stack_status.run == 2) {
+                    // auto rt = time::ticks_ms();
+                    // if (rt - _stack_lt < static_cast<decltype(rt)>(g_ui_stack_status.wait_time_ms)) {
+                    //     break;
+                    // }
+                    // _stack_lt = rt;
+                    // maix::log::info("stack cap start, %d", g_ui_stack_status.shot_steps_cnt);
+                    if (!__can_move) {
+                        break;
+                    }
+                    tmc2209_init_with(__low_speed_2um8x4);
+                    if (pic_cnt >= g_ui_stack_status.shot_number) {
+                        pic_cnt = 0;
+                        g_ui_stack_status.run = 0;
+                        if (g_ui_stack_status.reset_at_end_mode)
+                            g_ui_stack_status.need_reset = 1;
+                        update_stack_start_btn();
+                        reset_stack_start_btn();
+                    }
+                    float _a = std::fabs(g_ui_stack_status.move_len / 0.0028 / g_ui_stack_status.shot_number);
+                    float step_len = g_ui_stack_status.move_len>=0 ? __low_speed_2um8x4.step_len : -__low_speed_2um8x4.step_len;
+                    // maix::log::info("steps cnt: %f, step: %f", _a, step_len);
+                    for (int i = 0; i < _a; ++i) {
+                        g_slide->move(step_len);
+                    }
+                    g_ui_stack_status.reset_len += g_ui_stack_status.shot_steps_cnt*0.0028;
+                    __fut.get();
+                    __fut = std::move(std::async(std::launch::async, [&](){
+                                // maix::log::info("need wait %d ms, sleep start", g_ui_stack_status.wait_time_ms);
+                                // auto _slt = time::ticks_ms();
+                                // maix::log::info("sleep lt: %llu", _slt);
+                                time::sleep_ms(g_ui_stack_status.wait_time_ms);
+                                // auto _srt = time::ticks_ms();
+                                // maix::log::info("sleep rt: %llu, %llu", _srt, _srt-_slt);
+                                // time::sleep_ms(5);
+                                touch_start_pic();
+                                pic_cnt++;
+                                __can_move = true;
+                                }));
+                    __can_move = false;
+                }} while(0);
+                if (g_ui_stack_status.run == 1) {
+                    if (!almost_eq(g_ui_stack_status.reset_len, 4000)) {
+                        maix::log::info("reset start point and start");
+                        g_ui_stack_status.reset_len = -g_ui_stack_status.move_len;
+
+                        float _fast_len = floor(g_ui_stack_status.reset_len);
+                        float _nom_len = g_ui_stack_status.reset_len - static_cast<int>(g_ui_stack_status.reset_len);
+                        int _nom_steps = std::abs(static_cast<int>(_nom_len / 0.0028));
+
+                        // maix::log::info("fast len: %f, nom len: %f, nom step: %d", _fast_len, _nom_len, _nom_steps);
+
+                        tmc2209_init_with(__high_speed_1mmx1);
+                        for (int i = 0; i < std::fabs(floor(_fast_len)); ++i) {
+                            g_slide->move((g_ui_stack_status.reset_len>=0)?1:-1);
+                        }
+                        tmc2209_init_with(__low_speed_2um8x4);
+                        for (int i = 0; i < _nom_steps; ++i) {
+                            g_slide->move((g_ui_stack_status.reset_len>=0)?0.0224:-0.0224);
+                        }
+                    }
+                    g_ui_stack_status.reset_len = 0;
+                    g_ui_stack_status.run = 2;
+                    __can_move = true;
+
+                    memset(_stack_buf, 0x00, std::size(_stack_buf));
+                    std::time_t now = std::time(nullptr);
+                    std::tm* local_time = std::localtime(&now);
+                    int hour = local_time->tm_hour;
+                    int minute = local_time->tm_min;
+                    int second = local_time->tm_sec;
+                    snprintf(_stack_buf, std::size(_stack_buf), "%d_%d_%d", hour, minute, second);
+                    _stack_pic_cnt = 0;
+                }
+            } else {
+                if (g_ui_stack_status.run) {
+                    ui_stack_status_reset();
+                    g_ui_stack_status.run = 0;
+                }
             }
-        } else {
-            if (g_ui_stack_status.run) {
-                ui_stack_status_reset();
-                g_ui_stack_status.run = 0;
-            }
-        }
-    )
+            )
 }
 
 // static void show_loop_used_time()
@@ -955,25 +1019,67 @@ void slide_run_main(int& pic_cnt)
 //     ltime = rtime;
 // }
 
+
+char* read_first_line(const char* filename) {
+    FILE* file = fopen(filename, "r");
+    if (file == NULL) {
+        //perror("fopen failed");
+        return NULL;
+    }
+
+    // 分配一个缓冲区，比如 1024 字节
+    size_t buffer_size = 1024;
+    char* buffer = (char*)malloc(buffer_size);
+    if (buffer == NULL) {
+        //perror("malloc failed");
+        fclose(file);
+        return NULL;
+    }
+
+    if (fgets(buffer, buffer_size, file) == NULL) {
+        // 读取失败，比如文件为空
+        free(buffer);
+        fclose(file);
+        return NULL;
+    }
+
+    // 关闭文件
+    fclose(file);
+
+    // 去掉换行符（如果需要）
+    size_t len = strlen(buffer);
+    if (len > 0 && buffer[len-1] == '\n') {
+        buffer[len-1] = '\0';
+    }
+
+    return buffer;  // 注意：返回的是堆内存，需要外部 free
+}
+
 int key_down_count = 0;
 
 int app_base_loop(void)
 {
-	int key_switch_mid_value = read_input_gpio_a(22);
-	//log::info("Key %d", key_switch_mid_value);
-	if(key_switch_mid_value == 0)
-	{
-		key_down_count += 1;
-		if(key_down_count >= 10)
-		{
-			printf(":: EXIT\n");
-			app::set_exit_flag(true);
-		}
-	} else {
-		key_down_count = 0;
-	}
 
-	//printf("loop %d", 1);
+    detector.update();
+
+
+    int flip_flag = 0;
+    char* line = read_first_line("/mk/camera_flip.txt");
+    if (line != NULL) {
+        //printf("First line: %s\n", line);
+
+        if (strcmp(line, "1") == 0) {
+            flip_flag = 1;
+        }
+
+        free(line);
+    } else {
+        //printf("Failed to read first line.\n");
+    }
+
+    priv.camera->vflip(flip_flag);
+
+    //printf("loop %d", 1);
     // auto fps = time::fps();
     // log::info("curr fps: %0.2f", fps);
 
@@ -1063,21 +1169,21 @@ int app_base_loop(void)
 
         /* auto focus */
         TMC2209_EXIST_DO(
-            do {
+                do {
                 if (!auto_focus_start && !g_ui_stack_status.run) {
-                    if (g_auto_focus == std::nullopt) break;
-                    focus_x = g_auto_focus.value().x;
-                    focus_y = g_auto_focus.value().y;
-                    g_auto_focus = std::nullopt;
-                    auto_focus_start = true;
+                if (g_auto_focus == std::nullopt) break;
+                focus_x = g_auto_focus.value().x;
+                focus_y = g_auto_focus.value().y;
+                g_auto_focus = std::nullopt;
+                auto_focus_start = true;
                 }
 
                 if (auto_focus_start) {
-                    auto_focus_main(get_clarity, auto_focus_start);
+                auto_focus_main(get_clarity, auto_focus_start);
                 }
 
-            } while (0);
-        ) else if (fp5510_exist()) {
+                } while (0);
+                ) else if (fp5510_exist()) {
             do {
 #define FP5510_HILLCLIMBING 1
 #define FP5510_FULLSCAN 2
@@ -1124,352 +1230,416 @@ int app_base_loop(void)
                         impl_need_reset = true;
                     }
                     if (f.w <= 640 && f.h <= 480 &&
-                        fp5510_focus_w != f.w /2 &&
-                        fp5510_focus_h != f.h / 2) {
+                            fp5510_focus_w != f.w /2 &&
+                            fp5510_focus_h != f.h / 2) {
                         fp5510_focus_w = f.w / 2;
                         fp5510_focus_h = f.h / 2;
                         impl_need_reset = true;
-                    // } else if (fp5510_focus_w != 640 && fp5510_focus_h != 480) {
-                    //     fp5510_focus_w = 640;
-                    //     fp5510_focus_h = 480;
-                    //     impl_need_reset = true;
-                    // }
-                    } else if (fp5510_focus_w != 320 && fp5510_focus_h != 240) {
-                        fp5510_focus_w = 320;
-                        fp5510_focus_h = 240;
-                        impl_need_reset = true;
-                    }
-                    if (impl_need_reset) {
-                        maix::log::info("reset fp5510 focus impl");
+                        // } else if (fp5510_focus_w != 640 && fp5510_focus_h != 480) {
+                        //     fp5510_focus_w = 640;
+                        //     fp5510_focus_h = 480;
+                        //     impl_need_reset = true;
+                        // }
+                } else if (fp5510_focus_w != 320 && fp5510_focus_h != 240) {
+                    fp5510_focus_w = 320;
+                    fp5510_focus_h = 240;
+                    impl_need_reset = true;
+                }
+                if (impl_need_reset) {
+                    maix::log::info("reset fp5510 focus impl");
 #if FP5510_FOCUS_TYPE == FP5510_HILLCLIMBING
-                        fp5510_focus_impl.release();
-                        fp5510_focus_impl = std::make_unique<AutoFocusHillClimbing>(
+                    fp5510_focus_impl.release();
+                    fp5510_focus_impl = std::make_unique<AutoFocusHillClimbing>(
                             std::make_unique<CVMatCreater>(
                                 std::make_unique<ImageCropper>(
                                     focus_x_map, focus_y_map, fp5510_focus_w, fp5510_focus_h,
                                     std::make_unique<ImageGrayCreater>()
-                                )
-                            ),
+                                    )
+                                ),
                             std::make_unique<CALaplace>(),
                             [&](int pos) {
-                                pos = std::max(0, pos);
-                                fp5510.set_pos(pos);
+                            pos = std::max(0, pos);
+                            fp5510.set_pos(pos);
                             }, 0, 1023, -1, -1, 1
-                        );
+                            );
 #elif FP5510_FOCUS_TYPE == FP5510_FULLSCAN
-                        maix::log::info("full scan %dx%d (%d,%d)",
+                    maix::log::info("full scan %dx%d (%d,%d)",
                             fp5510_focus_w, fp5510_focus_h, focus_x_map, focus_y_map);
-                        full_scan_impl.release();
-                        full_scan_impl = std::make_unique<FullScan>(
+                    full_scan_impl.release();
+                    full_scan_impl = std::make_unique<FullScan>(
                             std::make_unique<CVMatCreater>(
                                 std::make_unique<ImageGrayCreater>(
                                     std::make_unique<ImageYVU420SPNV21Cropper>(
                                         focus_x_map, focus_y_map, fp5510_focus_w, fp5510_focus_h
+                                        )
                                     )
-                                )
-                            ),
+                                ),
                             std::make_unique<CALaplace>(),
                             [&](int pos) {
-                                pos = std::max(0, pos);
-                                fp5510.set_pos(pos);
+                            pos = std::max(0, pos);
+                            fp5510.set_pos(pos);
                             }, 0, 1023, 1, 1
-                        );
-                        full_scan_impl->set_save_path("/root/focus_full_scan");
-                        full_scan_cnt = 0;
+                            );
+                    full_scan_impl->set_save_path("/root/focus_full_scan");
+                    full_scan_cnt = 0;
 #elif FP5510_FOCUS_TYPE == FP5510_HILLCLIMBING_FUTURE
-                        fp5510_focus_impl.release();
-                        fp5510_focus_impl = std::make_unique<AutoFocusHCFuture>(
+                    fp5510_focus_impl.release();
+                    fp5510_focus_impl = std::make_unique<AutoFocusHCFuture>(
                             std::make_unique<CVMatCreater>(
                                 std::make_unique<ImageGrayCreater>(
                                     std::make_unique<ImageYVU420SPNV21Cropper>(
                                         focus_x_map, focus_y_map, fp5510_focus_w, fp5510_focus_h
+                                        )
                                     )
-                                )
-                            ),
+                                ),
                             std::make_unique<CALaplace>(),
                             [&](int pos) {
-                                pos = std::max(0, pos);
-                                fp5510.set_pos(pos);
+                            pos = std::max(0, pos);
+                            fp5510.set_pos(pos);
                             }, 0, 1023, -1, -1, 2
-                        );
+                            );
 #elif FP5510_FOCUS_TYPE == FP5510_HILLCLIMBING_FUTURE_MINI
-                        fp5510_focus_impl.release();
-                        fp5510_focus_impl = std::make_unique<AutoFocusHCFutureMini>(
+                    fp5510_focus_impl.release();
+                    fp5510_focus_impl = std::make_unique<AutoFocusHCFutureMini>(
                             std::make_unique<CVMatCreater>(
                                 std::make_unique<ImageCropper>(
                                     focus_x_map, focus_y_map, fp5510_focus_w, fp5510_focus_h,
                                     std::make_unique<ImageGrayCreater>()
-                                )
-                            ),
+                                    )
+                                ),
                             std::make_unique<CALaplace>(),
                             [&](int pos) {
-                                pos = std::max(0, pos);
-                                fp5510.set_pos(pos);
+                            pos = std::max(0, pos);
+                            fp5510.set_pos(pos);
                             }, 0, 1023, -1, -1, 2
-                        );
+                            );
 #elif FP5510_FOCUS_TYPE == FP5510_HILLCLIMBING_FUTURE_MINI_YVUCROP
-                        fp5510_focus_impl.release();
-                        fp5510_focus_impl = std::make_unique<AutoFocusHCFutureMini>(
+                    fp5510_focus_impl.release();
+                    fp5510_focus_impl = std::make_unique<AutoFocusHCFutureMini>(
                             std::make_unique<CVMatCreater>(
                                 std::make_unique<ImageGrayCreater>(
                                     std::make_unique<ImageYVU420SPNV21Cropper>(
                                         focus_x_map, focus_y_map, fp5510_focus_w, fp5510_focus_h
+                                        )
                                     )
-                                )
-                            ),
+                                ),
                             std::make_unique<CALaplace>(),
                             [&](int pos) {
-                                pos = std::max(0, pos);
-                                fp5510.set_pos(pos);
+                            pos = std::max(0, pos);
+                            fp5510.set_pos(pos);
                             }, 0, 1023, -1, -1, 2
+                            );
+#endif
+                }
+                g_auto_focus = std::nullopt;
+                auto_focus_start = true;
+                dbg_focus_total_ltime = time::ticks_ms();
+            }
+            if (auto_focus_start) {
+                // auto _create_oimg_lt = time::ticks_ms();
+                image::Format fmt = image::Format::FMT_YVU420SP;
+                ArcBox<image::Image> img = ArcBox<image::Image>(
+                        new image::Image(f.w, f.h, fmt, (uint8_t *)f.data, f.len, false)
                         );
-#endif
-                    }
-                    g_auto_focus = std::nullopt;
-                    auto_focus_start = true;
-                    dbg_focus_total_ltime = time::ticks_ms();
-                }
-                if (auto_focus_start) {
-                    // auto _create_oimg_lt = time::ticks_ms();
-                    image::Format fmt = image::Format::FMT_YVU420SP;
-                    ArcBox<image::Image> img = ArcBox<image::Image>(
-                            new image::Image(f.w, f.h, fmt, (uint8_t *)f.data, f.len, false)
-                    );
-                    // maix::log::info("create_oimg used %d", time::ticks_ms()-_create_oimg_lt);
+                // maix::log::info("create_oimg used %d", time::ticks_ms()-_create_oimg_lt);
 
-                    // auto dbg_focus_lt = time::ticks_ms();
+                // auto dbg_focus_lt = time::ticks_ms();
 #if FP5510_FOCUS_TYPE == FP5510_HILLCLIMBING
-                    if (fp5510_focus_impl->focus(img) == AutoFocusHillClimbing::AFMode::STOP) {
-                        auto_focus_start = false;
-                        log::info("FOCUS total used %llu ms", time::ticks_ms()-dbg_focus_total_ltime);
-                    }
-#elif FP5510_FOCUS_TYPE == FP5510_FULLSCAN
-                    full_scan_cnt++;
-                    if (full_scan_impl->scan(img) == FullScan::Mode::STOP
-                        /* || full_scan_cnt >= 100 */ ) {
-                        auto_focus_start = false;
-                        full_scan_impl->save("/root/focus_full_scan/info.txt");
-                    }
-#elif FP5510_FOCUS_TYPE == FP5510_HILLCLIMBING_FUTURE
-                    if (fp5510_focus_impl->focus(img) == AutoFocusHCFuture::Mode::STOP) {
-                        auto_focus_start = false;
-                        log::info("FOCUS total used %llu ms", time::ticks_ms()-dbg_focus_total_ltime);
-                    }
-#elif FP5510_FOCUS_TYPE == FP5510_HILLCLIMBING_FUTURE_MINI || FP5510_FOCUS_TYPE == FP5510_HILLCLIMBING_FUTURE_MINI_YVUCROP
-                    if (fp5510_focus_impl->focus(img) == AutoFocusHCFutureMini::Mode::STOP) {
-                        auto_focus_start = false;
-                        log::info("FOCUS total used %llu ms", time::ticks_ms()-dbg_focus_total_ltime);
-                    }
-#elif FP5510_FOCUS_TYPE == FP5510_ONLY_SET_POS_MIN_MAX
-                    fp5510.set_pos(fp5510_pos);
-                    maix::log::info("now set pos: %d", fp5510_pos);
-                    fp5510_pos = fp5510_pos ? 0 : 1023;
+                if (fp5510_focus_impl->focus(img) == AutoFocusHillClimbing::AFMode::STOP) {
                     auto_focus_start = false;
+                    log::info("FOCUS total used %llu ms", time::ticks_ms()-dbg_focus_total_ltime);
+                }
+#elif FP5510_FOCUS_TYPE == FP5510_FULLSCAN
+                full_scan_cnt++;
+                if (full_scan_impl->scan(img) == FullScan::Mode::STOP
+                        /* || full_scan_cnt >= 100 */ ) {
+                    auto_focus_start = false;
+                    full_scan_impl->save("/root/focus_full_scan/info.txt");
+                }
+#elif FP5510_FOCUS_TYPE == FP5510_HILLCLIMBING_FUTURE
+                if (fp5510_focus_impl->focus(img) == AutoFocusHCFuture::Mode::STOP) {
+                    auto_focus_start = false;
+                    log::info("FOCUS total used %llu ms", time::ticks_ms()-dbg_focus_total_ltime);
+                }
+#elif FP5510_FOCUS_TYPE == FP5510_HILLCLIMBING_FUTURE_MINI || FP5510_FOCUS_TYPE == FP5510_HILLCLIMBING_FUTURE_MINI_YVUCROP
+                if (fp5510_focus_impl->focus(img) == AutoFocusHCFutureMini::Mode::STOP) {
+                    auto_focus_start = false;
+                    log::info("FOCUS total used %llu ms", time::ticks_ms()-dbg_focus_total_ltime);
+                }
+#elif FP5510_FOCUS_TYPE == FP5510_ONLY_SET_POS_MIN_MAX
+                fp5510.set_pos(fp5510_pos);
+                maix::log::info("now set pos: %d", fp5510_pos);
+                fp5510_pos = fp5510_pos ? 0 : 1023;
+                auto_focus_start = false;
 #endif
-                    // log::info("focus 1 frame used %d", time::ticks_ms()-dbg_focus_lt);
-                }
-            } while(0);
-        }
-
-        // Snap picture
-        if (priv.cam_snap_flag) {
-            priv.cam_snap_flag = false;
-
-            image::Format fmt = image::Format::FMT_YVU420SP;
-            image::Image *img = new image::Image(f.w, f.h, fmt, (uint8_t *)f.data, f.len, true);
-            if (!img) {
-                printf("create image failed!\r\n");
-                _mmf_vi_frame_free(ch, &frame);
-                return -1;
+                // log::info("focus 1 frame used %d", time::ticks_ms()-dbg_focus_lt);
             }
+        } while(0);
+    }
 
-            focus_x = f.w/2;
-            focus_y = f.h/2;
-            get_clarity(true);
-            // get_clarity(false);
+    // Snap picture
+    if (priv.cam_snap_flag) {
+        priv.cam_snap_flag = false;
 
-            _capture_image(*priv.camera, img);
-            delete img;
+        image::Format fmt = image::Format::FMT_YVU420SP;
+        image::Image *img = new image::Image(f.w, f.h, fmt, (uint8_t *)f.data, f.len, true);
+        if (!img) {
+            printf("create image failed!\r\n");
+            _mmf_vi_frame_free(ch, &frame);
+            return -1;
         }
 
-        bool found_venc_stream = false;
+        focus_x = f.w/2;
+        focus_y = f.h/2;
+        get_clarity(true);
+        // get_clarity(false);
 
-        // Pop stream from encoder
-        mmf_stream_t venc_stream = {0};
-        if (0 == mmf_venc_pop(enc_ch, &venc_stream)) {
-            // for (int i = 0; i < venc_stream.count; i++) {
-            //     printf("venc stream[%d]: data:%p size:%d\r\n", i, venc_stream.data[i], venc_stream.data_size[i]);
-            // }
+        _capture_image(*priv.camera, img);
+        delete img;
+    }
 
-            if (venc_stream.count > 0) {
-                found_venc_stream = true;
-            }
+    bool found_venc_stream = false;
+
+    // Pop stream from encoder
+    mmf_stream_t venc_stream = {0};
+    if (0 == mmf_venc_pop(enc_ch, &venc_stream)) {
+        // for (int i = 0; i < venc_stream.count; i++) {
+        //     printf("venc stream[%d]: data:%p size:%d\r\n", i, venc_stream.data[i], venc_stream.data_size[i]);
+        // }
+
+        if (venc_stream.count > 0) {
+            found_venc_stream = true;
         }
+    }
 
-        if (priv.ffmpeg_packer && priv.ffmpeg_packer->is_opened()) {
-            double temp_us = priv.ffmpeg_packer->video_pts_to_us(priv.video_pts);
-            priv.audio_pts = priv.ffmpeg_packer->audio_us_to_pts(temp_us);
-        }
+    if (priv.ffmpeg_packer && priv.ffmpeg_packer->is_opened()) {
+        double temp_us = priv.ffmpeg_packer->video_pts_to_us(priv.video_pts);
+        priv.audio_pts = priv.ffmpeg_packer->audio_us_to_pts(temp_us);
+    }
 
-        if (found_venc_stream) {
-            if (priv.ffmpeg_packer) {
-                if (!priv.ffmpeg_packer->is_opened()) {
-                    if (venc_stream.count > 1) {
-                        int sps_pps_size = venc_stream.data_size[0] + venc_stream.data_size[1];
-                        uint8_t *sps_pps = (uint8_t *)malloc(sps_pps_size);
-                        if (sps_pps) {
-                            memcpy(sps_pps, venc_stream.data[0], venc_stream.data_size[0]);
-                            memcpy(sps_pps + venc_stream.data_size[0], venc_stream.data[1], venc_stream.data_size[1]);
+    if (found_venc_stream) {
+        if (priv.ffmpeg_packer) {
+            if (!priv.ffmpeg_packer->is_opened()) {
+                if (venc_stream.count > 1) {
+                    int sps_pps_size = venc_stream.data_size[0] + venc_stream.data_size[1];
+                    uint8_t *sps_pps = (uint8_t *)malloc(sps_pps_size);
+                    if (sps_pps) {
+                        memcpy(sps_pps, venc_stream.data[0], venc_stream.data_size[0]);
+                        memcpy(sps_pps + venc_stream.data_size[0], venc_stream.data[1], venc_stream.data_size[1]);
 
-                            if (0 == priv.ffmpeg_packer->config_sps_pps(sps_pps, sps_pps_size)) {
-                                while (0 != priv.ffmpeg_packer->open() && !app::need_exit()) {
-                                    time::sleep_ms(500);
-                                    log::info("Can't open ffmpeg, retry again..");
-                                }
-
-                                if (priv.audio_recorder) {
-                                    priv.audio_recorder->reset();
-                                }
-
-                                priv.last_read_pcm_ms = 0;
-                                priv.last_read_cam_ms = 0;
-                                priv.video_pts = 0;
-                                priv.audio_pts = 0;
+                        if (0 == priv.ffmpeg_packer->config_sps_pps(sps_pps, sps_pps_size)) {
+                            while (0 != priv.ffmpeg_packer->open() && !app::need_exit()) {
+                                time::sleep_ms(500);
+                                log::info("Can't open ffmpeg, retry again..");
                             }
-                            free(sps_pps);
+
+                            if (priv.audio_recorder) {
+                                priv.audio_recorder->reset();
+                            }
+
+                            priv.last_read_pcm_ms = 0;
+                            priv.last_read_cam_ms = 0;
+                            priv.video_pts = 0;
+                            priv.audio_pts = 0;
                         }
+                        free(sps_pps);
                     }
                 }
             }
+        }
 
-            if (priv.ffmpeg_packer->is_opened()) {
-                uint8_t *data = NULL;
-                int data_size = 0;
-                if (venc_stream.count == 1) {
-                    data = venc_stream.data[0];
-                    data_size = venc_stream.data_size[0];
-                } else if (venc_stream.count > 1) {
-                    data = venc_stream.data[2];
-                    data_size = venc_stream.data_size[2];
-                }
+        if (priv.ffmpeg_packer->is_opened()) {
+            uint8_t *data = NULL;
+            int data_size = 0;
+            if (venc_stream.count == 1) {
+                data = venc_stream.data[0];
+                data_size = venc_stream.data_size[0];
+            } else if (venc_stream.count > 1) {
+                data = venc_stream.data[2];
+                data_size = venc_stream.data_size[2];
+            }
 
-                if (data_size) {
-                    if (priv.last_read_cam_ms == 0) {
-                        priv.video_pts = 0;
-                        priv.last_read_cam_ms = time::ticks_ms();
+            if (data_size) {
+                if (priv.last_read_cam_ms == 0) {
+                    priv.video_pts = 0;
+                    priv.last_read_cam_ms = time::ticks_ms();
+                } else {
+                    if (!timelapse_record_is_enable()) {
+                        priv.video_pts += priv.ffmpeg_packer->video_us_to_pts((time::ticks_ms() - priv.last_read_cam_ms) * 1000);
                     } else {
-                        if (!timelapse_record_is_enable()) {
-                            priv.video_pts += priv.ffmpeg_packer->video_us_to_pts((time::ticks_ms() - priv.last_read_cam_ms) * 1000);
-                        } else {
-                            priv.video_pts += priv.ffmpeg_packer->video_us_to_pts(1000000 / priv.camera_fps);
-                        }
-                        priv.last_read_cam_ms = time::ticks_ms();
+                        priv.video_pts += priv.ffmpeg_packer->video_us_to_pts(1000000 / priv.camera_fps);
                     }
-                    // log::info("[VIDEO] pts:%d  pts %f s", priv.video_pts, priv.ffmpeg_packer->video_pts_to_us(priv.video_pts) / 1000000);
-                    if (err::ERR_NONE != priv.ffmpeg_packer->push(data, data_size, priv.video_pts)) {
-                        log::error("ffmpeg push failed!");
-                    }
+                    priv.last_read_cam_ms = time::ticks_ms();
+                }
+                // log::info("[VIDEO] pts:%d  pts %f s", priv.video_pts, priv.ffmpeg_packer->video_pts_to_us(priv.video_pts) / 1000000);
+                if (err::ERR_NONE != priv.ffmpeg_packer->push(data, data_size, priv.video_pts)) {
+                    log::error("ffmpeg push failed!");
                 }
             }
-            mmf_venc_free(enc_ch);
+        }
+        mmf_venc_free(enc_ch);
+    }
+
+    if (priv.audio_en && priv.ffmpeg_packer->is_opened()) { 
+        printf("Audio is enabled and ffmpeg_packer is opened.\n"); // Check if audio is enabled and ffmpeg_packer is opened.
+
+        int frame_size_per_second = priv.ffmpeg_packer->get_audio_frame_size_per_second();
+        printf("Frame size per second: %d\n", frame_size_per_second); // Output the frame size per second.
+
+        uint64_t loop_ms = 0;
+        int read_pcm_size = 0;
+
+        if (priv.last_read_pcm_ms == 0) {
+            loop_ms = 30;
+            read_pcm_size = frame_size_per_second * loop_ms * 1.5 / 1000;
+            priv.audio_pts = 0;
+            priv.last_read_pcm_ms = time::ticks_ms();
+            printf("First read: loop_ms = %llu, read_pcm_size = %d\n", loop_ms, read_pcm_size); // Debug first read condition.
+        } else {
+            loop_ms = time::ticks_ms() - priv.last_read_pcm_ms;
+            priv.last_read_pcm_ms = time::ticks_ms();
+            printf("Subsequent read: loop_ms = %llu\n", loop_ms); // Debug subsequent read condition.
+
+            read_pcm_size = frame_size_per_second * loop_ms * 1.5 / 1000;
+            priv.audio_pts += priv.ffmpeg_packer->audio_us_to_pts(loop_ms * 1000);
+            printf("read_pcm_size = %d, audio_pts = %llu\n", read_pcm_size, priv.audio_pts); // Debug PCM size and audio PTS.
         }
 
-        if (priv.audio_en && priv.ffmpeg_packer->is_opened()) {
-            int frame_size_per_second = priv.ffmpeg_packer->get_audio_frame_size_per_second();
-            uint64_t loop_ms = 0;
-            int read_pcm_size = 0;
-            if (priv.last_read_pcm_ms == 0) {
-                loop_ms = 30;
-                read_pcm_size = frame_size_per_second * loop_ms * 1.5 / 1000;
-                priv.audio_pts = 0;
-                priv.last_read_pcm_ms = time::ticks_ms();
-            } else {
-                loop_ms = time::ticks_ms() - priv.last_read_pcm_ms;
-                priv.last_read_pcm_ms = time::ticks_ms();
+        auto remain_frame_count = priv.audio_recorder->get_remaining_frames();
+        printf("Remaining frames: %llu\n", remain_frame_count); // Output the remaining frames.
 
-                read_pcm_size = frame_size_per_second * loop_ms * 1.5 / 1000;
-                priv.audio_pts += priv.ffmpeg_packer->audio_us_to_pts(loop_ms * 1000);
-            }
+        auto bytes_per_frame = priv.audio_recorder->frame_size();
+        printf("Bytes per frame: %d\n", bytes_per_frame); // Output the bytes per frame.
 
-            auto remain_frame_count = priv.audio_recorder->get_remaining_frames();
-            auto bytes_per_frame = priv.audio_recorder->frame_size();
-            auto remain_frame_bytes = remain_frame_count * bytes_per_frame;
-            read_pcm_size = (read_pcm_size + 1023) & ~1023;
-            if (read_pcm_size > remain_frame_bytes) {
-                read_pcm_size = remain_frame_bytes;
-            }
+        auto remain_frame_bytes = remain_frame_count * bytes_per_frame;
+        printf("Remaining frame bytes: %llu\n", remain_frame_bytes); // Output the remaining frame bytes.
 
-            Bytes *pcm_data = priv.audio_recorder->record_bytes(read_pcm_size);
-            if (pcm_data) {
-                if (pcm_data->data_len > 0) {
-                    // log::info("[AUDIO] pts:%d  pts %f s", priv.audio_pts, priv.ffmpeg_packer->audio_pts_to_us(priv.audio_pts) / 1000000);
-                    if (err::ERR_NONE != priv.ffmpeg_packer->push(pcm_data->data, pcm_data->data_len, priv.audio_pts, true)) {
-                        log::error("ffmpeg push failed!");
-                    }
+        read_pcm_size = (read_pcm_size + 1023) & ~1023;
+        printf("Adjusted read_pcm_size: %d\n", read_pcm_size); // Debug adjusted PCM size.
+
+        if (read_pcm_size > remain_frame_bytes) {
+            read_pcm_size = remain_frame_bytes;
+            printf("Read PCM size exceeded remaining bytes, adjusted to: %d\n", read_pcm_size); // Debug if adjustment happens.
+        }
+
+        Bytes *pcm_data = priv.audio_recorder->record_bytes(read_pcm_size);
+        if (pcm_data && pcm_data->data) {
+            printf("Recorded PCM data: data_len = %d\n", pcm_data->data_len); // Debug PCM data length.
+            printf("pcm_data->data = %p, data_len = %d\n", pcm_data->data, pcm_data->data_len);
+            if (pcm_data->data_len > 0) {
+                // log::info("[AUDIO] pts:%d  pts %f s", priv.audio_pts, priv.ffmpeg_packer->audio_pts_to_us(priv.audio_pts) / 1000000);
+                if (err::ERR_NONE != priv.ffmpeg_packer->push(pcm_data->data, pcm_data->data_len, priv.audio_pts, true)) {
+                    log::error("ffmpeg push failed!");
+                    printf("ffmpeg push failed!\n"); // Debug ffmpeg push failure.
+                } else {
+                    printf("ffmpeg push succeeded.\n"); // Debug ffmpeg push success.
                 }
-                delete pcm_data;
             }
+            delete pcm_data;
+            printf("PCM data deleted.\n"); // Debug PCM data deletion.
+        } else {
+            printf("Failed to record PCM data.\n"); // Debug PCM data recording failure.
+        }
+    }
+
+
+    if (false && priv.audio_en && priv.ffmpeg_packer->is_opened()) {
+        int frame_size_per_second = priv.ffmpeg_packer->get_audio_frame_size_per_second();
+        uint64_t loop_ms = 0;
+        int read_pcm_size = 0;
+        if (priv.last_read_pcm_ms == 0) {
+            loop_ms = 30;
+            read_pcm_size = frame_size_per_second * loop_ms * 1.5 / 1000;
+            priv.audio_pts = 0;
+            priv.last_read_pcm_ms = time::ticks_ms();
+        } else {
+            loop_ms = time::ticks_ms() - priv.last_read_pcm_ms;
+            priv.last_read_pcm_ms = time::ticks_ms();
+
+            read_pcm_size = frame_size_per_second * loop_ms * 1.5 / 1000;
+            priv.audio_pts += priv.ffmpeg_packer->audio_us_to_pts(loop_ms * 1000);
         }
 
-        if (priv.video_start_flag && priv.video_prepare_is_ok) {
-            uint64_t record_time = time::ticks_ms() - priv.video_start_ms;
+        auto remain_frame_count = priv.audio_recorder->get_remaining_frames();
+        auto bytes_per_frame = priv.audio_recorder->frame_size();
+        auto remain_frame_bytes = remain_frame_count * bytes_per_frame;
+        read_pcm_size = (read_pcm_size + 1023) & ~1023;
+        if (read_pcm_size > remain_frame_bytes) {
+            read_pcm_size = remain_frame_bytes;
+        }
 
-            if (!timelapse_record_is_enable()) {
+        Bytes *pcm_data = priv.audio_recorder->record_bytes(read_pcm_size);
+        if (pcm_data) {
+            if (pcm_data->data_len > 0) {
+                // log::info("[AUDIO] pts:%d  pts %f s", priv.audio_pts, priv.ffmpeg_packer->audio_pts_to_us(priv.audio_pts) / 1000000);
+                if (err::ERR_NONE != priv.ffmpeg_packer->push(pcm_data->data, pcm_data->data_len, priv.audio_pts, true)) {
+                    log::error("ffmpeg push failed!");
+                }
+            }
+            delete pcm_data;
+        }
+    }
+
+    if (priv.video_start_flag && priv.video_prepare_is_ok) {
+        uint64_t record_time = time::ticks_ms() - priv.video_start_ms;
+
+        if (!timelapse_record_is_enable()) {
+            mmf_venc_push2(enc_ch, frame);
+        } else {
+            if (timelapse_record_is_auto()) {
                 mmf_venc_push2(enc_ch, frame);
             } else {
-                if (timelapse_record_is_auto()) {
+                if (time::ticks_ms() - priv.last_push_venc_ms > (uint64_t)priv.timelapse_s * 1000) {
                     mmf_venc_push2(enc_ch, frame);
-                } else {
-                    if (time::ticks_ms() - priv.last_push_venc_ms > (uint64_t)priv.timelapse_s * 1000) {
-                        mmf_venc_push2(enc_ch, frame);
-                        priv.last_push_venc_ms = time::ticks_ms();
-                    }
+                    priv.last_push_venc_ms = time::ticks_ms();
                 }
             }
-
-            ui_set_record_time(record_time);
         }
-        priv.loop_last_frame = frame;
-    } else {
-        frame = priv.loop_last_frame;
+
+        ui_set_record_time(record_time);
     }
+    priv.loop_last_frame = frame;
+} else {
+    frame = priv.loop_last_frame;
+}
 
-    // Push frame to vo
-    mmf_vo_frame_push2(0, 0, 2, frame);
+// Push frame to vo
+mmf_vo_frame_push2(0, 0, 2, frame);
 
-    // Run ui rocess, must run after disp.show
-    lv_timer_handler();
+// Run ui rocess, must run after disp.show
+lv_timer_handler();
 
-    app_loop(*priv.camera, *priv.disp, priv.other_disp);
+app_loop(*priv.camera, *priv.disp, priv.other_disp);
 
-    if (priv.show_timestamp_enable) {
-        uint64_t curr_ms = time::ticks_ms();
-        if (curr_ms - priv.last_update_region_ms > 1000) {
-            if (priv.region) {
-                auto img = priv.region->get_canvas();
-                auto datetime = time::now();
-                auto str1 = datetime->strftime("%Y/%m/%d %H:%M:%S");
-                delete datetime;
-                img->draw_string(0, 0, str1, image::COLOR_WHITE);
-                priv.region->update_canvas();
-                // log::info("use:%lld str:%s", time::ticks_ms() - curr_ms, str1.c_str());
-            }
-            priv.last_update_region_ms = curr_ms;
+if (priv.show_timestamp_enable) {
+    uint64_t curr_ms = time::ticks_ms();
+    if (curr_ms - priv.last_update_region_ms > 1000) {
+        if (priv.region) {
+            auto img = priv.region->get_canvas();
+            auto datetime = time::now();
+            auto str1 = datetime->strftime("%Y/%m/%d %H:%M:%S");
+            delete datetime;
+            img->draw_string(0, 0, str1, image::COLOR_WHITE);
+            priv.region->update_canvas();
+            // log::info("use:%lld str:%s", time::ticks_ms() - curr_ms, str1.c_str());
         }
+        priv.last_update_region_ms = curr_ms;
     }
+}
 
-    // printf("loop time: %ld ms\n", time::ticks_ms() - priv.loop_last_ms);
-    // priv.loop_last_ms = time::ticks_ms();
-    return 0;
+// printf("loop time: %ld ms\n", time::ticks_ms() - priv.loop_last_ms);
+// priv.loop_last_ms = time::ticks_ms();
+return 0;
 }
 
 int app_init(camera::Camera &cam)
 {
-	sys::register_default_signal_handle();
+    sys::register_default_signal_handle();
 
-	printf("App Init\n");
+    printf("App Init\n");
 
-	init_key();
+    init_key();
+    setup_keys();
 
     ui_all_screen_init();
     ui_camera_config_t ui_camera_cfg;

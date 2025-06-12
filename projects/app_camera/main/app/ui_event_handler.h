@@ -8,6 +8,12 @@ extern "C" {
 #include "lvgl.h"
 #include "stdint.h"
 
+
+
+void trigger_left_button(void);
+void trigger_right_button(void);
+void trigger_user_button(void);
+
 /**
  * 0: pic
  * 1: video
