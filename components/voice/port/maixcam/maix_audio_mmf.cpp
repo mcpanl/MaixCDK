@@ -12,8 +12,55 @@
 #include <sys/wait.h>
 #include "tinyalsa/pcm.h"
 #include "tinyalsa/mixer.h"
+#include <regex>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <string>
+#include <ctime>
+#include <iostream>
+
 
 using namespace maix;
+
+void find_max_record_device(int &card, int &device)
+{
+    FILE* pipe = popen("arecord -l", "r");
+    if (!pipe) {
+        std::cerr << "Failed to execute 'arecord -l'" << std::endl;
+        return;
+    }
+
+    std::regex regex_line(R"(card (\d+): .*, device (\d+):)");
+    char buffer[256];
+    int max_card = -1, max_device = -1;
+
+    std::cout << "[Debug] arecord -l output:" << std::endl;
+
+    while (fgets(buffer, sizeof(buffer), pipe)) {
+        std::cout << buffer;  // 原始输出
+        std::cmatch match;
+        if (std::regex_search(buffer, match, regex_line)) {
+            int c = std::stoi(match[1].str());
+            int d = std::stoi(match[2].str());
+            std::cout << "  [Matched] card: " << c << ", device: " << d << std::endl;
+            if (c > max_card || (c == max_card && d > max_device)) {
+                max_card = c;
+                max_device = d;
+            }
+        }
+    }
+
+    pclose(pipe);
+
+    if (max_card >= 0) {
+        card = max_card;
+        device = max_device;
+        std::cout << "[Selected] card: " << card << ", device: " << device << std::endl;
+    } else {
+        std::cerr << "[Error] No valid capture devices found." << std::endl;
+    }
+}
 
 namespace maix::audio
 {
@@ -210,7 +257,7 @@ namespace maix::audio
             }
         }
 
-        system("arecord -q -r 16000 -f S16_LE -c 1 -s 1024 /dev/null");
+//        system("arecord -q -r 16000 -f S16_LE -c 1 -s 1024 /dev/null");
 
         auto tinyalsa_format = to_tinyalsa_format(format);
         audio_param_t *param = new audio_param_t();
@@ -229,10 +276,38 @@ namespace maix::audio
         param->device = 0;
         param->path = path;
         param->block = block;
-        uint32_t pcm_flag = PCM_IN | (!param->block ? PCM_NONBLOCK : 0);
+
+// 自动选择最大编号的设备
+int selected_card = 0, selected_device = 0;
+find_max_record_device(selected_card, selected_device);
+std::cout << "[Recorder] Using card: " << selected_card << ", device: " << selected_device << std::endl;
+param->card = selected_card;
+param->device = selected_device;
+
+if(selected_card > 0)
+{
+	printf("[Recorder] init with usb mic! channels=1, rate=48000, block=false\n");
+	config.channels = 1;
+	config.rate = 48000;
+	config.format = PCM_FORMAT_S16_LE;
+	param->block = false;
+}
+
+char test_cmd[256];
+snprintf(test_cmd, sizeof(test_cmd),
+         "arecord -q -D plughw:%d,%d -r 16000 -f S16_LE -c 1 -s 1024 /dev/null",
+         selected_card, selected_device);
+
+std::cout << "[Recorder] Testing device with command: " << test_cmd << std::endl;
+int ret = system(test_cmd);
+if (ret != 0) {
+    std::cerr << "[Recorder] Warning: arecord test command failed with code " << ret << std::endl;
+}
+
+	uint32_t pcm_flag = PCM_IN | (!param->block ? PCM_NONBLOCK : 0);
 #ifdef PLATFORM_MAIXCAM
         // Fix segment error when start pcm with channel=2 for the first time.
-        if (channel != 1 || sample_rate != 16000 || tinyalsa_format != PCM_FORMAT_S16_LE) {
+        if (selected_card == 0 && (channel != 1 || sample_rate != 16000 || tinyalsa_format != PCM_FORMAT_S16_LE)) {
             config.channels = 1;
             config.rate = 16000;
             config.format = PCM_FORMAT_S16_LE;
@@ -241,7 +316,7 @@ namespace maix::audio
                 err::check_null_raise(param->pcm, "failed to allocate memory for PCM");
             } else if (!pcm_is_ready(param->pcm)){
                 pcm_close(param->pcm);
-                err::check_raise(err::ERR_RUNTIME, "failed to open PCM");
+                err::check_raise(err::ERR_RUNTIME, "failed to open PCM#1");
             }
             pcm_prepare(param->pcm);
             pcm_start(param->pcm);
@@ -256,7 +331,7 @@ namespace maix::audio
             err::check_null_raise(param->pcm, "failed to allocate memory for PCM");
         } else if (!pcm_is_ready(param->pcm)){
             pcm_close(param->pcm);
-            err::check_raise(err::ERR_RUNTIME, "failed to open PCM");
+            err::check_raise(err::ERR_RUNTIME, "failed to open PCM#2");
         }
         if (param->block) {
             pcm_prepare(param->pcm);
@@ -642,7 +717,7 @@ namespace maix::audio
 
 #ifdef PLATFORM_MAIXCAM
         // Fix segment error when start pcm with samplerate=44100 for the first time.
-        if (channel != 1 || sample_rate != 16000 || tinyalsa_format != PCM_FORMAT_S16_LE) {
+        if (false && (channel != 1 || sample_rate != 16000 || tinyalsa_format != PCM_FORMAT_S16_LE)) {
             config.channels = 1;
             config.rate = 16000;
             config.format = PCM_FORMAT_S16_LE;
