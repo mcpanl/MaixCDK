@@ -119,10 +119,10 @@ static void main_gui(Maix_GUI_Activity *activity, void *obj, Maix_Activity_MSG *
         lv_obj_set_layout(btn, LV_LAYOUT_FLEX);
         lv_obj_set_flex_flow(btn, LV_FLEX_FLOW_ROW);
         lv_obj_set_flex_align(btn, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-        lv_obj_set_style_bg_color(btn, theme_btn_color, LV_PART_MAIN);
+        lv_obj_set_style_bg_color(btn, lv_color_hex(0x191919), LV_PART_MAIN);
         lv_obj_set_style_shadow_width(btn, 0, LV_PART_MAIN);
         lv_obj_set_size(btn, lv_pct(70), lv_pct(30));
-        lv_obj_set_style_radius(btn, lv_pct(100), LV_PART_MAIN);
+        lv_obj_set_style_radius(btn, 26, LV_PART_MAIN);
         lv_obj_add_event_cb(btn, btn_event_cb, LV_EVENT_CLICKED, (void*)i);
         // icon
         std::string path = fs::abspath(app::get_app_path()) + "/assets/" + icons[i];
