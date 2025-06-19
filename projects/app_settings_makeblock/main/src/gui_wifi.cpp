@@ -494,7 +494,7 @@ void on_wifi_gui(Maix_GUI_Activity *activity, void *obj, Maix_Activity_MSG *msg,
         valid_aps.clear();
         for (auto &ap : all_aps)
         {
-            if (ap.ssid.size() > 0)
+            if (ap.ssid.size() > 0 && ap.frequency < 5000)
             {
                 valid_aps.push_back(ap);
             }
