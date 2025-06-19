@@ -98,6 +98,8 @@ static void touch_start_video_stop(void);
 
 int g_camera_mode = 0;
 
+int g_has_small_image = 0;
+
 static lv_obj_t *g_toast = NULL;
 
 
@@ -502,6 +504,13 @@ void event_touch_small_img_cb(lv_event_t * e)
     DEBUG_EN(0);
     lv_event_code_t code = lv_event_get_code(e);
     if (code == LV_EVENT_CLICKED) {
+
+        if (g_has_small_image == 0) {
+            show_toast("No photo taken yet.", 2000);
+            printf("not has small image!\n");
+            return;
+        }
+    
         DEBUG_PRT("View big photo\n");
         lv_obj_remove_flag(g_big_img, LV_OBJ_FLAG_HIDDEN);
         priv.view_photo_flag = 1;
@@ -1665,6 +1674,8 @@ void ui_update_small_img(void *data, int data_size)
         printf("you need input ARGB8888 image, width: %d height: %d\n", img_dsc->header.w, img_dsc->header.h);
         return;
     }
+    
+    g_has_small_image = 1;
 
     memcpy((void *)img_dsc->data, data, data_size);
     lv_obj_update_layout(g_small_img);
