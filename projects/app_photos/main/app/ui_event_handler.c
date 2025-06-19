@@ -146,7 +146,8 @@ void event_touch_cancel_btn_cb(lv_event_t * e)
 
 void event_touch_big_image_cb(lv_event_t * e)
 {
-    DEBUG_EN(0);
+    DEBUG_EN(1);
+
     lv_event_code_t code = lv_event_get_code(e);
     if (code == LV_EVENT_SHORT_CLICKED) {
         ui_big_photo_info_t *data = (ui_big_photo_info_t *)lv_event_get_user_data(e);
@@ -198,7 +199,7 @@ static void confirm_btn_event_cb(lv_event_t * e) {
 }
 
 static void cancel_btn_event_cb(lv_event_t * e) {
-	lv_obj_remove_flag(g_lower_screen, LV_OBJ_FLAG_HIDDEN);
+	//lv_obj_remove_flag(g_lower_screen, LV_OBJ_FLAG_HIDDEN);
     lv_obj_del(lv_obj_get_parent(lv_event_get_target(e))); // 删除弹窗
 }
 
