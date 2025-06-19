@@ -1782,6 +1782,7 @@ void ui_show_center_image(uint8_t *data, int data_size, int width, int height)
 
 static void screen_big_image(void)
 {
+    printf("BIG IMAGE\n");
     lv_obj_t *scr = lv_obj_create(lv_scr_act());
     lv_obj_set_size(scr, lv_pct(100), lv_pct(100));
     lv_obj_set_style_border_side(scr, LV_BORDER_SIDE_NONE, 0);

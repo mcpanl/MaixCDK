@@ -19,6 +19,9 @@ void trigger_user_button(void);
  * 1: video
  */
 extern int g_camera_mode;
+
+extern int g_has_small_image;
+
 void touch_start_video(int flag);
 void touch_start_pic();
 
