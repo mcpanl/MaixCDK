@@ -16,8 +16,23 @@
 #include <fcntl.h>
 #include <time.h>
 
+
+#include <vector>
+#include <mutex>
+#include <map>
+#include <set>
+#include <thread>
+#include <cstring>
+#include <netinet/in.h>
+#include <functional>
+#include <arpa/inet.h>
+#include <sys/socket.h>
+#include <sys/select.h>
+
 using namespace maix;
 
+
+#define PORT 8090
 #define ENABLE_RTSP 0
 
 static struct {
@@ -46,6 +61,171 @@ static struct {
     bool audio_en;
 } priv;
 
+
+
+class TcpServer {
+public:
+    TcpServer() : server_fd(-1), running(false) {}
+
+    ~TcpServer() {
+        stop();
+    }
+
+    void start() {
+        running = true;
+        server_thread = std::thread(&TcpServer::run, this);
+    }
+
+    void stop() {
+        running = false;
+        if (server_fd != -1) {
+            close(server_fd);
+            server_fd = -1;
+        }
+
+        {
+            std::lock_guard<std::mutex> lock(client_mutex);
+            for (int fd : client_fds) {
+                close(fd);
+            }
+            client_fds.clear();
+        }
+
+#if 0
+        if (server_thread.joinable()) {
+            server_thread.join();
+        }
+#endif
+    }
+
+    void setMessageCallback(std::function<void(int, const std::vector<char>&)> callback) {
+        onMessage = callback;
+    }
+
+    void broadcastText(const std::string& message) {
+        std::vector<char> data(message.begin(), message.end());
+        broadcastBinary(data);
+    }
+
+    void broadcastBinary(const std::vector<char>& data) {
+        std::lock_guard<std::mutex> lock(client_mutex);
+        for (int fd : client_fds) {
+            send(fd, data.data(), data.size(), 0);
+        }
+    }
+
+private:
+    int server_fd;
+    std::thread server_thread;
+    std::set<int> client_fds;
+    std::mutex client_mutex;
+    bool running;
+
+    std::function<void(int, const std::vector<char>&)> onMessage;
+
+    void setNonBlocking(int fd) {
+        int flags = fcntl(fd, F_GETFL, 0);
+        fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+    }
+
+    void run() {
+        server_fd = socket(AF_INET, SOCK_STREAM, 0);
+        if (server_fd < 0) {
+            std::cerr << "Socket creation failed\n";
+            return;
+        }
+
+        int opt = 1;
+        setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+
+        sockaddr_in address{};
+        address.sin_family = AF_INET;
+        address.sin_addr.s_addr = INADDR_ANY;
+        address.sin_port = htons(PORT);
+
+        if (bind(server_fd, (sockaddr*)&address, sizeof(address)) < 0) {
+            std::cerr << "Bind failed\n";
+            close(server_fd);
+            return;
+        }
+
+        if (listen(server_fd, SOMAXCONN) < 0) {
+            std::cerr << "Listen failed\n";
+            close(server_fd);
+            return;
+        }
+
+        setNonBlocking(server_fd);
+
+        std::cout << "Server listening on port " << PORT << "...\n";
+
+        while (running && !app::need_exit()) {
+            fd_set read_fds;
+            FD_ZERO(&read_fds);
+            FD_SET(server_fd, &read_fds);
+            int max_fd = server_fd;
+
+            {
+                std::lock_guard<std::mutex> lock(client_mutex);
+                for (int fd : client_fds) {
+                    FD_SET(fd, &read_fds);
+                    if (fd > max_fd) max_fd = fd;
+                }
+            }
+
+            struct timeval timeout{};
+            timeout.tv_sec = 1;
+            timeout.tv_usec = 0;
+
+            int activity = select(max_fd + 1, &read_fds, nullptr, nullptr, &timeout);
+            if (activity < 0 && running) {
+                std::cerr << "select error\n";
+                break;
+            }
+
+            // New connection
+            if (FD_ISSET(server_fd, &read_fds)) {
+                sockaddr_in client_addr{};
+                socklen_t client_len = sizeof(client_addr);
+                int client_fd = accept(server_fd, (sockaddr*)&client_addr, &client_len);
+                if (client_fd >= 0) {
+                    setNonBlocking(client_fd);
+                    std::lock_guard<std::mutex> lock(client_mutex);
+                    client_fds.insert(client_fd);
+                    std::cout << "New client connected: " << client_fd << "\n";
+                }
+            }
+
+            // Read from clients
+            std::vector<int> disconnected;
+            {
+                std::lock_guard<std::mutex> lock(client_mutex);
+                for (int fd : client_fds) {
+                    if (FD_ISSET(fd, &read_fds)) {
+                        char buffer[1024];
+                        ssize_t bytes_read = recv(fd, buffer, sizeof(buffer), 0);
+                        if (bytes_read <= 0) {
+                            disconnected.push_back(fd);
+                        } else {
+                            std::vector<char> data(buffer, buffer + bytes_read);
+                            if (onMessage) {
+                                onMessage(fd, data);
+                            }
+                        }
+                    }
+                }
+
+                for (int fd : disconnected) {
+                    std::cout << "Client disconnected: " << fd << "\n";
+                    close(fd);
+                    client_fds.erase(fd);
+                }
+            }
+        }
+
+        std::cout << "Server exiting select loop.\n";
+    }
+};
 
 
 const char* get_current_time_string() {
@@ -120,6 +300,15 @@ int _main(int argc, char* argv[])
 {
     mmf_deinit_v2(true);
 
+
+    TcpServer server;
+
+    server.setMessageCallback([](int client_fd, const std::vector<char>& data) {
+        std::string msg(data.begin(), data.end());
+        std::cout << "Received from " << client_fd << ": " << msg << std::endl;
+    });
+
+    server.start();
 
     int cam_w = 1280;
     int cam_h = 720;
@@ -300,10 +489,10 @@ int _main(int argc, char* argv[])
 
 
             if (priv.audio_en && priv.ffmpeg_packer->is_opened()) { 
-                printf("Audio is enabled and ffmpeg_packer is opened.\n"); // Check if audio is enabled and ffmpeg_packer is opened.
+                //printf("Audio is enabled and ffmpeg_packer is opened.\n"); // Check if audio is enabled and ffmpeg_packer is opened.
 
                 int frame_size_per_second = priv.ffmpeg_packer->get_audio_frame_size_per_second();
-                printf("Frame size per second: %d\n", frame_size_per_second); // Output the frame size per second.
+                //printf("Frame size per second: %d\n", frame_size_per_second); // Output the frame size per second.
 
                 uint64_t loop_ms = 0;
                 int read_pcm_size = 0;
@@ -313,49 +502,49 @@ int _main(int argc, char* argv[])
                     read_pcm_size = frame_size_per_second * loop_ms * 1.5 / 1000;
                     priv.audio_pts = 0;
                     priv.last_read_pcm_ms = time::ticks_ms();
-                    printf("First read: loop_ms = %llu, read_pcm_size = %d\n", loop_ms, read_pcm_size); // Debug first read condition.
+                    //printf("First read: loop_ms = %llu, read_pcm_size = %d\n", loop_ms, read_pcm_size); // Debug first read condition.
                 } else {
                     loop_ms = time::ticks_ms() - priv.last_read_pcm_ms;
                     priv.last_read_pcm_ms = time::ticks_ms();
-                    printf("Subsequent read: loop_ms = %llu\n", loop_ms); // Debug subsequent read condition.
+                    //printf("Subsequent read: loop_ms = %llu\n", loop_ms); // Debug subsequent read condition.
 
                     read_pcm_size = frame_size_per_second * loop_ms * 1.5 / 1000;
                     priv.audio_pts += priv.ffmpeg_packer->audio_us_to_pts(loop_ms * 1000);
-                    printf("read_pcm_size = %d, audio_pts = %llu\n", read_pcm_size, priv.audio_pts); // Debug PCM size and audio PTS.
+                    //printf("read_pcm_size = %d, audio_pts = %llu\n", read_pcm_size, priv.audio_pts); // Debug PCM size and audio PTS.
                 }
 
                 auto remain_frame_count = priv.audio_recorder->get_remaining_frames();
-                printf("Remaining frames: %llu\n", remain_frame_count); // Output the remaining frames.
+                //printf("Remaining frames: %llu\n", remain_frame_count); // Output the remaining frames.
 
                 auto bytes_per_frame = priv.audio_recorder->frame_size();
-                printf("Bytes per frame: %d\n", bytes_per_frame); // Output the bytes per frame.
+                //printf("Bytes per frame: %d\n", bytes_per_frame); // Output the bytes per frame.
 
                 auto remain_frame_bytes = remain_frame_count * bytes_per_frame;
-                printf("Remaining frame bytes: %llu\n", remain_frame_bytes); // Output the remaining frame bytes.
+                //printf("Remaining frame bytes: %llu\n", remain_frame_bytes); // Output the remaining frame bytes.
 
                 read_pcm_size = (read_pcm_size + 1023) & ~1023;
-                printf("Adjusted read_pcm_size: %d\n", read_pcm_size); // Debug adjusted PCM size.
+                //printf("Adjusted read_pcm_size: %d\n", read_pcm_size); // Debug adjusted PCM size.
 
                 if (read_pcm_size > remain_frame_bytes) {
                     read_pcm_size = remain_frame_bytes;
-                    printf("Read PCM size exceeded remaining bytes, adjusted to: %d\n", read_pcm_size); // Debug if adjustment happens.
+                    //printf("Read PCM size exceeded remaining bytes, adjusted to: %d\n", read_pcm_size); // Debug if adjustment happens.
                 }
 
                 Bytes *pcm_data = priv.audio_recorder->record_bytes(read_pcm_size);
                 if (pcm_data && pcm_data->data) {
-                    printf("Recorded PCM data: data_len = %d\n", pcm_data->data_len); // Debug PCM data length.
-                    printf("pcm_data->data = %p, data_len = %d\n", pcm_data->data, pcm_data->data_len);
+                    //printf("Recorded PCM data: data_len = %d\n", pcm_data->data_len); // Debug PCM data length.
+                    //printf("pcm_data->data = %p, data_len = %d\n", pcm_data->data, pcm_data->data_len);
                     if (pcm_data->data_len > 0) {
                         // log::info("[AUDIO] pts:%d  pts %f s", priv.audio_pts, priv.ffmpeg_packer->audio_pts_to_us(priv.audio_pts) / 1000000);
                         if (err::ERR_NONE != priv.ffmpeg_packer->push(pcm_data->data, pcm_data->data_len, priv.audio_pts, true)) {
                             log::error("ffmpeg push failed!");
                             printf("ffmpeg push failed!\n"); // Debug ffmpeg push failure.
                         } else {
-                            printf("ffmpeg push succeeded.\n"); // Debug ffmpeg push success.
+                           // printf("ffmpeg push succeeded.\n"); // Debug ffmpeg push success.
                         }
                     }
                     delete pcm_data;
-                    printf("PCM data deleted.\n"); // Debug PCM data deletion.
+                    //printf("PCM data deleted.\n"); // Debug PCM data deletion.
                 } else {
                     printf("Failed to record PCM data.\n"); // Debug PCM data recording failure.
                 }
@@ -385,6 +574,9 @@ int _main(int argc, char* argv[])
 #if ENABLE_RTSP
     priv.rtsp->stop();
 #endif
+
+    server.stop();
+    std::cout << "Server stopped.\n";
 
     printf("准备关闭视频流\n");
 
