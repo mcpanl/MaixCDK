@@ -16,6 +16,7 @@
 #include <fcntl.h>
 #include <time.h>
 
+#include <fstream>
 
 #include <vector>
 #include <mutex>
@@ -34,6 +35,10 @@ using namespace maix;
 
 #define PORT 8090
 #define ENABLE_RTSP 0
+#define ENABLE_PIPE 0
+
+static std::vector<uint8_t> g_sps_pps_buf;
+
 
 static struct {
     camera::Camera *cam;
@@ -61,6 +66,47 @@ static struct {
     bool audio_en;
 } priv;
 
+
+#if ENABLE_PIPE
+int pipe_fd = -1;
+
+void save_video_to_file(const uint8_t *data, int size, int index) {
+    if (pipe_fd < 0 || size <= 0 || data == nullptr) return;
+
+    // 每帧都写入 SPS/PPS + 帧数据
+    if (!g_sps_pps_buf.empty()) {
+        write(pipe_fd, g_sps_pps_buf.data(), g_sps_pps_buf.size());
+    }
+    write(pipe_fd, data, size);
+}
+
+void save_audio_to_file(const uint8_t *data, int size, int index) {
+
+}
+#endif
+
+#if 0
+void save_video_to_file(const uint8_t *data, int size, int index) {
+    char filename[64];
+    snprintf(filename, sizeof(filename), "/root/%03d.bin", index);
+    std::ofstream ofs(filename, std::ios::binary);
+    if (ofs.is_open()) {
+        ofs.write((const char *)data, size);
+        ofs.close();
+    }
+}
+
+void save_audio_to_file(const uint8_t *data, int size, int index) {
+    write(ffmpeg_audio_fd, data, size);
+    char filename[64];
+    snprintf(filename, sizeof(filename), "/root/%03d_audio.bin", index);
+    std::ofstream ofs(filename, std::ios::binary);
+    if (ofs.is_open()) {
+        ofs.write((const char *)data, size);
+        ofs.close();
+    }
+}
+#endif
 
 
 class TcpServer {
@@ -300,6 +346,11 @@ int _main(int argc, char* argv[])
 {
     mmf_deinit_v2(true);
 
+#if ENABLE_PIPE
+    printf("Open PIPE\n");
+    pipe_fd = open("/root/stream.h264", O_WRONLY);
+    printf("Open PIPE DONE\n");
+#endif
 
     TcpServer server;
 
@@ -436,6 +487,12 @@ int _main(int argc, char* argv[])
                         memcpy(sps_pps, venc_stream.data[0], venc_stream.data_size[0]);
                         memcpy(sps_pps + venc_stream.data_size[0], venc_stream.data[1], venc_stream.data_size[1]);
 
+                        int sps_pps_size = venc_stream.data_size[0] + venc_stream.data_size[1];
+                        g_sps_pps_buf.resize(sps_pps_size);
+                        memcpy(g_sps_pps_buf.data(), venc_stream.data[0], venc_stream.data_size[0]);
+                        memcpy(g_sps_pps_buf.data() + venc_stream.data_size[0], venc_stream.data[1], venc_stream.data_size[1]);
+
+
                         if (0 == priv.ffmpeg_packer->config_sps_pps(sps_pps, sps_pps_size)) {
                             while (0 != priv.ffmpeg_packer->open() && !app::need_exit()) {
                                 time::sleep_ms(500);
@@ -478,7 +535,10 @@ int _main(int argc, char* argv[])
                                 );
                         priv.last_read_cam_ms = time::ticks_ms();
                     }
-
+#if ENABLE_PIPE
+                    static int video_frame_index = 1;  // 全局或静态变量记录帧编号
+                    save_video_to_file(data, data_size, video_frame_index++);
+#endif
                     // 推入 ffmpeg 打包器
                     if (err::ERR_NONE != priv.ffmpeg_packer->push(data, data_size, priv.video_pts)) {
                         log::error("ffmpeg push failed!");
@@ -535,6 +595,11 @@ int _main(int argc, char* argv[])
                     //printf("Recorded PCM data: data_len = %d\n", pcm_data->data_len); // Debug PCM data length.
                     //printf("pcm_data->data = %p, data_len = %d\n", pcm_data->data, pcm_data->data_len);
                     if (pcm_data->data_len > 0) {
+
+#if ENABLE_PIPE
+                        static int audio_frame_index = 1;  // 全局或静态变量记录帧编号
+                        save_audio_to_file(pcm_data->data, pcm_data->data_len, audio_frame_index++);
+#endif
                         // log::info("[AUDIO] pts:%d  pts %f s", priv.audio_pts, priv.ffmpeg_packer->audio_pts_to_us(priv.audio_pts) / 1000000);
                         if (err::ERR_NONE != priv.ffmpeg_packer->push(pcm_data->data, pcm_data->data_len, priv.audio_pts, true)) {
                             log::error("ffmpeg push failed!");
@@ -573,6 +638,10 @@ int _main(int argc, char* argv[])
 
 #if ENABLE_RTSP
     priv.rtsp->stop();
+#endif
+
+#if ENABLE_PIPE
+    close(pipe_fd);
 #endif
 
     server.stop();
