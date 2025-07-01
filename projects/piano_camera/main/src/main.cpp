@@ -30,6 +30,12 @@
 #include <sys/socket.h>
 #include <sys/select.h>
 
+#include <queue>                 // 队列
+#include <condition_variable>    // 条件变量
+#include <atomic>                // 原子变量，用于线程安全状态标志
+#include <optional>              // 可选类型，用于超时取数据
+#include <chrono>                // 高精度时间
+
 using namespace maix;
 
 
@@ -37,13 +43,113 @@ using namespace maix;
 #define ENABLE_RTSP 0
 #define ENABLE_PIPE 0
 
+
+template <typename T>
+class DroppingQueue {
+public:
+    void push(T&& value) { // 使用移动语义
+        std::lock_guard<std::mutex> lock(mtx_);
+        buffer_ = std::move(value);
+        has_data_ = true;
+    }
+
+    bool try_pop(T& value) {
+        std::lock_guard<std::mutex> lock(mtx_);
+        if (!has_data_)
+            return false;
+
+        value = std::move(buffer_);
+        has_data_ = false;
+        return true;
+    }
+
+private:
+    std::mutex mtx_;
+    T buffer_;
+    bool has_data_ = false;
+};
+
+
+void udp_broadcast_thread(DroppingQueue<std::vector<uint8_t>>& queue, std::atomic<bool>& running)
+{
+    const int UDP_PORT = 5005;
+    const char* BROADCAST_IP = "255.255.255.255";
+    const size_t MAX_PACKET_SIZE = 1400;
+    const size_t HEADER_SIZE = 8;
+    const size_t CHUNK_SIZE = MAX_PACKET_SIZE - HEADER_SIZE;
+
+    int sock = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sock < 0) {
+        perror("socket failed");
+        return;
+    }
+
+    int broadcastEnable = 1;
+    if (setsockopt(sock, SOL_SOCKET, SO_BROADCAST, &broadcastEnable, sizeof(broadcastEnable)) < 0) {
+        perror("setsockopt failed");
+        close(sock);
+        return;
+    }
+
+    sockaddr_in addr {};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(UDP_PORT);
+    addr.sin_addr.s_addr = inet_addr(BROADCAST_IP);
+
+    uint32_t frame_id = 0;
+
+    while (running) {
+        std::vector<uint8_t> jpeg_data;
+        if (!queue.try_pop(jpeg_data)) {
+            printf("-- has not jpeg data, wait 50ms\n");
+            std::this_thread::sleep_for(std::chrono::milliseconds(25));
+            continue;
+        }
+
+        size_t jpeg_size = jpeg_data.size();
+        uint16_t total_packets = (jpeg_size + CHUNK_SIZE - 1) / CHUNK_SIZE;
+        frame_id++;
+        printf("-- will send jpeg %d, size = %d\n", frame_id, jpeg_size);
+        for (uint16_t packet_id = 0; packet_id < total_packets; ++packet_id) {
+            size_t start = packet_id * CHUNK_SIZE;
+            size_t end = std::min(start + CHUNK_SIZE, jpeg_size);
+            size_t payload_size = end - start;
+
+            uint8_t buffer[MAX_PACKET_SIZE];
+
+            // Header: frame_id (4 bytes) | total_packets (2 bytes) | packet_id (2 bytes)
+            buffer[0] = (frame_id >> 24) & 0xFF;
+            buffer[1] = (frame_id >> 16) & 0xFF;
+            buffer[2] = (frame_id >> 8) & 0xFF;
+            buffer[3] = frame_id & 0xFF;
+            buffer[4] = (total_packets >> 8) & 0xFF;
+            buffer[5] = total_packets & 0xFF;
+            buffer[6] = (packet_id >> 8) & 0xFF;
+            buffer[7] = packet_id & 0xFF;
+
+            memcpy(buffer + HEADER_SIZE, jpeg_data.data() + start, payload_size);
+
+            ssize_t sent = sendto(sock, buffer, HEADER_SIZE + payload_size, 0,
+                                  (struct sockaddr*)&addr, sizeof(addr));
+            if (sent < 0) {
+                perror("sendto failed");
+            }
+        }
+
+        // 可选：控制发送帧率（不强制）
+        std::this_thread::sleep_for(std::chrono::milliseconds(25));
+    }
+
+    close(sock);
+}
+
 static std::vector<uint8_t> g_sps_pps_buf;
 
 
 static struct {
     camera::Camera *cam;
     camera::Camera *cam2;
-
+    display::Display *disp;
 #if ENABLE_RTSP
     rtsp::Rtsp *rtsp;
 #endif
@@ -346,6 +452,13 @@ int _main(int argc, char* argv[])
 {
     mmf_deinit_v2(true);
 
+    DroppingQueue<std::vector<uint8_t>> jpeg_queue;
+    std::atomic<bool> running = true;
+
+    // 启动线程
+    std::thread udp_thread(udp_broadcast_thread, std::ref(jpeg_queue), std::ref(running));
+
+
 #if ENABLE_PIPE
     printf("Open PIPE\n");
     pipe_fd = open("/root/stream.h264", O_WRONLY);
@@ -361,22 +474,22 @@ int _main(int argc, char* argv[])
 
     server.start();
 
-    int cam_w = 1280;
-    int cam_h = 720;
-    int cam2_w = 640;
-    int cam2_h = 480;
+    int cam_w = 640;
+    int cam_h = 480;
+    int cam2_w = 160;
+    int cam2_h = 120;
 
     image::Format cam_fmt = image::Format::FMT_YVU420SP;
     int cam_fps = 30;
     int cam_buffer_num = 3;
-    int cam_bitrate = 3 * 1000 * 1000;
+    int cam_bitrate = 1 * 1000 * 1000;
 
     priv.audio_en = true;
 
     priv.cam = new camera::Camera(cam_w, cam_h, cam_fmt, "", cam_fps, cam_buffer_num);
-    // priv.cam2 = priv.cam->add_channel(cam2_w, cam2_h, cam_fmt, cam_fps, cam_buffer_num);
+    priv.cam2 = priv.cam->add_channel(cam2_w, cam2_h, cam_fmt, cam_fps, cam_buffer_num);
 
-    display::Display disp = display::Display();
+    priv.disp = new display::Display();
 
     printf("[U] init audio_recorder\n");
     priv.audio_recorder = new audio::Recorder();
@@ -622,7 +735,7 @@ int _main(int argc, char* argv[])
         mmf_venc_free(1);
 
         // 将帧数据推送至VO
-        mmf_vo_frame_push2(0, 0, 2, frame);
+        //mmf_vo_frame_push2(0, 0, 2, frame);
 
         // 释放帧数据
         _mmf_vi_frame_free(ch, &frame);
@@ -631,6 +744,25 @@ int _main(int argc, char* argv[])
 #endif
 
         delete img;
+
+
+        image::Image *img2 = priv.cam2->read();
+        image::Image *jpg_img = img2->to_format(image::FMT_JPEG);
+
+        priv.disp->show(*img2);
+
+        uint8_t* jpeg_data = (uint8_t*)jpg_img->data();
+        size_t jpeg_size = jpg_img->data_size();
+
+    
+        // 主线程中不断 push 最新 jpeg 数据
+        std::vector<uint8_t> jpeg(jpeg_data, jpeg_data + jpeg_size);
+        jpeg_queue.push(std::move(jpeg)); // 用移动语义，避免拷贝
+
+
+        delete img2;
+
+
         uint64_t curr_ms = time::ticks_ms();
         // log::info("loop use %lld ms\r\n", curr_ms - last_ms);
         last_ms = curr_ms;
@@ -643,6 +775,9 @@ int _main(int argc, char* argv[])
 #if ENABLE_PIPE
     close(pipe_fd);
 #endif
+
+    running = false;
+    udp_thread.join();
 
     server.stop();
     std::cout << "Server stopped.\n";
