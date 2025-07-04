@@ -35,6 +35,7 @@
 #include <atomic>                // 原子变量，用于线程安全状态标志
 #include <optional>              // 可选类型，用于超时取数据
 #include <chrono>                // 高精度时间
+#include <sys/stat.h> 
 
 using namespace maix;
 
@@ -42,6 +43,11 @@ using namespace maix;
 #define PORT 8090
 #define ENABLE_RTSP 0
 #define ENABLE_PIPE 0
+
+
+int record_number = 0;
+std::string custom_dir = "videos";
+
 
 
 template <typename T>
@@ -91,7 +97,7 @@ void udp_broadcast_thread(DroppingQueue<std::vector<uint8_t>>& queue, std::atomi
         return;
     }
 
-    sockaddr_in addr {};
+    sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_port = htons(UDP_PORT);
     addr.sin_addr.s_addr = inet_addr(BROADCAST_IP);
@@ -101,15 +107,15 @@ void udp_broadcast_thread(DroppingQueue<std::vector<uint8_t>>& queue, std::atomi
     while (running) {
         std::vector<uint8_t> jpeg_data;
         if (!queue.try_pop(jpeg_data)) {
-            printf("-- has not jpeg data, wait 50ms\n");
-            std::this_thread::sleep_for(std::chrono::milliseconds(25));
+            std::this_thread::sleep_for(std::chrono::milliseconds(30));
             continue;
         }
 
         size_t jpeg_size = jpeg_data.size();
         uint16_t total_packets = (jpeg_size + CHUNK_SIZE - 1) / CHUNK_SIZE;
         frame_id++;
-        printf("-- will send jpeg %d, size = %d\n", frame_id, jpeg_size);
+        // printf("-- send jpeg %d, size = %zu bytes\n", frame_id, jpeg_size);
+
         for (uint16_t packet_id = 0; packet_id < total_packets; ++packet_id) {
             size_t start = packet_id * CHUNK_SIZE;
             size_t end = std::min(start + CHUNK_SIZE, jpeg_size);
@@ -136,12 +142,37 @@ void udp_broadcast_thread(DroppingQueue<std::vector<uint8_t>>& queue, std::atomi
             }
         }
 
-        // 可选：控制发送帧率（不强制）
-        std::this_thread::sleep_for(std::chrono::milliseconds(25));
+        std::this_thread::sleep_for(std::chrono::milliseconds(30));
     }
 
     close(sock);
 }
+
+
+void jpeg_worker_thread(DroppingQueue<image::Image*>& img_queue,
+                        DroppingQueue<std::vector<uint8_t>>& jpeg_queue,
+                        std::atomic<bool>& running)
+{
+    while (running) {
+        image::Image* img = nullptr;
+        if (!img_queue.try_pop(img)) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(30));
+            continue;
+        }
+
+        image::Image* jpg_img = img->to_format(image::FMT_JPEG);
+        uint8_t* jpeg_data = (uint8_t*)jpg_img->data();
+        size_t jpeg_size = jpg_img->data_size();
+
+        std::vector<uint8_t> jpeg(jpeg_data, jpeg_data + jpeg_size);
+        jpeg_queue.push(std::move(jpeg));
+
+        delete jpg_img;
+        delete img;
+        std::this_thread::sleep_for(std::chrono::milliseconds(30));
+    }
+}
+
 
 static std::vector<uint8_t> g_sps_pps_buf;
 
@@ -215,6 +246,118 @@ void save_audio_to_file(const uint8_t *data, int size, int index) {
 #endif
 
 
+class RecorderManager
+{
+public:
+    enum class RecordState { Idle, WaitingForSPS, Recording };
+
+    RecorderManager(ffmpeg::FFmpegPacker *packer, decltype(priv) *priv_data)
+        : packer_(packer), priv_(priv_data), recording_(false), state_(RecordState::Idle), start_time_ms_(0), file_path_("") {}
+
+    // 设置录制文件名
+    void setRecordFileName(const std::string &path)
+    {
+        file_path_ = path;
+        if (packer_)
+        {
+            packer_->config2("path", file_path_.c_str());
+        }
+    }
+
+    // 开始录制
+    void startRecord()
+    {
+        if (state_ == RecordState::Recording)
+            return;
+        if (file_path_.empty())
+            return;
+
+        recording_ = true;
+        state_ = RecordState::WaitingForSPS;
+
+        // 复位时间戳
+        priv_->last_read_pcm_ms = 0;
+        priv_->last_read_cam_ms = 0;
+        priv_->video_pts = 0;
+        priv_->audio_pts = 0;
+
+        if (priv_->audio_recorder)
+        {
+            priv_->audio_recorder->reset();
+        }
+
+        start_time_ms_ = maix::time::ticks_ms();
+        std::cout << "Recording started.\n";
+    }
+
+    // 停止录制
+    void stopRecord()
+    {
+        if (state_ == RecordState::Idle)
+            return;
+
+        if (packer_ && packer_->is_opened())
+        {
+            packer_->close();
+        }
+
+        recording_ = false;
+        state_ = RecordState::Idle;
+
+        std::cout << "Recording stopped.\n";
+    }
+
+    // 是否处于录制状态
+    bool isRecording() const { return recording_; }
+
+    // 是否等待 SPS/PPS（等待打开 packer）
+    bool isWaitingForSPS() const { return state_ == RecordState::WaitingForSPS; }
+
+    // 设置状态为已经开始录制
+    void setRecordingOpened()
+    {
+        state_ = RecordState::Recording;
+    }
+
+    // 是否已经打开 packer
+    bool isOpened() const
+    {
+        return state_ == RecordState::Recording && packer_->is_opened();
+    }
+
+    // 获取录制时长
+    uint64_t getRecordDuration() const
+    {
+        if (recording_)
+        {
+            return maix::time::ticks_ms() - start_time_ms_;
+        }
+        return 0;
+    }
+
+    // 获取当前文件大小
+    uint64_t getRecordFileSize() const
+    {
+        if (file_path_.empty())
+            return 0;
+
+        struct stat stat_buf;
+        if (stat(file_path_.c_str(), &stat_buf) == 0)
+            return stat_buf.st_size;
+
+        return 0;
+    }
+
+private:
+    ffmpeg::FFmpegPacker *packer_;
+    decltype(priv) *priv_; // 传入的 priv 指针
+    bool recording_;
+    RecordState state_;
+    uint64_t start_time_ms_;
+    std::string file_path_;
+};
+
+
 class TcpServer {
 public:
     TcpServer() : server_fd(-1), running(false) {}
@@ -230,6 +373,7 @@ public:
 
     void stop() {
         running = false;
+
         if (server_fd != -1) {
             close(server_fd);
             server_fd = -1;
@@ -237,12 +381,11 @@ public:
 
         {
             std::lock_guard<std::mutex> lock(client_mutex);
-            for (int fd : client_fds) {
-                close(fd);
+            for (auto& [fd, client] : clients) {
+                client->stop();
             }
-            client_fds.clear();
+            clients.clear();
         }
-
 #if 0
         if (server_thread.joinable()) {
             server_thread.join();
@@ -261,24 +404,88 @@ public:
 
     void broadcastBinary(const std::vector<char>& data) {
         std::lock_guard<std::mutex> lock(client_mutex);
-        for (int fd : client_fds) {
-            send(fd, data.data(), data.size(), 0);
+        for (auto& [fd, client] : clients) {
+            client->sendData(data);
         }
     }
 
 private:
+    struct ClientHandler {
+        int fd;
+        std::thread thread;
+        std::queue<std::vector<char>> sendQueue;
+        std::mutex queueMutex;
+        std::condition_variable queueCond;
+        std::atomic<bool> active;
+        std::function<void(int, const std::vector<char>&)> onMessage;
+
+        ClientHandler(int client_fd, std::function<void(int, const std::vector<char>&)> messageCallback)
+            : fd(client_fd), active(true), onMessage(std::move(messageCallback)) {}
+
+        void start() {
+            thread = std::thread(&ClientHandler::run, this);
+        }
+
+        void stop() {
+            active = false;
+            queueCond.notify_all();
+#if 0
+            if (thread.joinable()) {
+                thread.join();
+            }
+#endif
+            close(fd);
+        }
+
+        void sendData(const std::vector<char>& data) {
+            {
+                std::lock_guard<std::mutex> lock(queueMutex);
+                sendQueue.push(data);
+            }
+            queueCond.notify_one();
+        }
+
+        void run() {
+            while (active) {
+                // Read
+                char buffer[1024];
+                ssize_t bytes_read = recv(fd, buffer, sizeof(buffer), 0);
+                if (bytes_read <= 0) {
+                    std::cout << "Client disconnected: " << fd << std::endl;
+                    break;
+                }
+                if (onMessage) {
+                    std::vector<char> data(buffer, buffer + bytes_read);
+                    onMessage(fd, data);
+                }
+
+                // Send
+                std::unique_lock<std::mutex> lock(queueMutex);
+                queueCond.wait_for(lock, std::chrono::milliseconds(10), [this]() { return !sendQueue.empty() || !active; });
+
+                while (!sendQueue.empty()) {
+                    auto& msg = sendQueue.front();
+                    ssize_t sent = send(fd, msg.data(), msg.size(), 0);
+                    if (sent < 0) {
+                        std::cerr << "Send error on client: " << fd << std::endl;
+                        active = false;
+                        break;
+                    }
+                    sendQueue.pop();
+                }
+            }
+
+            active = false;  // Mark as inactive for server cleanup
+        }
+    };
+
     int server_fd;
     std::thread server_thread;
-    std::set<int> client_fds;
+    std::unordered_map<int, std::shared_ptr<ClientHandler>> clients;
     std::mutex client_mutex;
-    bool running;
+    std::atomic<bool> running;
 
     std::function<void(int, const std::vector<char>&)> onMessage;
-
-    void setNonBlocking(int fd) {
-        int flags = fcntl(fd, F_GETFL, 0);
-        fcntl(fd, F_SETFL, flags | O_NONBLOCK);
-    }
 
     void run() {
         server_fd = socket(AF_INET, SOCK_STREAM, 0);
@@ -307,77 +514,31 @@ private:
             return;
         }
 
-        setNonBlocking(server_fd);
-
         std::cout << "Server listening on port " << PORT << "...\n";
 
-        while (running && !app::need_exit()) {
-            fd_set read_fds;
-            FD_ZERO(&read_fds);
-            FD_SET(server_fd, &read_fds);
-            int max_fd = server_fd;
+        while (running) {
+            sockaddr_in client_addr{};
+            socklen_t client_len = sizeof(client_addr);
+            int client_fd = accept(server_fd, (sockaddr*)&client_addr, &client_len);
+            if (client_fd >= 0) {
+                std::cout << "New client connected: " << client_fd << "\n";
 
-            {
-                std::lock_guard<std::mutex> lock(client_mutex);
-                for (int fd : client_fds) {
-                    FD_SET(fd, &read_fds);
-                    if (fd > max_fd) max_fd = fd;
-                }
-            }
-
-            struct timeval timeout{};
-            timeout.tv_sec = 1;
-            timeout.tv_usec = 0;
-
-            int activity = select(max_fd + 1, &read_fds, nullptr, nullptr, &timeout);
-            if (activity < 0 && running) {
-                std::cerr << "select error\n";
-                break;
-            }
-
-            // New connection
-            if (FD_ISSET(server_fd, &read_fds)) {
-                sockaddr_in client_addr{};
-                socklen_t client_len = sizeof(client_addr);
-                int client_fd = accept(server_fd, (sockaddr*)&client_addr, &client_len);
-                if (client_fd >= 0) {
-                    setNonBlocking(client_fd);
+                auto client = std::make_shared<ClientHandler>(client_fd, onMessage);
+                {
                     std::lock_guard<std::mutex> lock(client_mutex);
-                    client_fds.insert(client_fd);
-                    std::cout << "New client connected: " << client_fd << "\n";
+                    clients[client_fd] = client;
                 }
-            }
-
-            // Read from clients
-            std::vector<int> disconnected;
-            {
-                std::lock_guard<std::mutex> lock(client_mutex);
-                for (int fd : client_fds) {
-                    if (FD_ISSET(fd, &read_fds)) {
-                        char buffer[1024];
-                        ssize_t bytes_read = recv(fd, buffer, sizeof(buffer), 0);
-                        if (bytes_read <= 0) {
-                            disconnected.push_back(fd);
-                        } else {
-                            std::vector<char> data(buffer, buffer + bytes_read);
-                            if (onMessage) {
-                                onMessage(fd, data);
-                            }
-                        }
-                    }
-                }
-
-                for (int fd : disconnected) {
-                    std::cout << "Client disconnected: " << fd << "\n";
-                    close(fd);
-                    client_fds.erase(fd);
-                }
+                client->start();
+            } else {
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));  // avoid busy waiting
             }
         }
 
-        std::cout << "Server exiting select loop.\n";
+        std::cout << "Server stopped accepting new clients.\n";
     }
 };
+
+
 
 
 const char* get_current_time_string() {
@@ -452,8 +613,13 @@ int _main(int argc, char* argv[])
 {
     mmf_deinit_v2(true);
 
+
+    DroppingQueue<image::Image*> img_queue;
     DroppingQueue<std::vector<uint8_t>> jpeg_queue;
     std::atomic<bool> running = true;
+
+    // 启动 JPEG 转换线程
+    std::thread jpeg_thread(jpeg_worker_thread, std::ref(img_queue), std::ref(jpeg_queue), std::ref(running));
 
     // 启动线程
     std::thread udp_thread(udp_broadcast_thread, std::ref(jpeg_queue), std::ref(running));
@@ -467,12 +633,14 @@ int _main(int argc, char* argv[])
 
     TcpServer server;
 
+/*
     server.setMessageCallback([](int client_fd, const std::vector<char>& data) {
         std::string msg(data.begin(), data.end());
         std::cout << "Received from " << client_fd << ": " << msg << std::endl;
     });
 
     server.start();
+*/
 
     int cam_w = 640;
     int cam_h = 480;
@@ -482,7 +650,7 @@ int _main(int argc, char* argv[])
     image::Format cam_fmt = image::Format::FMT_YVU420SP;
     int cam_fps = 30;
     int cam_buffer_num = 3;
-    int cam_bitrate = 1 * 1000 * 1000;
+    int cam_bitrate = 3 * 1000 * 1000;
 
     priv.audio_en = true;
 
@@ -517,7 +685,46 @@ int _main(int argc, char* argv[])
     err::check_bool_raise(!priv.ffmpeg_packer->config("audio_bitrate", 128000), "rtmp config failed!");
     err::check_bool_raise(!priv.ffmpeg_packer->config("audio_format", AV_SAMPLE_FMT_S16), "rtmp config failed!");
 
-    priv.ffmpeg_packer->config2("path", "/root/a.mp4");
+    RecorderManager recorderManager(priv.ffmpeg_packer, &priv);
+
+    server.setMessageCallback([&](int client_fd, const std::vector<char>& data) {
+    std::string msg(data.begin(), data.end());
+    std::cout << "Received from " << client_fd << ": " << msg << std::endl;
+
+    if (msg.rfind("set ", 0) == 0) {
+        // set /root/videos/test.mp4
+        std::string filename = msg.substr(4);
+        recorderManager.setRecordFileName(filename);
+        server.broadcastText("File name set to: " + filename);
+    } else if (msg == "start") {
+        recorderManager.startRecord();
+        server.broadcastText("Recording started.");
+    } else if (msg == "stop") {
+        recorderManager.stopRecord();
+        server.broadcastText("Recording stopped.");
+    } else if (msg == "status") {
+        std::string status = recorderManager.isRecording() ? "Recording" : "Stopped";
+        server.broadcastText("Status: " + status);
+    } else if (msg == "duration") {
+        server.broadcastText("Duration: " + std::to_string(recorderManager.getRecordDuration()) + " ms");
+    } else if (msg == "filesize") {
+        server.broadcastText("File Size: " + std::to_string(recorderManager.getRecordFileSize()) + " bytes");
+    } else {
+        server.broadcastText("Unknown command.");
+    }
+        server.broadcastText("Unknown command.");
+    });
+
+    server.start();
+
+    // 创建目录
+    std::string dir_path = "/root/" + custom_dir;
+    mkdir(dir_path.c_str(), 0755);
+    
+    // 构造文件名
+    std::string output_path = "/root/" + custom_dir + "/" + std::to_string(record_number) + ".mp4";
+    printf("OutputPath = %s", output_path.c_str());
+    priv.ffmpeg_packer->config2("path", output_path.c_str());
 
     // priv.ffmpeg_packer->open();
 
@@ -582,7 +789,7 @@ int _main(int argc, char* argv[])
         }
 
         // 配置视频PTS与音频PTS同步
-        if (priv.ffmpeg_packer && priv.ffmpeg_packer->is_opened()) {
+        if (priv.ffmpeg_packer && recorderManager.isOpened()) {
             double temp_us = priv.ffmpeg_packer->video_pts_to_us(priv.video_pts);
             priv.audio_pts = priv.ffmpeg_packer->audio_us_to_pts(temp_us);
         }
@@ -592,8 +799,11 @@ int _main(int argc, char* argv[])
 
         if (found_venc_stream) {
             // 如果 packer 没打开且是第一帧（含SPS/PPS），配置 SPS/PPS 并打开
-            if (priv.ffmpeg_packer && !priv.ffmpeg_packer->is_opened()) {
+            if (priv.ffmpeg_packer && recorderManager.isWaitingForSPS()) {
                 if (venc_stream.count > 1) {
+
+                    printf("***** CONFIG SPS/PPS *****\n");
+
                     int sps_pps_size = venc_stream.data_size[0] + venc_stream.data_size[1];
                     uint8_t *sps_pps = (uint8_t *)malloc(sps_pps_size);
                     if (sps_pps) {
@@ -612,6 +822,8 @@ int _main(int argc, char* argv[])
                                 log::info("Can't open ffmpeg, retry again...");
                             }
 
+                            recorderManager.setRecordingOpened(); 
+
                             if (priv.audio_recorder) {
                                 priv.audio_recorder->reset();
                             }
@@ -626,7 +838,7 @@ int _main(int argc, char* argv[])
             }
 
             // 如果 packer 已经打开，把编码数据推进去
-            if (priv.ffmpeg_packer->is_opened()) {
+            if (recorderManager.isOpened()) {
                 uint8_t *data = NULL;
                 int data_size = 0;
                 if (venc_stream.count == 1) {
@@ -661,7 +873,7 @@ int _main(int argc, char* argv[])
 
 
 
-            if (priv.audio_en && priv.ffmpeg_packer->is_opened()) { 
+            if (recorderManager.isOpened() && priv.audio_en  && priv.ffmpeg_packer->is_opened()) { 
                 //printf("Audio is enabled and ffmpeg_packer is opened.\n"); // Check if audio is enabled and ffmpeg_packer is opened.
 
                 int frame_size_per_second = priv.ffmpeg_packer->get_audio_frame_size_per_second();
@@ -745,7 +957,11 @@ int _main(int argc, char* argv[])
 
         delete img;
 
+        image::Image *img2 = priv.cam2->read();    
+        priv.disp->show(*img2);
+        img_queue.push(std::move(img2));
 
+#if 0
         image::Image *img2 = priv.cam2->read();
         image::Image *jpg_img = img2->to_format(image::FMT_JPEG);
 
@@ -761,7 +977,7 @@ int _main(int argc, char* argv[])
 
 
         delete img2;
-
+#endif
 
         uint64_t curr_ms = time::ticks_ms();
         // log::info("loop use %lld ms\r\n", curr_ms - last_ms);
@@ -777,6 +993,7 @@ int _main(int argc, char* argv[])
 #endif
 
     running = false;
+    jpeg_thread.join();
     udp_thread.join();
 
     server.stop();
