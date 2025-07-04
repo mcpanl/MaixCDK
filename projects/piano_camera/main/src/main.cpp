@@ -49,13 +49,21 @@ int record_number = 0;
 std::string custom_dir = "videos";
 
 
-
 template <typename T>
 class DroppingQueue {
 public:
-    void push(T&& value) { // 使用移动语义
+    void push(T value) { // 接收一个值或指针副本，适配裸指针
         std::lock_guard<std::mutex> lock(mtx_);
-        buffer_ = std::move(value);
+        if (has_data_) {
+            printf("[DroppingQueue] Drop old data\n");
+            // 如果是裸指针类型，调用者自己管理释放
+
+        if constexpr (std::is_pointer<T>::value) {
+            printf("Well Delete\n");
+            delete buffer_; // 释放旧数据
+        }
+        }
+        buffer_ = value;
         has_data_ = true;
     }
 
@@ -64,7 +72,7 @@ public:
         if (!has_data_)
             return false;
 
-        value = std::move(buffer_);
+        value = buffer_;
         has_data_ = false;
         return true;
     }
@@ -153,7 +161,54 @@ void jpeg_worker_thread(DroppingQueue<image::Image*>& img_queue,
                         DroppingQueue<std::vector<uint8_t>>& jpeg_queue,
                         std::atomic<bool>& running)
 {
+    printf("*** START jpeg_worker ***\n");
+
     while (running) {
+        image::Image* img = nullptr;
+        if (!img_queue.try_pop(img)) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(30));
+            continue;
+        }
+
+        if (!img) {
+            printf("jpeg_worker: got nullptr image, skipping\n");
+            continue;
+        }
+
+        image::Image* jpg_img = img->to_format(image::FMT_JPEG);
+        if (!jpg_img) {
+            printf("jpeg_worker: to_format failed\n");
+            delete img;
+            continue;
+        }
+
+        uint8_t* jpeg_data = static_cast<uint8_t*>(jpg_img->data());
+        size_t jpeg_size = jpg_img->data_size();
+
+        std::vector<uint8_t> jpeg(jpeg_data, jpeg_data + jpeg_size);
+        jpeg_queue.push(std::move(jpeg));
+
+        delete jpg_img;
+        delete img;
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(30));
+    }
+}
+
+
+#if 0
+void jpeg_worker_thread(DroppingQueue<image::Image*>& img_queue,
+                        DroppingQueue<std::vector<uint8_t>>& jpeg_queue,
+                        std::atomic<bool>& running)
+
+void jpeg_worker_thread(DroppingQueue<std::unique_ptr<maix::image::Image>>& img_queue,
+                        DroppingQueue<std::vector<uint8_t>>& jpeg_queue,
+                        std::atomic<bool>& running)
+{
+    printf("*** START jpeg_worker ***\n");
+
+    while (running) {
+#if 0
         image::Image* img = nullptr;
         if (!img_queue.try_pop(img)) {
             std::this_thread::sleep_for(std::chrono::milliseconds(30));
@@ -169,10 +224,40 @@ void jpeg_worker_thread(DroppingQueue<image::Image*>& img_queue,
 
         delete jpg_img;
         delete img;
+#endif
+
+std::unique_ptr<image::Image> img;
+if (!img_queue.try_pop(img)) {
+    printf("jpeg_worker: no try_pop result\n");
+    std::this_thread::sleep_for(std::chrono::milliseconds(30));
+    continue;
+}
+printf("jpeg_worker: got image\n");
+
+if (!img) {
+    printf("jpeg_worker: got nullptr image, skipping\n");
+    continue;
+}
+
+auto jpg_img = std::unique_ptr<image::Image>(img->to_format(image::FMT_JPEG));
+if (!jpg_img) {
+    printf("jpeg_worker: to_format failed\n");
+    continue;
+}
+//printf("jpeg_worker: to_format done\n");
+
+uint8_t* jpeg_data = static_cast<uint8_t*>(jpg_img->data());
+size_t jpeg_size = jpg_img->data_size();
+std::cout << "Address of jpg_img->data(): " << static_cast<const void*>(jpg_img->data()) << std::endl;
+
+std::vector<uint8_t> jpeg(jpeg_data, jpeg_data + jpeg_size);
+jpeg_queue.push(std::move(jpeg));
+//printf("jpeg_worker: jpeg pushed, size = %zu\n", jpeg_size);
+
         std::this_thread::sleep_for(std::chrono::milliseconds(30));
     }
 }
-
+#endif
 
 static std::vector<uint8_t> g_sps_pps_buf;
 
@@ -613,8 +698,8 @@ int _main(int argc, char* argv[])
 {
     mmf_deinit_v2(true);
 
-
     DroppingQueue<image::Image*> img_queue;
+    //DroppingQueue<image::Image*> img_queue;
     DroppingQueue<std::vector<uint8_t>> jpeg_queue;
     std::atomic<bool> running = true;
 
@@ -952,14 +1037,22 @@ int _main(int argc, char* argv[])
         // 释放帧数据
         _mmf_vi_frame_free(ch, &frame);
 #if 0
-        disp.show(*img);
+        img_queue.push(img);
+        priv.disp->show(*img);
 #endif
 
         delete img;
+image::Image* img2 = priv.cam2->read();
+priv.disp->show(*img2);
+img_queue.push(img2);
+        //image::Image *img2 = priv.cam2->read();    
+        //priv.disp->show(*img2);
+        //img_queue.push(std::move(img2));
 
-        image::Image *img2 = priv.cam2->read();    
-        priv.disp->show(*img2);
-        img_queue.push(std::move(img2));
+//std::unique_ptr<image::Image> img2(priv.cam2->read());
+//priv.disp->show(*img2);
+//img_queue.push(std::move(img2)); // 自动管理内存
+
 
 #if 0
         image::Image *img2 = priv.cam2->read();
