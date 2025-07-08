@@ -5,6 +5,7 @@
 #include "maix_time.hpp"
 #include "maix_display.hpp"
 #include "maix_rtsp.hpp"
+#include "maix_wifi.hpp"
 #include "maix_camera.hpp"
 #include "maix_basic.hpp"
 #include "maix_ffmpeg.hpp"
@@ -37,8 +38,10 @@
 #include <chrono>                // 高精度时间
 #include <sys/stat.h> 
 
-using namespace maix;
+#include <arpa/inet.h>
 
+using namespace maix;
+using namespace maix::network;
 
 #define PORT 8090
 #define ENABLE_RTSP 0
@@ -48,6 +51,8 @@ using namespace maix;
 int record_number = 0;
 std::string custom_dir = "videos";
 
+std::string local_ip = "0.0.0.0";
+std::string broadcast_ip = "255.255.255.255";
 
 template <typename T>
 class DroppingQueue {
@@ -55,11 +60,11 @@ public:
     void push(T value) { // 接收一个值或指针副本，适配裸指针
         std::lock_guard<std::mutex> lock(mtx_);
         if (has_data_) {
-            printf("[DroppingQueue] Drop old data\n");
+            //printf("[DroppingQueue] Drop old data\n");
             // 如果是裸指针类型，调用者自己管理释放
 
         if constexpr (std::is_pointer<T>::value) {
-            printf("Well Delete\n");
+            //printf("Well Delete\n");
             delete buffer_; // 释放旧数据
         }
         }
@@ -83,15 +88,45 @@ private:
     bool has_data_ = false;
 };
 
+std::string get_broadcast_address(const std::string& ip_str, const std::string& netmask_str)
+{
+    in_addr ip, netmask, broadcast;
+    inet_aton(ip_str.c_str(), &ip);
+    inet_aton(netmask_str.c_str(), &netmask);
+
+    broadcast.s_addr = (ip.s_addr & netmask.s_addr) | (~netmask.s_addr);
+
+    return std::string(inet_ntoa(broadcast));
+}
+
+std::string guess_netmask(const std::string& ip)
+{
+    if(ip.empty()) return "255.255.255.0"; // fallback
+
+    int first_octet = std::stoi(ip.substr(0, ip.find('.')));
+    int second_octet = std::stoi(ip.substr(ip.find('.') + 1, ip.find('.', ip.find('.') + 1)));
+
+    if(first_octet == 10)
+        return "255.0.0.0";
+    else if(first_octet == 172 && (second_octet >= 16 && second_octet <= 31))
+        return "255.240.0.0";
+    else
+        return "255.255.255.0"; // assume 192.168.x.x
+}
 
 void udp_broadcast_thread(DroppingQueue<std::vector<uint8_t>>& queue, std::atomic<bool>& running)
 {
-    const int UDP_PORT = 5005;
-    const char* BROADCAST_IP = "255.255.255.255";
-    const size_t MAX_PACKET_SIZE = 1400;
-    const size_t HEADER_SIZE = 8;
-    const size_t CHUNK_SIZE = MAX_PACKET_SIZE - HEADER_SIZE;
+    broadcast_ip = "239.255.0.2";
 
+    log::info("***** UDP IP *****");
+    log::info(broadcast_ip.c_str());
+
+    const int UDP_PORT = 5005;
+    const char* BROADCAST_IP = broadcast_ip.c_str();
+    const size_t MAX_PACKET_SIZE = 1200;
+    const size_t HEADER_SIZE = 12;
+    const size_t CHUNK_SIZE = MAX_PACKET_SIZE - HEADER_SIZE;
+    
     int sock = socket(AF_INET, SOCK_DGRAM, 0);
     if (sock < 0) {
         perror("socket failed");
@@ -105,6 +140,8 @@ void udp_broadcast_thread(DroppingQueue<std::vector<uint8_t>>& queue, std::atomi
         return;
     }
 
+    in_addr_t local_ip_binary = inet_addr(local_ip.c_str());
+
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_port = htons(UDP_PORT);
@@ -115,7 +152,7 @@ void udp_broadcast_thread(DroppingQueue<std::vector<uint8_t>>& queue, std::atomi
     while (running) {
         std::vector<uint8_t> jpeg_data;
         if (!queue.try_pop(jpeg_data)) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(30));
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
             continue;
         }
 
@@ -141,6 +178,8 @@ void udp_broadcast_thread(DroppingQueue<std::vector<uint8_t>>& queue, std::atomi
             buffer[6] = (packet_id >> 8) & 0xFF;
             buffer[7] = packet_id & 0xFF;
 
+            memcpy(buffer + 8, &local_ip_binary, 4);
+
             memcpy(buffer + HEADER_SIZE, jpeg_data.data() + start, payload_size);
 
             ssize_t sent = sendto(sock, buffer, HEADER_SIZE + payload_size, 0,
@@ -150,7 +189,7 @@ void udp_broadcast_thread(DroppingQueue<std::vector<uint8_t>>& queue, std::atomi
             }
         }
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(30));
+        std::this_thread::sleep_for(std::chrono::milliseconds(125));
     }
 
     close(sock);
@@ -286,6 +325,9 @@ static struct {
     void *loop_last_frame;
 
     bool audio_en;
+
+
+    bool video_stop_flag;
 } priv;
 
 
@@ -383,7 +425,7 @@ public:
 
         if (packer_ && packer_->is_opened())
         {
-            packer_->close();
+            //packer_->close();
         }
 
         recording_ = false;
@@ -698,6 +740,28 @@ int _main(int argc, char* argv[])
 {
     mmf_deinit_v2(true);
 
+    std::vector<std::string> wifi_ifaces = wifi::list_devices();
+    for(auto &iface : wifi_ifaces)
+    {
+        log::info("wifi iface: %s", iface.c_str());
+    }
+    if(wifi_ifaces.empty())
+    {
+        log::error("no wifi iface found");
+        return -1;
+    }
+    wifi::Wifi wifi(wifi_ifaces[0]);
+
+    std::string netmask = guess_netmask(wifi.get_ip());
+    
+    log::info("IP: %s", wifi.get_ip().c_str());
+    log::info("MAC: %s", wifi.get_mac().c_str());
+    log::info("Gateway: %s", wifi.get_gateway().c_str());
+    log::info("MASK: %s", netmask.c_str());
+
+    local_ip = wifi.get_ip();
+    broadcast_ip = get_broadcast_address(wifi.get_ip(), netmask);
+
     DroppingQueue<image::Image*> img_queue;
     //DroppingQueue<image::Image*> img_queue;
     DroppingQueue<std::vector<uint8_t>> jpeg_queue;
@@ -727,17 +791,18 @@ int _main(int argc, char* argv[])
     server.start();
 */
 
-    int cam_w = 640;
-    int cam_h = 480;
+    int cam_w = 1920;
+    int cam_h = 1080;
     int cam2_w = 160;
     int cam2_h = 120;
 
     image::Format cam_fmt = image::Format::FMT_YVU420SP;
     int cam_fps = 30;
     int cam_buffer_num = 3;
-    int cam_bitrate = 3 * 1000 * 1000;
+    int cam_bitrate = 9 * 1000 * 1000;
 
     priv.audio_en = true;
+    priv.video_stop_flag = false;
 
     priv.cam = new camera::Camera(cam_w, cam_h, cam_fmt, "", cam_fps, cam_buffer_num);
     priv.cam2 = priv.cam->add_channel(cam2_w, cam2_h, cam_fmt, cam_fps, cam_buffer_num);
@@ -764,7 +829,7 @@ int _main(int argc, char* argv[])
     err::check_bool_raise(!priv.ffmpeg_packer->config("video_fps", cam_fps), "rtmp config failed!");
     err::check_bool_raise(!priv.ffmpeg_packer->config("video_pixel_format", AV_PIX_FMT_NV21), "rtmp config failed!");
 
-    err::check_bool_raise(!priv.ffmpeg_packer->config("has_audio", true), "rtmp config failed!");
+    err::check_bool_raise(!priv.ffmpeg_packer->config("has_audio", priv.audio_en), "rtmp config failed!");
     err::check_bool_raise(!priv.ffmpeg_packer->config("audio_sample_rate", 48000), "rtmp config failed!");
     err::check_bool_raise(!priv.ffmpeg_packer->config("audio_channels", 1), "rtmp config failed!");
     err::check_bool_raise(!priv.ffmpeg_packer->config("audio_bitrate", 128000), "rtmp config failed!");
@@ -773,31 +838,32 @@ int _main(int argc, char* argv[])
     RecorderManager recorderManager(priv.ffmpeg_packer, &priv);
 
     server.setMessageCallback([&](int client_fd, const std::vector<char>& data) {
-    std::string msg(data.begin(), data.end());
-    std::cout << "Received from " << client_fd << ": " << msg << std::endl;
+        std::string msg(data.begin(), data.end());
+        std::cout << "Received from " << client_fd << ": " << msg << std::endl;
 
-    if (msg.rfind("set ", 0) == 0) {
-        // set /root/videos/test.mp4
-        std::string filename = msg.substr(4);
-        recorderManager.setRecordFileName(filename);
-        server.broadcastText("File name set to: " + filename);
-    } else if (msg == "start") {
-        recorderManager.startRecord();
-        server.broadcastText("Recording started.");
-    } else if (msg == "stop") {
-        recorderManager.stopRecord();
-        server.broadcastText("Recording stopped.");
-    } else if (msg == "status") {
-        std::string status = recorderManager.isRecording() ? "Recording" : "Stopped";
-        server.broadcastText("Status: " + status);
-    } else if (msg == "duration") {
-        server.broadcastText("Duration: " + std::to_string(recorderManager.getRecordDuration()) + " ms");
-    } else if (msg == "filesize") {
-        server.broadcastText("File Size: " + std::to_string(recorderManager.getRecordFileSize()) + " bytes");
-    } else {
-        server.broadcastText("Unknown command.");
-    }
-        server.broadcastText("Unknown command.");
+        if (msg.rfind("set ", 0) == 0) {
+            // set /root/videos/test.mp4
+            std::string filename = msg.substr(4);
+            recorderManager.setRecordFileName(filename);
+            server.broadcastText("File name set to: " + filename + "\n");
+        } else if (msg == "start") {
+            priv.video_stop_flag = false;
+            recorderManager.startRecord();
+            server.broadcastText("Recording started.\n");
+        } else if (msg == "stop") {
+            priv.video_stop_flag = true;
+            recorderManager.stopRecord();
+            server.broadcastText("Recording stopped.\n");
+        } else if (msg == "status") {
+            std::string status = recorderManager.isRecording() ? "Recording\n" : "Stopped\n";
+            server.broadcastText("Status: " + status + "\n");
+        } else if (msg == "duration") {
+            server.broadcastText("Duration: " + std::to_string(recorderManager.getRecordDuration()) + " ms\n");
+        } else if (msg == "filesize") {
+            server.broadcastText("File Size: " + std::to_string(recorderManager.getRecordFileSize()) + " bytes\n");
+        } else {
+            server.broadcastText("Unknown command.\n");
+        }
     });
 
     server.start();
@@ -832,6 +898,7 @@ int _main(int argc, char* argv[])
     uint64_t last_ms = time::ticks_ms();
     int cnt = 0;
     while(!app::need_exit()) {
+//printf("=================================\n");
 #if ENABLE_RTSP
         rgn_img = region->get_canvas();
         const char* time_str = get_current_time_string();
@@ -856,15 +923,25 @@ int _main(int argc, char* argv[])
         void *frame = NULL;
         mmf_frame_info_t f;
 
+//printf("*** from vi get data\n");
+
         // 从VI获取一帧数据
         int ch = priv.cam->get_channel();
         int res = _mmf_vi_frame_pop(ch, &frame, &f, 40);
 
+        if (res != 0 || frame == nullptr) {
+            printf("Failed to get frame, skipping...\n");
+            time::sleep_ms(10);
+            continue;
+        }
+
+
+//printf("*** push to venc\n");
         // 将帧数据推送至VENC
         mmf_venc_push2(1, frame);
 
 
-
+//printf("*** from venc get data\n");
         // 从编码器通道1取出编码数据
         mmf_stream_t venc_stream = {0};
         if (0 == mmf_venc_pop(1, &venc_stream)) {
@@ -873,6 +950,7 @@ int _main(int argc, char* argv[])
             }
         }
 
+//printf("*** config pts sync\n");
         // 配置视频PTS与音频PTS同步
         if (priv.ffmpeg_packer && recorderManager.isOpened()) {
             double temp_us = priv.ffmpeg_packer->video_pts_to_us(priv.video_pts);
@@ -882,6 +960,7 @@ int _main(int argc, char* argv[])
         // printf("*** 取出的编码数据: %d \n", venc_stream.count);
 
 
+//printf("*** found venc stream?\n");
         if (found_venc_stream) {
             // 如果 packer 没打开且是第一帧（含SPS/PPS），配置 SPS/PPS 并打开
             if (priv.ffmpeg_packer && recorderManager.isWaitingForSPS()) {
@@ -922,8 +1001,12 @@ int _main(int argc, char* argv[])
                 }
             }
 
+//printf("*** push video to packeter\n");
             // 如果 packer 已经打开，把编码数据推进去
             if (recorderManager.isOpened()) {
+                
+                //printf("^^^^^^^ 包装器已打开，准备推送数据\n");
+            
                 uint8_t *data = NULL;
                 int data_size = 0;
                 if (venc_stream.count == 1) {
@@ -957,8 +1040,8 @@ int _main(int argc, char* argv[])
             }
 
 
-
-            if (recorderManager.isOpened() && priv.audio_en  && priv.ffmpeg_packer->is_opened()) { 
+//printf("*** push audio to packeter\n");
+            if (priv.audio_en && recorderManager.isOpened()) { 
                 //printf("Audio is enabled and ffmpeg_packer is opened.\n"); // Check if audio is enabled and ffmpeg_packer is opened.
 
                 int frame_size_per_second = priv.ffmpeg_packer->get_audio_frame_size_per_second();
@@ -1028,12 +1111,14 @@ int _main(int argc, char* argv[])
         }
 
 
+//printf("*** release venc\n");
         // 释放VENC资源
         mmf_venc_free(1);
 
         // 将帧数据推送至VO
         //mmf_vo_frame_push2(0, 0, 2, frame);
 
+//printf("*** release frame\n");
         // 释放帧数据
         _mmf_vi_frame_free(ch, &frame);
 #if 0
@@ -1042,8 +1127,12 @@ int _main(int argc, char* argv[])
 #endif
 
         delete img;
+
+//printf("*** read from cam2\n");
 image::Image* img2 = priv.cam2->read();
+//printf("*** disp show img2\n");
 priv.disp->show(*img2);
+//printf("*** img_queue push img2\n");
 img_queue.push(img2);
         //image::Image *img2 = priv.cam2->read();    
         //priv.disp->show(*img2);
@@ -1053,6 +1142,16 @@ img_queue.push(img2);
 //priv.disp->show(*img2);
 //img_queue.push(std::move(img2)); // 自动管理内存
 
+
+if(priv.video_stop_flag) {
+    printf("*** 主循环触发停止录像 ***\n");
+    if (priv.ffmpeg_packer) {
+        priv.ffmpeg_packer->close();
+        printf("*** 包装器关闭完成\n");
+    }
+    printf("*** 主循环触发停止录像 完毕 ***\n");
+    priv.video_stop_flag = false;
+}
 
 #if 0
         image::Image *img2 = priv.cam2->read();
@@ -1071,7 +1170,7 @@ img_queue.push(img2);
 
         delete img2;
 #endif
-
+//printf("==================================\n");
         uint64_t curr_ms = time::ticks_ms();
         // log::info("loop use %lld ms\r\n", curr_ms - last_ms);
         last_ms = curr_ms;
