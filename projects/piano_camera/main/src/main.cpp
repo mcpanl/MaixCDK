@@ -47,7 +47,6 @@ using namespace maix::network;
 #define ENABLE_RTSP 0
 #define ENABLE_PIPE 0
 
-
 int record_number = 0;
 std::string custom_dir = "videos";
 
@@ -149,7 +148,7 @@ void udp_broadcast_thread(DroppingQueue<std::vector<uint8_t>>& queue, std::atomi
 
     uint32_t frame_id = 0;
 
-    while (running) {
+    while (!app::need_exit() && running) {
         std::vector<uint8_t> jpeg_data;
         if (!queue.try_pop(jpeg_data)) {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -185,8 +184,10 @@ void udp_broadcast_thread(DroppingQueue<std::vector<uint8_t>>& queue, std::atomi
             ssize_t sent = sendto(sock, buffer, HEADER_SIZE + payload_size, 0,
                                   (struct sockaddr*)&addr, sizeof(addr));
             if (sent < 0) {
-                perror("sendto failed");
+                perror("UDP sendto failed");
             }
+
+            
         }
 
         std::this_thread::sleep_for(std::chrono::milliseconds(125));
@@ -195,44 +196,6 @@ void udp_broadcast_thread(DroppingQueue<std::vector<uint8_t>>& queue, std::atomi
     close(sock);
 }
 
-
-void jpeg_worker_thread(DroppingQueue<image::Image*>& img_queue,
-                        DroppingQueue<std::vector<uint8_t>>& jpeg_queue,
-                        std::atomic<bool>& running)
-{
-    printf("*** START jpeg_worker ***\n");
-
-    while (running) {
-        image::Image* img = nullptr;
-        if (!img_queue.try_pop(img)) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(30));
-            continue;
-        }
-
-        if (!img) {
-            printf("jpeg_worker: got nullptr image, skipping\n");
-            continue;
-        }
-
-        image::Image* jpg_img = img->to_format(image::FMT_JPEG);
-        if (!jpg_img) {
-            printf("jpeg_worker: to_format failed\n");
-            delete img;
-            continue;
-        }
-
-        uint8_t* jpeg_data = static_cast<uint8_t*>(jpg_img->data());
-        size_t jpeg_size = jpg_img->data_size();
-
-        std::vector<uint8_t> jpeg(jpeg_data, jpeg_data + jpeg_size);
-        jpeg_queue.push(std::move(jpeg));
-
-        delete jpg_img;
-        delete img;
-
-        std::this_thread::sleep_for(std::chrono::milliseconds(30));
-    }
-}
 
 
 #if 0
@@ -499,6 +462,7 @@ public:
     }
 
     void stop() {
+        printf("**** SERVER STOP ****\n");
         running = false;
 
         if (server_fd != -1) {
@@ -509,6 +473,7 @@ public:
         {
             std::lock_guard<std::mutex> lock(client_mutex);
             for (auto& [fd, client] : clients) {
+                printf("    **** wait client stop...\n");
                 client->stop();
             }
             clients.clear();
@@ -540,6 +505,10 @@ private:
     struct ClientHandler {
         int fd;
         std::thread thread;
+
+        std::thread readThread;
+        std::thread writeThread;
+
         std::queue<std::vector<char>> sendQueue;
         std::mutex queueMutex;
         std::condition_variable queueCond;
@@ -550,12 +519,21 @@ private:
             : fd(client_fd), active(true), onMessage(std::move(messageCallback)) {}
 
         void start() {
-            thread = std::thread(&ClientHandler::run, this);
+            //thread = std::thread(&ClientHandler::runSelectLoop, this);
+            readThread = std::thread(&ClientHandler::readLoop, this);
+            writeThread = std::thread(&ClientHandler::writeLoop, this);
         }
 
         void stop() {
+
+            printf("**** CLIENT HANDLER STOP ****\n");
+
             active = false;
+            shutdown(fd, SHUT_RDWR);
             queueCond.notify_all();
+
+            if (readThread.joinable()) readThread.join();
+            if (writeThread.joinable()) writeThread.join();
 #if 0
             if (thread.joinable()) {
                 thread.join();
@@ -572,6 +550,7 @@ private:
             queueCond.notify_one();
         }
 
+/*
         void run() {
             while (active) {
                 // Read
@@ -604,6 +583,173 @@ private:
 
             active = false;  // Mark as inactive for server cleanup
         }
+*/
+
+void runSelectLoop() {
+    // 设置为非阻塞（可选，但推荐）
+    int flags = fcntl(fd, F_GETFL, 0);
+    fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+
+    while (!app::need_exit() && active) {
+        fd_set read_fds, write_fds;
+        FD_ZERO(&read_fds);
+        FD_ZERO(&write_fds);
+
+        FD_SET(fd, &read_fds);
+        if (!sendQueue.empty()) {
+            FD_SET(fd, &write_fds);
+        }
+
+        timeval timeout = {1, 0}; // 1 秒超时
+        int max_fd = fd;
+
+        int ret = select(max_fd + 1, &read_fds, &write_fds, nullptr, &timeout);
+        if (ret < 0) {
+            if (errno == EINTR) continue;
+            std::cerr << "select error on fd: " << fd << std::endl;
+            break;
+        }
+
+        if (FD_ISSET(fd, &read_fds)) {
+            char buffer[1024];
+            ssize_t bytes_read = recv(fd, buffer, sizeof(buffer), 0);
+            if (bytes_read <= 0) {
+                std::cout << "Client disconnected: " << fd << std::endl;
+                break;
+            }
+
+            if (onMessage) {
+                std::vector<char> data(buffer, buffer + bytes_read);
+                onMessage(fd, data);
+            }
+        }
+
+        if (FD_ISSET(fd, &write_fds)) {
+            std::unique_lock<std::mutex> lock(queueMutex);
+            if (!sendQueue.empty()) {
+                auto msg = sendQueue.front();
+                ssize_t sent = send(fd, msg.data(), msg.size(), 0);
+                if (sent < 0) {
+                    std::cerr << "Send error on client: " << fd << std::endl;
+                    break;
+                }
+                sendQueue.pop();
+            }
+        }
+    }
+
+    active = false;
+    queueCond.notify_all();
+}
+
+/*
+    void readLoop() {
+        while (!app::need_exit() && active) {
+            char buffer[1024];
+            ssize_t bytes_read = recv(fd, buffer, sizeof(buffer), 0);
+            if (bytes_read <= 0) {
+                std::cout << "Client disconnected: " << fd << std::endl;
+                break;
+            }
+            if (onMessage) {
+                std::vector<char> data(buffer, buffer + bytes_read);
+                onMessage(fd, data);
+            }
+        }
+        active = false;
+        queueCond.notify_all();  // in case write is waiting
+    }
+
+    void writeLoop() {
+        while (!app::need_exit() && active) {
+            std::unique_lock<std::mutex> lock(queueMutex);
+            queueCond.wait(lock, [this]() { return !sendQueue.empty() || !active || app::need_exit(); });
+
+            while (!app::need_exit() && !sendQueue.empty()) {
+                auto msg = sendQueue.front();
+                sendQueue.pop();
+                lock.unlock();  // unlock during potentially long send
+                ssize_t sent = send(fd, msg.data(), msg.size(), 0);
+                lock.lock();  // re-lock
+                if (sent < 0) {
+                    std::cerr << "Send error on client: " << fd << std::endl;
+                    active = false;
+                    break;
+                }
+            }
+        }
+    }
+*/
+
+void readLoop() {
+    while (!app::need_exit() && active) {
+        fd_set read_fds;
+        FD_ZERO(&read_fds);
+        FD_SET(fd, &read_fds);
+
+        int ret = select(fd + 1, &read_fds, nullptr, nullptr, nullptr);
+        if (ret < 0) {
+            if (errno == EINTR) continue;
+            std::cerr << "[readLoop] select error\n";
+            break;
+        }
+
+        if (FD_ISSET(fd, &read_fds)) {
+            char buffer[1024];
+            ssize_t bytes_read = recv(fd, buffer, sizeof(buffer), 0);
+            if (bytes_read <= 0) {
+                std::cout << "Client disconnected: " << fd << std::endl;
+                break;
+            }
+
+            if (onMessage) {
+                std::vector<char> data(buffer, buffer + bytes_read);
+                onMessage(fd, data);
+            }
+        }
+    }
+
+    active = false;
+    queueCond.notify_all();  // wake writeLoop if needed
+}
+
+void writeLoop() {
+    while (!app::need_exit() && active) {
+        std::unique_lock<std::mutex> lock(queueMutex);
+        queueCond.wait(lock, [this]() {
+            return !sendQueue.empty() || !active || app::need_exit();
+        });
+
+        while (!sendQueue.empty() && active && !app::need_exit()) {
+            fd_set write_fds;
+            FD_ZERO(&write_fds);
+            FD_SET(fd, &write_fds);
+
+            lock.unlock();  // 解锁以避免 select 被互斥阻塞
+            int ret = select(fd + 1, nullptr, &write_fds, nullptr, nullptr);
+            lock.lock();
+
+            if (ret < 0) {
+                if (errno == EINTR) continue;
+                std::cerr << "[writeLoop] select error\n";
+                break;
+            }
+
+            if (FD_ISSET(fd, &write_fds)) {
+                auto msg = sendQueue.front();
+                ssize_t sent = send(fd, msg.data(), msg.size(), 0);
+                if (sent < 0) {
+                    std::cerr << "Send error on client: " << fd << std::endl;
+                    active = false;
+                    break;
+                }
+
+                sendQueue.pop();
+            }
+        }
+    }
+}
+
     };
 
     int server_fd;
@@ -643,7 +789,7 @@ private:
 
         std::cout << "Server listening on port " << PORT << "...\n";
 
-        while (running) {
+        while (!app::need_exit() && running) {
             sockaddr_in client_addr{};
             socklen_t client_len = sizeof(client_addr);
             int client_fd = accept(server_fd, (sockaddr*)&client_addr, &client_len);
@@ -665,6 +811,52 @@ private:
     }
 };
 
+
+std::shared_ptr<TcpServer> server;
+
+
+void jpeg_worker_thread(DroppingQueue<image::Image*>& img_queue,
+                        DroppingQueue<std::vector<uint8_t>>& jpeg_queue,
+                        std::atomic<bool>& running)
+{
+    printf("*** START jpeg_worker ***\n");
+
+    while (!app::need_exit() && running) {
+        image::Image* img = nullptr;
+        if (!img_queue.try_pop(img)) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(30));
+            continue;
+        }
+
+        if (!img) {
+            printf("jpeg_worker: got nullptr image, skipping\n");
+            continue;
+        }
+
+        image::Image* jpg_img = img->to_format(image::FMT_JPEG);
+        if (!jpg_img) {
+            printf("jpeg_worker: to_format failed\n");
+            delete img;
+            continue;
+        }
+
+        uint8_t* jpeg_data = static_cast<uint8_t*>(jpg_img->data());
+        size_t jpeg_size = jpg_img->data_size();
+
+        std::vector<uint8_t> jpeg(jpeg_data, jpeg_data + jpeg_size);
+        jpeg_queue.push(std::move(jpeg));
+
+        char buffer[256];
+        snprintf(buffer, sizeof(buffer), "JPEG_SIZE = %d\n", jpeg_size);
+
+        server->broadcastText(buffer);
+
+        delete jpg_img;
+        delete img;
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(30));
+    }
+}
 
 
 
@@ -767,6 +959,11 @@ int _main(int argc, char* argv[])
     DroppingQueue<std::vector<uint8_t>> jpeg_queue;
     std::atomic<bool> running = true;
 
+    server = std::make_shared<TcpServer>();
+
+    server->start();
+
+
     // 启动 JPEG 转换线程
     std::thread jpeg_thread(jpeg_worker_thread, std::ref(img_queue), std::ref(jpeg_queue), std::ref(running));
 
@@ -780,7 +977,6 @@ int _main(int argc, char* argv[])
     printf("Open PIPE DONE\n");
 #endif
 
-    TcpServer server;
 
 /*
     server.setMessageCallback([](int client_fd, const std::vector<char>& data) {
@@ -837,7 +1033,7 @@ int _main(int argc, char* argv[])
 
     RecorderManager recorderManager(priv.ffmpeg_packer, &priv);
 
-    server.setMessageCallback([&](int client_fd, const std::vector<char>& data) {
+    server->setMessageCallback([&](int client_fd, const std::vector<char>& data) {
         std::string msg(data.begin(), data.end());
         std::cout << "Received from " << client_fd << ": " << msg << std::endl;
 
@@ -845,28 +1041,27 @@ int _main(int argc, char* argv[])
             // set /root/videos/test.mp4
             std::string filename = msg.substr(4);
             recorderManager.setRecordFileName(filename);
-            server.broadcastText("File name set to: " + filename + "\n");
+            server->broadcastText("File name set to: " + filename + "\n");
         } else if (msg == "start") {
             priv.video_stop_flag = false;
             recorderManager.startRecord();
-            server.broadcastText("Recording started.\n");
+            server->broadcastText("Recording started.\n");
         } else if (msg == "stop") {
             priv.video_stop_flag = true;
             recorderManager.stopRecord();
-            server.broadcastText("Recording stopped.\n");
+            server->broadcastText("Recording stopped.\n");
         } else if (msg == "status") {
             std::string status = recorderManager.isRecording() ? "Recording\n" : "Stopped\n";
-            server.broadcastText("Status: " + status + "\n");
+            server->broadcastText("Status: " + status + "\n");
         } else if (msg == "duration") {
-            server.broadcastText("Duration: " + std::to_string(recorderManager.getRecordDuration()) + " ms\n");
+            server->broadcastText("Duration: " + std::to_string(recorderManager.getRecordDuration()) + " ms\n");
         } else if (msg == "filesize") {
-            server.broadcastText("File Size: " + std::to_string(recorderManager.getRecordFileSize()) + " bytes\n");
+            server->broadcastText("File Size: " + std::to_string(recorderManager.getRecordFileSize()) + " bytes\n");
         } else {
-            server.broadcastText("Unknown command.\n");
+            server->broadcastText("Unknown command.\n");
         }
     });
 
-    server.start();
 
     // 创建目录
     std::string dir_path = "/root/" + custom_dir;
@@ -1188,7 +1383,7 @@ if(priv.video_stop_flag) {
     jpeg_thread.join();
     udp_thread.join();
 
-    server.stop();
+    server->stop();
     std::cout << "Server stopped.\n";
 
     printf("准备关闭视频流\n");
