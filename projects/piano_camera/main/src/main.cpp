@@ -16,7 +16,8 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <time.h>
-
+#include <cstdio>
+#include <ctime>
 #include <fstream>
 
 #include <vector>
@@ -39,6 +40,42 @@
 #include <sys/stat.h> 
 
 #include <arpa/inet.h>
+
+
+#define ENABLE_DEBUG 1
+
+#if ENABLE_DEBUG
+
+// 获取当前时间字符串，格式为 HH:MM:SS.mmm
+inline const char* current_time_str() {
+    static char buffer[32];
+    auto now = std::chrono::system_clock::now();
+    auto t = std::chrono::system_clock::to_time_t(now);
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                  now.time_since_epoch()) % 1000;
+
+    std::tm tm_buf;
+#if defined(_WIN32)
+    localtime_s(&tm_buf, &t);
+#else
+    localtime_r(&t, &tm_buf);
+#endif
+    std::snprintf(buffer, sizeof(buffer), "%02d:%02d:%02d.%03lld",
+        tm_buf.tm_hour, tm_buf.tm_min, tm_buf.tm_sec, static_cast<long long>(ms.count()));
+    return buffer;
+}
+
+// 获取文件名，不带路径
+#define __FILENAME__ (strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__)
+
+// 调试打印宏
+#define DEBUG_PRINT(fmt, ...) \
+    printf("[DEBUG][%s][%s:%d] " fmt "\n", current_time_str(), __FILENAME__, __LINE__, ##__VA_ARGS__)
+
+#else
+#define DEBUG_PRINT(fmt, ...) ((void)0)
+#endif
+
 
 using namespace maix;
 using namespace maix::network;
@@ -819,7 +856,7 @@ void jpeg_worker_thread(DroppingQueue<image::Image*>& img_queue,
                         DroppingQueue<std::vector<uint8_t>>& jpeg_queue,
                         std::atomic<bool>& running)
 {
-    printf("*** START jpeg_worker ***\n");
+    DEBUG_PRINT("jpeg_worker_thread start");
 
     while (!app::need_exit() && running) {
         image::Image* img = nullptr;
@@ -833,7 +870,13 @@ void jpeg_worker_thread(DroppingQueue<image::Image*>& img_queue,
             continue;
         }
 
+        DEBUG_PRINT("jpeg_worker: got image %p", img);
+        DEBUG_PRINT("jpeg_worker: got image of size %zu", img->data_size());
+
         image::Image* jpg_img = img->to_format(image::FMT_JPEG);
+        DEBUG_PRINT("jpeg_worker: formated image %p", jpg_img);
+        DEBUG_PRINT("jpeg_worker: formated jpeg of size %zu", jpg_img->data_size());
+
         if (!jpg_img) {
             printf("jpeg_worker: to_format failed\n");
             delete img;
@@ -1124,6 +1167,8 @@ int _main(int argc, char* argv[])
         int ch = priv.cam->get_channel();
         int res = _mmf_vi_frame_pop(ch, &frame, &f, 40);
 
+        DEBUG_PRINT("frame vi pop %s, ptr = %p", res == 0 ? "success" : "fail", frame);
+
         if (res != 0 || frame == nullptr) {
             printf("Failed to get frame, skipping...\n");
             time::sleep_ms(10);
@@ -1131,12 +1176,12 @@ int _main(int argc, char* argv[])
         }
 
 
-//printf("*** push to venc\n");
+printf("*** push to venc\n");
         // 将帧数据推送至VENC
-        mmf_venc_push2(1, frame);
+        int res2 = mmf_venc_push2(1, frame);
+        DEBUG_PRINT("frame venc push %s", res2 == 0 ? "success" : "fail");
 
-
-//printf("*** from venc get data\n");
+printf("*** from venc get data\n");
         // 从编码器通道1取出编码数据
         mmf_stream_t venc_stream = {0};
         if (0 == mmf_venc_pop(1, &venc_stream)) {
@@ -1145,7 +1190,7 @@ int _main(int argc, char* argv[])
             }
         }
 
-//printf("*** config pts sync\n");
+printf("*** config pts sync\n");
         // 配置视频PTS与音频PTS同步
         if (priv.ffmpeg_packer && recorderManager.isOpened()) {
             double temp_us = priv.ffmpeg_packer->video_pts_to_us(priv.video_pts);
@@ -1155,7 +1200,7 @@ int _main(int argc, char* argv[])
         // printf("*** 取出的编码数据: %d \n", venc_stream.count);
 
 
-//printf("*** found venc stream?\n");
+printf("*** found venc stream?\n");
         if (found_venc_stream) {
             // 如果 packer 没打开且是第一帧（含SPS/PPS），配置 SPS/PPS 并打开
             if (priv.ffmpeg_packer && recorderManager.isWaitingForSPS()) {
@@ -1196,7 +1241,7 @@ int _main(int argc, char* argv[])
                 }
             }
 
-//printf("*** push video to packeter\n");
+printf("*** push video to packeter\n");
             // 如果 packer 已经打开，把编码数据推进去
             if (recorderManager.isOpened()) {
                 
@@ -1235,7 +1280,7 @@ int _main(int argc, char* argv[])
             }
 
 
-//printf("*** push audio to packeter\n");
+printf("*** push audio to packeter\n");
             if (priv.audio_en && recorderManager.isOpened()) { 
                 //printf("Audio is enabled and ffmpeg_packer is opened.\n"); // Check if audio is enabled and ffmpeg_packer is opened.
 
@@ -1306,14 +1351,14 @@ int _main(int argc, char* argv[])
         }
 
 
-//printf("*** release venc\n");
+printf("*** release venc\n");
         // 释放VENC资源
         mmf_venc_free(1);
 
         // 将帧数据推送至VO
         //mmf_vo_frame_push2(0, 0, 2, frame);
 
-//printf("*** release frame\n");
+printf("*** release frame\n");
         // 释放帧数据
         _mmf_vi_frame_free(ch, &frame);
 #if 0
@@ -1323,12 +1368,21 @@ int _main(int argc, char* argv[])
 
         delete img;
 
-//printf("*** read from cam2\n");
+printf("*** read from cam2\n");
 image::Image* img2 = priv.cam2->read();
-//printf("*** disp show img2\n");
+
+DEBUG_PRINT("img2 read ptr = %p", img2);
+if(!img2) {
+    DEBUG_PRINT("img2 read fail");
+    time::sleep_ms(10);
+    continue;
+}
+
+printf("*** disp show img2\n");
 priv.disp->show(*img2);
-//printf("*** img_queue push img2\n");
+printf("*** img_queue push img2\n");
 img_queue.push(img2);
+
         //image::Image *img2 = priv.cam2->read();    
         //priv.disp->show(*img2);
         //img_queue.push(std::move(img2));
@@ -1367,6 +1421,7 @@ if(priv.video_stop_flag) {
 #endif
 //printf("==================================\n");
         uint64_t curr_ms = time::ticks_ms();
+DEBUG_PRINT("loop end tick = %d", curr_ms);
         // log::info("loop use %lld ms\r\n", curr_ms - last_ms);
         last_ms = curr_ms;
     }
