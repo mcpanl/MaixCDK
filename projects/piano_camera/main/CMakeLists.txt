@@ -41,6 +41,9 @@ list(APPEND ADD_REQUIREMENTS network basic vision ext_dev FFmpeg)
 #### Just for this component, won't affect other 
 #### modules, including component that depend 
 #### on this component
+
+list(APPEND ADD_DEFINITIONS_PRIVATE -g)
+
 # list(APPEND ADD_DEFINITIONS_PRIVATE -DAAAAA=1)
 
 #### Add compile option for this component
