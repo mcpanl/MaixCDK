@@ -660,10 +660,11 @@ namespace maix::video
          * @param block This parameter determines whether encoding should block until it is complete.
          * If set to true, it will wait until encoding is finished before returning.
          * If set to false, it will return the current encoding result on the next call.
+         * @param venc_channel mmf_venc_channel number.
          * @maixpy maix.video.Encoder.__init__
          * @maixcdk maix.video.Encoder.Encoder
          */
-        Encoder(std::string path = "", int width = 2560, int height = 1440, image::Format format = image::Format::FMT_YVU420SP, video::VideoType type = video::VideoType::VIDEO_H264, int framerate = 30, int gop = 50, int bitrate = 3000 * 1000, int time_base = 1000, bool capture = false, bool block = true);
+        Encoder(std::string path = "", int width = 2560, int height = 1440, image::Format format = image::Format::FMT_YVU420SP, video::VideoType type = video::VideoType::VIDEO_H264, int framerate = 30, int gop = 50, int bitrate = 3000 * 1000, int time_base = 1000, bool capture = false, bool block = true, int venc_channel = 1);
         ~Encoder();
 
         /**
@@ -811,6 +812,7 @@ namespace maix::video
         int _gop;
         int _bitrate;
         int _time_base;
+        int _venc_channel;
         bool _need_capture;
         image::Image *_capture_image;
         camera::Camera *_camera;

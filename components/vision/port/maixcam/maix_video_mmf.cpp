@@ -222,7 +222,7 @@ namespace maix::video
         enum AVSampleFormat audio_format;
     } encoder_param_t;
 
-    Encoder::Encoder(std::string path, int width, int height, image::Format format, VideoType type, int framerate, int gop, int bitrate, int time_base, bool capture, bool block) {
+    Encoder::Encoder(std::string path, int width, int height, image::Format format, VideoType type, int framerate, int gop, int bitrate, int time_base, bool capture, bool block, int venc_channel) {
         _path = path;
         _width = width;
         _height = height;
@@ -239,6 +239,34 @@ namespace maix::video
         _start_encode_ms = 0;
         _encode_started = false;
         _block = block;
+        _venc_channel = venc_channel;
+
+
+
+        printf("************************************\n");
+        printf("********* VENC CHANNEL = %d *********\n", _venc_channel);
+
+    printf("Encoder Private Members:\n");
+    printf("_path: %s\n", _path.c_str());
+    printf("_width: %d\n", _width);
+    printf("_height: %d\n", _height);
+    printf("_format: %d\n", static_cast<int>(_format));
+    printf("_type: %d\n", static_cast<int>(_type));
+    printf("_framerate: %d\n", _framerate);
+    printf("_gop: %d\n", _gop);
+    printf("_bitrate: %d\n", _bitrate);
+    printf("_time_base: %d\n", _time_base);
+    printf("_need_capture: %s\n", _need_capture ? "true" : "false");
+    printf("_capture_image: %p\n", _capture_image);
+    printf("_camera: %p\n", _camera);
+    printf("_bind_camera: %p\n", _bind_camera);
+    printf("_start_encode_ms: %ld\n", _start_encode_ms);
+    printf("_encode_started: %s\n", _encode_started ? "true" : "false");
+    printf("_block: %s\n", _block ? "true" : "false");
+    printf("_venc_channel: %d\n", _venc_channel);
+
+        printf("************************************\n");
+
 
         err::check_bool_raise(format == image::Format::FMT_YVU420SP, "Encoder only support FMT_YVU420SP format!");
         video::VideoType video_type = _get_video_type(path.c_str(), type);
@@ -264,7 +292,7 @@ namespace maix::video
                     err::check_raise(err::ERR_RUNTIME, "init mmf failed!");
                 }
 
-                if (0 != mmf_add_venc_channel_v2(MMF_VENC_CHN, &cfg)) {
+                if (0 != mmf_add_venc_channel_v2(_venc_channel, &cfg)) {
                     mmf_deinit_v2(false);
                     err::check_raise(err::ERR_RUNTIME, "mmf venc init failed!");
                 }
@@ -288,7 +316,7 @@ namespace maix::video
                     err::check_raise(err::ERR_RUNTIME, "init mmf failed!");
                 }
 
-                if (0 != mmf_add_venc_channel_v2(MMF_VENC_CHN, &cfg)) {
+                if (0 != mmf_add_venc_channel_v2(_venc_channel, &cfg)) {
                     mmf_deinit_v2(false);
                     err::check_raise(err::ERR_RUNTIME, "mmf venc init failed!");
                 }
@@ -355,7 +383,7 @@ namespace maix::video
                 err::check_raise(err::ERR_RUNTIME, "init mmf failed!");
             }
 
-            if (0 != mmf_add_venc_channel_v2(MMF_VENC_CHN, &cfg)) {
+            if (0 != mmf_add_venc_channel_v2(_venc_channel, &cfg)) {
                 mmf_deinit_v2(false);
                 err::check_raise(err::ERR_RUNTIME, "mmf venc init failed!");
             }
@@ -466,13 +494,13 @@ namespace maix::video
             switch (_type) {
             case VIDEO_H264:
             {
-                mmf_del_venc_channel(MMF_VENC_CHN);
+                mmf_del_venc_channel(_venc_channel);
                 mmf_deinit_v2(false);
                 break;
             }
             case VIDEO_H265:
             {
-                mmf_del_venc_channel(MMF_VENC_CHN);
+                mmf_del_venc_channel(_venc_channel);
                 mmf_deinit_v2(false);
                 break;
             }
@@ -488,7 +516,7 @@ namespace maix::video
         } else {
             encoder_param_t *param = (encoder_param_t *)_param;
             if (param) {
-                mmf_del_venc_channel(MMF_VENC_CHN);
+                mmf_del_venc_channel(_venc_channel);
                 mmf_deinit_v2(false);
                 av_write_trailer(param->outputFormatContext);
 
@@ -558,7 +586,7 @@ namespace maix::video
                     }
 
                     mmf_venc_cfg_t cfg = {0};
-                    if (0 != mmf_venc_get_cfg(MMF_VENC_CHN, &cfg)) {
+                    if (0 != mmf_venc_get_cfg(_venc_channel, &cfg)) {
                         err::check_raise(err::ERR_RUNTIME, "get venc config failed!\r\n");
                     }
 
@@ -572,11 +600,11 @@ namespace maix::video
                         || img->height() != cfg.h
                         || img->format() != mmf_invert_format_to_maix(cfg.fmt)) {
                         log::warn("image size or format is incorrect, try to reinit venc!\r\n");
-                        mmf_del_venc_channel(MMF_VENC_CHN);
+                        mmf_del_venc_channel(_venc_channel);
                         cfg.w = img_w;
                         cfg.h = img_h;
                         cfg.fmt = mmf_invert_format_to_mmf(img_fmt);
-                        if (0 != mmf_add_venc_channel_v2(MMF_VENC_CHN, &cfg)) {
+                        if (0 != mmf_add_venc_channel_v2(_venc_channel, &cfg)) {
                             err::check_raise(err::ERR_RUNTIME, "mmf venc init failed!\r\n");
                         }
                         _width = img_w;
@@ -584,15 +612,15 @@ namespace maix::video
                         _format = img_fmt;
                     }
 
-                    if (mmf_venc_push(MMF_VENC_CHN, (uint8_t *)img->data(), img->width(), img->height(), mmf_invert_format_to_mmf(img->format()))) {
+                    if (mmf_venc_push(_venc_channel, (uint8_t *)img->data(), img->width(), img->height(), mmf_invert_format_to_mmf(img->format()))) {
                         log::error("mmf_venc_push failed\n");
                         goto _exit;
                     }
 
                     mmf_stream_t stream = {0};
-                    if (mmf_venc_pop(MMF_VENC_CHN, &stream)) {
+                    if (mmf_venc_pop(_venc_channel, &stream)) {
                         log::error("mmf_enc_h265_pull failed\n");
-                        mmf_venc_free(MMF_VENC_CHN);
+                        mmf_venc_free(_venc_channel);
                         goto _exit;
                     }
 
@@ -605,7 +633,7 @@ namespace maix::video
                         stream_buffer = (uint8_t *)malloc(stream_size);
                         if (!stream_buffer) {
                             log::error("malloc failed!\r\n");
-                            mmf_venc_free(MMF_VENC_CHN);
+                            mmf_venc_free(_venc_channel);
                             goto _exit;
                         } else {
                             if (stream.count > 1) {
@@ -620,7 +648,7 @@ namespace maix::video
                         }
                     }
 
-                    if (mmf_venc_free(MMF_VENC_CHN)) {
+                    if (mmf_venc_free(_venc_channel)) {
                         printf("mmf_venc_free failed\n");
                         free(stream_buffer);
                         stream_buffer = NULL;
@@ -636,10 +664,10 @@ namespace maix::video
                     int data_size, width, height, format;
                     do {
                         mmf_stream_t stream = {0};
-                        if (mmf_venc_pop(MMF_VENC_CHN, &stream)) {
+                        if (mmf_venc_pop(_venc_channel, &stream)) {
                             log::error("mmf_venc_pop failed\n");
-                            mmf_venc_free(MMF_VENC_CHN);
-                            mmf_del_venc_channel(MMF_VENC_CHN);
+                            mmf_venc_free(_venc_channel);
+                            mmf_del_venc_channel(_venc_channel);
                             goto _exit;
                         }
 
@@ -651,8 +679,8 @@ namespace maix::video
                             stream_buffer = (uint8_t *)malloc(stream_size);
                             if (!stream_buffer) {
                                 log::error("malloc failed!\r\n");
-                                mmf_venc_free(MMF_VENC_CHN);
-                                mmf_del_venc_channel(MMF_VENC_CHN);
+                                mmf_venc_free(_venc_channel);
+                                mmf_del_venc_channel(_venc_channel);
                                 goto _exit;
                             } else {
                                 if (stream.count > 1) {
@@ -667,11 +695,11 @@ namespace maix::video
                             }
                         }
 
-                        if (mmf_venc_free(MMF_VENC_CHN)) {
+                        if (mmf_venc_free(_venc_channel)) {
                             printf("mmf_venc_free failed\n");
                             free(stream_buffer);
                             stream_buffer = NULL;
-                            mmf_del_venc_channel(MMF_VENC_CHN);
+                            mmf_del_venc_channel(_venc_channel);
                             goto _exit;
                         }
 
@@ -733,7 +761,7 @@ namespace maix::video
                         }
 
                         mmf_venc_cfg_t cfg = {0};
-                        if (0 != mmf_venc_get_cfg(MMF_VENC_CHN, &cfg)) {
+                        if (0 != mmf_venc_get_cfg(_venc_channel, &cfg)) {
                             err::check_raise(err::ERR_RUNTIME, "get venc config failed!\r\n");
                         }
 
@@ -744,11 +772,11 @@ namespace maix::video
                             || img_h != cfg.h
                             || mmf_fmt != cfg.fmt) {
                             log::warn("image size or format is incorrect, try to reinit venc!\r\n");
-                            mmf_del_venc_channel(MMF_VENC_CHN);
+                            mmf_del_venc_channel(_venc_channel);
                             cfg.w = img_w;
                             cfg.h = img_h;
                             cfg.fmt = mmf_invert_format_to_mmf(mmf_fmt);
-                            if (0 != mmf_add_venc_channel_v2(MMF_VENC_CHN, &cfg)) {
+                            if (0 != mmf_add_venc_channel_v2(_venc_channel, &cfg)) {
                                 err::check_raise(err::ERR_RUNTIME, "mmf venc init failed!\r\n");
                             }
                             _width = img_w;
@@ -756,9 +784,9 @@ namespace maix::video
                             _format = (image::Format)mmf_invert_format_to_maix(mmf_fmt);
                         }
 
-                        if (mmf_venc_push(MMF_VENC_CHN, (uint8_t *)data, width, height, format)) {
+                        if (mmf_venc_push(_venc_channel, (uint8_t *)data, width, height, format)) {
                             log::warn("mmf_venc_push failed\n");
-                            mmf_del_venc_channel(MMF_VENC_CHN);
+                            mmf_del_venc_channel(_venc_channel);
                             goto _exit;
                         }
 
@@ -778,15 +806,15 @@ namespace maix::video
                     dts = get_dts(diff_ms);
                     pts = get_pts(diff_ms);
 
-                    if (mmf_enc_h265_push(MMF_VENC_CHN, (uint8_t *)img->data(), img->width(), img->height(), mmf_invert_format_to_mmf(img->format()))) {
+                    if (mmf_enc_h265_push(_venc_channel, (uint8_t *)img->data(), img->width(), img->height(), mmf_invert_format_to_mmf(img->format()))) {
                         log::error("mmf_enc_h265_push failed\n");
                         goto _exit;
                     }
 
                     mmf_h265_stream_t stream = {0};
-                    if (mmf_enc_h265_pop(MMF_VENC_CHN, &stream)) {
+                    if (mmf_enc_h265_pop(_venc_channel, &stream)) {
                         log::error("mmf_enc_h265_pull failed\n");
-                        mmf_enc_h265_free(MMF_VENC_CHN);
+                        mmf_enc_h265_free(_venc_channel);
                         goto _exit;
                     }
 
@@ -799,7 +827,7 @@ namespace maix::video
                         stream_buffer = (uint8_t *)malloc(stream_size);
                         if (!stream_buffer) {
                             log::error("malloc failed!\r\n");
-                            mmf_enc_h265_free(MMF_VENC_CHN);
+                            mmf_enc_h265_free(_venc_channel);
                             goto _exit;
                         } else {
                             if (stream.count > 1) {
@@ -814,7 +842,7 @@ namespace maix::video
                         }
                     }
 
-                    if (mmf_enc_h265_free(MMF_VENC_CHN)) {
+                    if (mmf_enc_h265_free(_venc_channel)) {
                         printf("mmf_enc_h265_free failed\n");
                         free(stream_buffer);
                         stream_buffer = NULL;
@@ -832,10 +860,10 @@ namespace maix::video
 
                     do {
                         mmf_h265_stream_t stream = {0};
-                        if (mmf_enc_h265_pop(MMF_VENC_CHN, &stream)) {
+                        if (mmf_enc_h265_pop(_venc_channel, &stream)) {
                             log::error("mmf_enc_h265_pop failed\n");
-                            mmf_enc_h265_free(MMF_VENC_CHN);
-                            mmf_enc_h265_deinit(MMF_VENC_CHN);
+                            mmf_enc_h265_free(_venc_channel);
+                            mmf_enc_h265_deinit(_venc_channel);
                             goto _exit;
                         }
 
@@ -847,8 +875,8 @@ namespace maix::video
                             stream_buffer = (uint8_t *)malloc(stream_size);
                             if (!stream_buffer) {
                                 log::error("malloc failed!\r\n");
-                                mmf_enc_h265_free(MMF_VENC_CHN);
-                                mmf_enc_h265_deinit(MMF_VENC_CHN);
+                                mmf_enc_h265_free(_venc_channel);
+                                mmf_enc_h265_deinit(_venc_channel);
                                 goto _exit;
                             } else {
                                 if (stream.count > 1) {
@@ -863,11 +891,11 @@ namespace maix::video
                             }
                         }
 
-                        if (mmf_enc_h265_free(MMF_VENC_CHN)) {
+                        if (mmf_enc_h265_free(_venc_channel)) {
                             printf("mmf_enc_h265_free failed\n");
                             free(stream_buffer);
                             stream_buffer = NULL;
-                            mmf_enc_h265_deinit(MMF_VENC_CHN);
+                            mmf_enc_h265_deinit(_venc_channel);
                             goto _exit;
                         }
 
@@ -928,9 +956,9 @@ namespace maix::video
                             }
                         }
 
-                        if (mmf_enc_h265_push(MMF_VENC_CHN, (uint8_t *)data, width, height, format)) {
+                        if (mmf_enc_h265_push(_venc_channel, (uint8_t *)data, width, height, format)) {
                             log::warn("mmf_enc_h265_push failed\n");
-                            mmf_enc_h265_deinit(MMF_VENC_CHN);
+                            mmf_enc_h265_deinit(_venc_channel);
                             goto _exit;
                         }
 
@@ -993,9 +1021,9 @@ namespace maix::video
                         }
                         param->last_encode_ms = time::ticks_ms();
 
-                        if (mmf_venc_push(MMF_VENC_CHN, (uint8_t *)data, width, height, format)) {
+                        if (mmf_venc_push(_venc_channel, (uint8_t *)data, width, height, format)) {
                             log::warn("mmf_venc_push failed\n");
-                            mmf_del_venc_channel(MMF_VENC_CHN);
+                            mmf_del_venc_channel(_venc_channel);
                             goto _exit;
                         }
 
@@ -1013,10 +1041,10 @@ namespace maix::video
                 }
 
                 mmf_stream_t stream = {0};
-                if (mmf_venc_pop(MMF_VENC_CHN, &stream)) {
+                if (mmf_venc_pop(_venc_channel, &stream)) {
                     log::error("mmf_venc_pop failed\n");
-                    mmf_venc_free(MMF_VENC_CHN);
-                    mmf_del_venc_channel(MMF_VENC_CHN);
+                    mmf_venc_free(_venc_channel);
+                    mmf_del_venc_channel(_venc_channel);
                     goto _exit;
                 }
 
@@ -1037,8 +1065,8 @@ namespace maix::video
                         stream_buffer = (uint8_t *)malloc(stream_size);
                         if (!stream_buffer) {
                             log::error("malloc failed!\r\n");
-                            mmf_venc_free(MMF_VENC_CHN);
-                            mmf_del_venc_channel(MMF_VENC_CHN);
+                            mmf_venc_free(_venc_channel);
+                            mmf_del_venc_channel(_venc_channel);
                             goto _exit;
                         }
 
@@ -1054,8 +1082,8 @@ namespace maix::video
                                 log::error("malloc failed!\r\n");
                                 free(stream_buffer);
                                 stream_buffer = NULL;
-                                mmf_venc_free(MMF_VENC_CHN);
-                                mmf_del_venc_channel(MMF_VENC_CHN);
+                                mmf_venc_free(_venc_channel);
+                                mmf_del_venc_channel(_venc_channel);
                                 goto _exit;
                             }
                             memcpy(frame_buffer, stream_buffer, stream_size);
@@ -1098,11 +1126,11 @@ namespace maix::video
                         }
                     }
                 }
-                if (mmf_venc_free(MMF_VENC_CHN)) {
+                if (mmf_venc_free(_venc_channel)) {
                     printf("mmf_venc_free failed\n");
                     free(stream_buffer);
                     stream_buffer = NULL;
-                    mmf_del_venc_channel(MMF_VENC_CHN);
+                    mmf_del_venc_channel(_venc_channel);
                     goto _exit;
                 }
 
@@ -1198,7 +1226,7 @@ namespace maix::video
                         }
 
                         param->last_encode_ms = time::ticks_ms();
-                        if (mmf_venc_push(MMF_VENC_CHN, (uint8_t *)img->data(), img->width(), img->height(), mmf_invert_format_to_mmf(img->format()))) {
+                        if (mmf_venc_push(_venc_channel, (uint8_t *)img->data(), img->width(), img->height(), mmf_invert_format_to_mmf(img->format()))) {
                             log::error("mmf_venc_push failed\n");
                             goto _exit;
                         }
@@ -1216,9 +1244,9 @@ namespace maix::video
                         }
                         param->last_encode_ms = time::ticks_ms();
 
-                        if (mmf_venc_push(MMF_VENC_CHN, (uint8_t *)data, width, height, format)) {
+                        if (mmf_venc_push(_venc_channel, (uint8_t *)data, width, height, format)) {
                             log::warn("mmf_venc_push failed\n");
-                            mmf_del_venc_channel(MMF_VENC_CHN);
+                            mmf_del_venc_channel(_venc_channel);
                             goto _exit;
                         }
 

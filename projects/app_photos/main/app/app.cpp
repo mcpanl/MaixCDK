@@ -306,13 +306,20 @@ public:
         for (auto date : date_dirs) {
             std::string picture_path = _picture_path + "/" + date;
             std::string video_path = _video_path + "/" + date;
-            // log::info("date: %s picture_path:%s video_path:%s", date.c_str(), picture_path.c_str(), video_path.c_str());
+            //log::info("date: %s picture_path:%s video_path:%s", date.c_str(), picture_path.c_str(), video_path.c_str());
 
             // find all picture
             if (fs::exists(picture_path)) {
                 auto pictures = fs::listdir(picture_path);
                 if (pictures) {
                     for (auto picture : *pictures) {
+
+                        if (picture == "_.jpg") {
+                            printf("***** 已忽略_.jpg *****\n");
+                            continue; // 忽略 _.jpg
+                        }
+
+
                         std::string picture_full_path = picture_path + "/" + picture;
                         if (_picture_path_is_valid(picture_full_path)) {
                             std::string thumbnail_path = picture_path + "/.thumbnail/" + picture;
@@ -334,6 +341,12 @@ public:
                 auto videos = fs::listdir(video_path);
                 if (videos) {
                     for (auto video : *videos) {
+
+                        if (video == "_.mp4") {
+                            printf("***** 已忽略_.mp4 *****\n");
+                            continue; // 忽略 _.mp4
+                        }
+
                         std::string video_full_path = video_path + "/" + video;
                         if (_video_path_is_valid(video_full_path)) {
                             std::string thumbnail_path = video_path + "/.thumbnail/" + video;
@@ -736,6 +749,7 @@ void nv21_resize_frame(uint8_t *y, uint8_t *uv, uint32_t src_width, uint32_t src
 
 static lv_image_dsc_t *load_thumbnail_image(char *path, char *thumbnail_path)
 {
+    printf("**** LOAD THUMB\n ");
     image::Image *thumbnail_img = NULL;
     std::string thumbnail_path_string(thumbnail_path);
     if (fs::exists(thumbnail_path_string)) {
@@ -752,6 +766,7 @@ static lv_image_dsc_t *load_thumbnail_image(char *path, char *thumbnail_path)
             delete src_img;
         }
     } else {
+        printf("**** Has not thumb, will create\n");
         std::string src_path(path);
         size_t pos = src_path.rfind(".mp4");
         if (pos != std::string::npos) {

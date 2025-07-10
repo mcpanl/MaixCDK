@@ -257,6 +257,11 @@ static void _capture_image(maix::camera::Camera &camera, maix::image::Image *img
 
 static int save_buff_to_file(char *filename, uint8_t *filebuf, uint32_t filebuf_len)
 {
+
+    printf("***** SAVE BUFF TO FILE *****\n");
+    printf("FileName = %s", filename);
+    printf("*****************************\n");
+
     int fd = -1;
     fd = open(filename, O_WRONLY | O_CREAT, 0777);
     if (fd <= 2) {
@@ -1896,6 +1901,7 @@ static int app_config_param(void)
 
 static void _capture_image(maix::camera::Camera &camera, maix::image::Image *img)
 {
+    //char *date = strdup("0000-00-00");
     char *date = ui_get_sys_date();
     if (date) {
         string picture_root_path = maix::app::get_picture_path();
@@ -1927,6 +1933,11 @@ static void _capture_image(maix::camera::Camera &camera, maix::image::Image *img
                 image::Image *load_img = image::load((char *)picture_save_path.c_str());
                 maix::image::Image *thumbnail_img = load_img->resize(128, 128, image::Fit::FIT_COVER);
                 thumbnail_img->save(thumbnail_path.c_str());
+
+                printf("^^^^^ Save thumb ^^^^^\n");
+                printf("thumb path = %s", thumbnail_path.c_str());
+                printf("^^^^^^^^^^^^^^^^^^^^^^\n");
+/*
                 if (_stack_save) {
                     _stack_pic_cnt++;
                     std::filesystem::path stack_save_path = picture_path;
@@ -1940,6 +1951,7 @@ static void _capture_image(maix::camera::Camera &camera, maix::image::Image *img
                         std::filesystem::copy_file(picture_save_path, stack_save_path, std::filesystem::copy_options::overwrite_existing);
                     } catch (...) {}
                 }
+*/
                 delete thumbnail_img;
                 delete load_img;
 
@@ -1999,6 +2011,7 @@ int app_loop(maix::camera::Camera &camera, maix::display::Display &disp, maix::d
     }
     if (priv.video_start_flag && !priv.video_prepare_is_ok) {
         printf("Prepare record video\n");
+        //char *date = strdup("0000-00-00"); 
         char *date = ui_get_sys_date();
         if (date) {
             string video_root_path = maix::app::get_video_path();

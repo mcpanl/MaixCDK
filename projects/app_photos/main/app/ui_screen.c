@@ -70,6 +70,10 @@ LV_IMG_DECLARE(img_check_active);
 LV_IMG_DECLARE(img_btn_select);
 LV_IMG_DECLARE(img_btn_cancel);
 
+LV_IMG_DECLARE(img_list_empty);
+LV_IMG_DECLARE(img_list_empty_small);
+LV_IMG_DECLARE(img_list_empty_text);
+
 extern void event_touch_small_image_cb(lv_event_t * e);
 extern void event_touch_big_image_cb(lv_event_t * e);
 extern void event_touch_exit_cb(lv_event_t * e);
@@ -752,7 +756,7 @@ void ui_set_view_flag(int value)
                 lv_obj_add_flag(g_lower_view1, LV_OBJ_FLAG_HIDDEN);
             }
             if (g_lower_view2) {
-                lv_obj_remove_flag(g_lower_view2, LV_OBJ_FLAG_HIDDEN);
+                //lv_obj_remove_flag(g_lower_view2, LV_OBJ_FLAG_HIDDEN);
             }
         }
 
@@ -893,7 +897,7 @@ void ui_set_view_flag(int value)
                 lv_obj_add_flag(g_lower_view1, LV_OBJ_FLAG_HIDDEN);
             }
             if (g_lower_view2) {
-                lv_obj_remove_flag(g_lower_view2, LV_OBJ_FLAG_HIDDEN);
+                //lv_obj_remove_flag(g_lower_view2, LV_OBJ_FLAG_HIDDEN);
             }
         }
 
@@ -1132,12 +1136,8 @@ void ui_photo_list_screen_update(void)
 
     lv_obj_t *scr = g_small_photo_screen;
 
-    Node *next = priv.dirs;
-    while (next != NULL) {
-        ui_directory_t *dir = &next->data->dir;
-        Node *next_photo = dir->list;
+    int list_image_count = 0;
 
-        if (next_photo) {
             lv_obj_t *obj = lv_obj_create(scr);
             lv_obj_set_style_radius(obj, 0, 0);
             lv_obj_set_height(obj, LV_SIZE_CONTENT);
@@ -1146,10 +1146,12 @@ void ui_photo_list_screen_update(void)
             lv_obj_set_style_outline_width(obj, 0, 0);
             lv_obj_set_style_bg_color(obj, lv_color_hex(0x000000), 0);
             lv_obj_set_style_border_side(obj, LV_BORDER_SIDE_NONE, 0);
-            lv_obj_set_size(obj, lv_pct(100), lv_pct(12));
+            lv_obj_set_size(obj, lv_pct(100), lv_pct(1));
 
             lv_obj_t *label = lv_label_create(obj);
-            lv_label_set_text(label, dir->dir_name);
+            // 暂时隐藏目录名称
+            lv_label_set_text(label, "");
+            //lv_label_set_text(label, dir->dir_name);
             lv_obj_center(label);
             lv_obj_set_style_text_font(label, &lv_font_montserrat_14, 0);
             lv_obj_set_style_text_color(label, lv_color_hex(0xffffff), 0);
@@ -1169,19 +1171,70 @@ void ui_photo_list_screen_update(void)
             lv_obj_center(sub_obj);
             lv_obj_set_style_radius(sub_obj, 0, 0);
             lv_obj_remove_flag(sub_obj, LV_OBJ_FLAG_SCROLLABLE);
+            
             lv_obj_set_style_pad_all(sub_obj, 15, 0);
             lv_obj_set_style_bg_color(sub_obj, lv_color_hex(0x000000), 0);
             //lv_obj_set_style_border_color(sub_obj, lv_color_hex(0x7c7c7c), 0);
             //lv_obj_set_style_radius(sub_obj, 10, 0);
             lv_obj_set_flex_flow(sub_obj, LV_FLEX_FLOW_ROW_WRAP);
             lv_obj_set_flex_align(sub_obj, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
-	    lv_obj_set_style_border_width(sub_obj, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+            lv_obj_set_style_border_width(sub_obj, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
 
+    Node *next = priv.dirs;
+    while (next != NULL) {
+        ui_directory_t *dir = &next->data->dir;
+        Node *next_photo = dir->list;
+
+        if (next_photo) {
+#if 0
+            lv_obj_t *obj = lv_obj_create(scr);
+            lv_obj_set_style_radius(obj, 0, 0);
+            lv_obj_set_height(obj, LV_SIZE_CONTENT);
+            lv_obj_remove_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
+            lv_obj_set_style_pad_all(obj, 0, 0);
+            lv_obj_set_style_outline_width(obj, 0, 0);
+            lv_obj_set_style_bg_color(obj, lv_color_hex(0x000000), 0);
+            lv_obj_set_style_border_side(obj, LV_BORDER_SIDE_NONE, 0);
+            lv_obj_set_size(obj, lv_pct(100), lv_pct(1));
+
+            lv_obj_t *label = lv_label_create(obj);
+            // 暂时隐藏目录名称
+            lv_label_set_text(label, "");
+            //lv_label_set_text(label, dir->dir_name);
+            lv_obj_center(label);
+            lv_obj_set_style_text_font(label, &lv_font_montserrat_14, 0);
+            lv_obj_set_style_text_color(label, lv_color_hex(0xffffff), 0);
+
+            lv_obj_t *obj2 = lv_obj_create(scr);
+            lv_obj_set_width(obj2, lv_pct(100));
+            lv_obj_set_height(obj2, LV_SIZE_CONTENT);
+            lv_obj_set_style_radius(obj2, 0, 0);
+            lv_obj_set_style_bg_color(obj2, lv_color_hex(0x000000), 0);
+            lv_obj_set_style_border_side(obj2, LV_BORDER_SIDE_NONE, 0);
+            lv_obj_remove_flag(obj2, LV_OBJ_FLAG_SCROLLABLE);
+            lv_obj_set_style_pad_all(obj2, 0, 0);
+
+            lv_obj_t *sub_obj = lv_obj_create(obj2);
+            lv_obj_set_width(sub_obj, lv_pct(92));
+            lv_obj_set_height(sub_obj, LV_SIZE_CONTENT);
+            lv_obj_center(sub_obj);
+            lv_obj_set_style_radius(sub_obj, 0, 0);
+            lv_obj_remove_flag(sub_obj, LV_OBJ_FLAG_SCROLLABLE);
+            
+            lv_obj_set_style_pad_all(sub_obj, 15, 0);
+            lv_obj_set_style_bg_color(sub_obj, lv_color_hex(0x000000), 0);
+            //lv_obj_set_style_border_color(sub_obj, lv_color_hex(0x7c7c7c), 0);
+            //lv_obj_set_style_radius(sub_obj, 10, 0);
+            lv_obj_set_flex_flow(sub_obj, LV_FLEX_FLOW_ROW_WRAP);
+            lv_obj_set_flex_align(sub_obj, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+	        lv_obj_set_style_border_width(sub_obj, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+#endif
             while (next_photo != NULL) {
+                list_image_count++;
                 ui_photo_t *photo = &next_photo->data->photo;
                 {
                     lv_obj_t *sub_obj2 = lv_obj_create(sub_obj);
-                    lv_obj_set_size(sub_obj2, 128, 143);
+                    lv_obj_set_size(sub_obj2, 128, 128); // 143
                     lv_obj_set_style_radius(sub_obj2, 0, 0);
                     lv_obj_remove_flag(sub_obj2, LV_OBJ_FLAG_SCROLLABLE);
                     lv_obj_set_style_pad_all(sub_obj2, 0, 0);
@@ -1246,6 +1299,30 @@ void ui_photo_list_screen_update(void)
             }
         }
         next = next->next;
+    }
+
+
+    printf("**** List image count = %d ****\n", list_image_count);
+    if (list_image_count == 0) {
+
+            lv_obj_t *obj = lv_obj_create(scr);
+            lv_obj_set_style_radius(obj, 0, 0);
+            lv_obj_remove_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
+            lv_obj_set_style_pad_all(obj, 0, 0);
+            lv_obj_set_style_outline_width(obj, 0, 0);
+            lv_obj_set_style_bg_color(obj, lv_color_hex(0x000000), 0);
+            lv_obj_set_style_border_side(obj, LV_BORDER_SIDE_NONE, 0);
+            lv_obj_set_size(obj, lv_pct(100), lv_pct(100));
+
+            lv_obj_t *img_list_empty = lv_img_create(obj);
+            lv_img_set_src(img_list_empty, &img_list_empty_small);
+            lv_obj_align(img_list_empty, LV_ALIGN_CENTER, 0, -8);
+
+            lv_obj_t *label = lv_label_create(obj);
+            lv_label_set_text(label, "Empty Album...");
+            lv_obj_align(label, LV_ALIGN_CENTER, 0, 90);
+            lv_obj_set_style_text_font(label, &lv_font_montserrat_24, 0);
+            lv_obj_set_style_text_color(label, lv_color_hex(0xb2b2b2), 0);
     }
 }
 

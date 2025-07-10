@@ -418,6 +418,7 @@ _free_format_context:
         }
     }
 
+#if 0
     void close() {
         if (!_open) return;
 
@@ -463,6 +464,82 @@ _free_format_context:
         _open = false;
         _video_last_pts = 0;
     }
+#endif
+
+void close() {
+    printf("close: start\n");
+    
+    if (!_open) {
+        printf("close: not open, return\n");
+        return;
+    }
+
+    if (_pcm_list) {
+        printf("close: starting to free _pcm_list\n");
+        for (auto it = _pcm_list->begin(); it != _pcm_list->end(); /* no increment here */) {
+            auto &item = *it;
+            Bytes *pcm = item.second;
+            printf("close: deleting pcm at %p\n", pcm);
+            delete pcm;
+
+            printf("close: erasing item from _pcm_list\n");
+            it = _pcm_list->erase(it);  // erase returns the next iterator, no need to ++it
+        }
+        printf("close: deleting _pcm_list\n");
+        delete _pcm_list;
+        _pcm_list = nullptr;
+    }
+
+
+   if (_has_audio) {
+        printf("close: audio was enabled, start freeing audio resources\n");
+
+        if (_audio_frame && ((uintptr_t)_audio_frame) > 0x1000) {
+            printf("close: freeing _audio_frame, ptr=%p\n", _audio_frame);
+            av_frame_free(&_audio_frame);
+            _audio_frame = nullptr;
+        } else {
+            printf("close: _audio_frame is invalid or already null, skip free. ptr=%p\n", _audio_frame);
+        }
+
+        if (_audio_swr_ctx) {
+            printf("close: freeing _audio_swr_ctx\n");
+            swr_free(&_audio_swr_ctx);
+            _audio_swr_ctx = nullptr;
+        }
+
+        if (_audio_codec_ctx) {
+            printf("close: freeing _audio_codec_ctx\n");
+            avcodec_free_context(&_audio_codec_ctx);
+            _audio_codec_ctx = nullptr;
+        }
+    } else {
+        printf("close: audio not enabled, skipping audio resource free\n");
+    }
+
+    if (_format_context) {
+        printf("close: _format_context exists\n");
+        if (_path.length() > 0) {
+            printf("close: writing trailer\n");
+            av_write_trailer(_format_context);
+        }
+
+        if (_format_context && _format_context->pb) {
+            printf("close: closing avio\n");
+            avio_closep(&_format_context->pb);
+        }
+
+        printf("close: freeing _format_context\n");
+        avformat_free_context(_format_context);
+        _format_context = NULL;
+    }
+
+    printf("close: finalizing\n");
+    _open = false;
+    _video_last_pts = 0;
+
+    printf("close: done\n");
+}
 
     std::vector<unsigned char> pack_pcm(uint8_t *frame, size_t frame_size) {
         std::vector<unsigned char> output_data;

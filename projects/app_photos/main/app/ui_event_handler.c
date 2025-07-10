@@ -34,6 +34,7 @@ extern lv_obj_t *g_btn_cancel;
 
 LV_IMG_DECLARE(img_dialog_confirm);
 LV_IMG_DECLARE(img_dialog_cancel);
+LV_IMG_DECLARE(img_btn_close);
 
 static struct {
     unsigned int exit_flag : 1;
@@ -203,7 +204,7 @@ static void confirm_btn_event_cb(lv_event_t * e) {
 }
 
 static void cancel_btn_event_cb(lv_event_t * e) {
-	//lv_obj_remove_flag(g_lower_screen, LV_OBJ_FLAG_HIDDEN);
+	lv_obj_remove_flag(g_lower_screen, LV_OBJ_FLAG_HIDDEN);
     lv_obj_del(lv_obj_get_parent(lv_event_get_target(e))); // 删除弹窗
 }
 
@@ -218,13 +219,26 @@ void show_confirm_dialog(const char * message, const char * action) {
     lv_obj_set_style_radius(dialog, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_move_foreground(dialog);
     lv_obj_set_style_pad_all(dialog, 0, 0);
+    
+    // 设置弹窗底色透明度
+    lv_obj_set_style_bg_color(dialog, lv_color_black(), LV_PART_MAIN); // 设置背景颜色为黑色
+    lv_obj_set_style_bg_opa(dialog, LV_OPA_90, LV_PART_MAIN); // 设置背景透明度为 90%
+    //lv_obj_set_style_bg_opa(dialog, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_border_width(dialog, 0, LV_PART_MAIN);
+    lv_obj_set_style_shadow_width(dialog, 0, LV_PART_MAIN);
 
-    // 提示文字
+    // 顶部标题
     lv_obj_t * title = lv_label_create(dialog);
     lv_label_set_text(title, "Tips");
     lv_obj_set_style_text_font(title, &lv_font_montserrat_32, 0);
-    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 24);
+    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 28);
 
+    // 顶部关闭按钮
+    lv_obj_t * btn_close = lv_img_create(dialog);
+    lv_img_set_src(btn_close, &img_btn_close);
+    lv_obj_align(btn_close, LV_ALIGN_TOP_RIGHT, -8, 8);
+    lv_obj_add_flag(btn_close, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(btn_close, cancel_btn_event_cb, LV_EVENT_CLICKED, NULL);
 
     // 提示文字
     lv_obj_t * label = lv_label_create(dialog);
@@ -253,7 +267,10 @@ void show_confirm_dialog_(const char * message, const char * action) {
     lv_obj_set_size(dialog, 640, 480);
     lv_obj_center(dialog);
     lv_obj_set_style_radius(dialog, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-    
+
+    // 设置弹窗背景颜色
+    lv_obj_set_style_bg_color(dialog, lv_color_black(), LV_PART_MAIN | LV_STATE_DEFAULT); 
+   
     lv_obj_move_foreground(dialog);
     lv_obj_set_style_pad_all(dialog, 10, 0);
 
