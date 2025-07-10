@@ -90,6 +90,8 @@ std::string custom_dir = "videos";
 std::string local_ip = "0.0.0.0";
 std::string broadcast_ip = "255.255.255.255";
 
+int udp_port = 5006;
+
 template <typename T>
 class DroppingQueue {
 public:
@@ -157,7 +159,6 @@ void udp_broadcast_thread(DroppingQueue<std::vector<uint8_t>>& queue, std::atomi
     log::info("***** UDP IP *****");
     log::info(broadcast_ip.c_str());
 
-    const int UDP_PORT = 5005;
     const char* BROADCAST_IP = broadcast_ip.c_str();
     const size_t MAX_PACKET_SIZE = 1200;
     const size_t HEADER_SIZE = 12;
@@ -180,7 +181,7 @@ void udp_broadcast_thread(DroppingQueue<std::vector<uint8_t>>& queue, std::atomi
 
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
-    addr.sin_port = htons(UDP_PORT);
+    addr.sin_port = htons(udp_port);
     addr.sin_addr.s_addr = inet_addr(BROADCAST_IP);
 
     uint32_t frame_id = 0;
@@ -1356,7 +1357,7 @@ printf("*** release venc\n");
         mmf_venc_free(1);
 
         // 将帧数据推送至VO
-        //mmf_vo_frame_push2(0, 0, 2, frame);
+        mmf_vo_frame_push2(0, 0, 2, frame);
 
 printf("*** release frame\n");
         // 释放帧数据
@@ -1378,8 +1379,8 @@ if(!img2) {
     continue;
 }
 
-printf("*** disp show img2\n");
-priv.disp->show(*img2);
+//printf("*** disp show img2\n");
+//priv.disp->show(*img2);
 printf("*** img_queue push img2\n");
 img_queue.push(img2);
 

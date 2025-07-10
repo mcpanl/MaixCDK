@@ -149,12 +149,18 @@ void show_toast(const char *text, uint32_t duration_ms)
     lv_anim_start(&a);
 }
 
+void simulate_btn_click_cb(void *btn_ptr)
+{
+    lv_obj_t *btn = (lv_obj_t *)btn_ptr;
+    lv_event_send(btn, LV_EVENT_CLICKED, NULL);
+}
 
 void trigger_left_button(void)
 {
 	DEBUG_EN(1);
 	DEBUG_PRT("LEFT CLICK on ui\n");
-
+    lv_obj_add_state(g_camera_image_button, LV_STATE_CHECKED);
+    lv_obj_clear_state(g_camera_video_button, LV_STATE_CHECKED);
     touch_video_camera(g_camera_image_button); // 切换到拍照模式
 }
 
@@ -162,7 +168,8 @@ void trigger_right_button(void)
 {
     DEBUG_EN(1);
     DEBUG_PRT("RIGHT CLICK on ui\n");
-
+    lv_obj_clear_state(g_camera_image_button, LV_STATE_CHECKED);
+    lv_obj_add_state(g_camera_video_button, LV_STATE_CHECKED);
     touch_video_camera(g_camera_video_button); // 切换到录像模式
 }
 
@@ -363,14 +370,14 @@ void event_touch_option_cb(lv_event_t * e)
 
 void touch_video_camera(lv_obj_t *clicked_btn)
 {
-    DEBUG_EN(0);
+    DEBUG_EN(1);
 
     if (lv_obj_has_state(g_start_snap_button, LV_STATE_USER_1)) {
         printf("Recording\n");
         show_toast("Recording. Cannot switch.", 2000);
 
-lv_obj_add_state(g_camera_video_button, LV_STATE_CHECKED);
-lv_obj_clear_state(g_camera_image_button, LV_STATE_CHECKED);
+        lv_obj_add_state(g_camera_video_button, LV_STATE_CHECKED);
+        lv_obj_clear_state(g_camera_image_button, LV_STATE_CHECKED);
 
         return; 
     }
@@ -383,7 +390,7 @@ lv_obj_clear_state(g_camera_image_button, LV_STATE_CHECKED);
         lv_obj_add_flag(g_start_snap_button, LV_OBJ_FLAG_CHECKABLE);
         lv_obj_add_state(g_start_snap_button, LV_STATE_CHECKED);
 	
-	lv_obj_add_flag(g_small_img, LV_OBJ_FLAG_HIDDEN);
+	    lv_obj_add_flag(g_small_img, LV_OBJ_FLAG_HIDDEN);
 
         DEBUG_PRT("ready to record video!\n");
         g_camera_mode = 1;
@@ -405,7 +412,7 @@ lv_obj_clear_state(g_camera_image_button, LV_STATE_CHECKED);
 
         lv_obj_add_state(g_camera_image_button, LV_STATE_CHECKED);
         lv_obj_clear_state(g_camera_video_button, LV_STATE_CHECKED);
-	lv_obj_remove_flag(g_small_img, LV_OBJ_FLAG_HIDDEN);
+	    lv_obj_remove_flag(g_small_img, LV_OBJ_FLAG_HIDDEN);
 
         DEBUG_PRT("ready to snap photo!\n");
         g_camera_mode = 0;

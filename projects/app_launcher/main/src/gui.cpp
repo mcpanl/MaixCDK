@@ -706,9 +706,12 @@ void launcher::create_home_items(Maix_GUI_Activity *activity, vector<app::APP_In
     }
     else
     {
+        // 禁止检查运行库是否有更新
+#if 0
         // check thread
         check_thread = new thread::Thread(check_process, nullptr);
         check_thread->detach();
+#endif
     }
 }
 
@@ -716,6 +719,8 @@ void launcher::create_home_items(Maix_GUI_Activity *activity, vector<app::APP_In
 void launcher::home_items_free(Maix_GUI_Activity *activity, vector<app::APP_Info>& app_info, void* screen)
 {
     gui_destroyed = true;
+
+#if 0
     log::info("wait check thread exit");
     while(!check_thread_exit)
     {
@@ -724,6 +729,7 @@ void launcher::home_items_free(Maix_GUI_Activity *activity, vector<app::APP_Info
     log::info("wait check thread exit done");
     delete check_thread;
     check_thread = nullptr;
+#endif
 
     log::info("wait bar update thread exit");
     while(!bar_update_thread_exit)
