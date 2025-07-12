@@ -41,8 +41,13 @@
 
 #include <arpa/inet.h>
 
+#include <iomanip>
+#include <sstream>
 
-#define ENABLE_DEBUG 1
+
+#include "region.hpp"
+
+#define ENABLE_DEBUG 0
 
 #if ENABLE_DEBUG
 
@@ -313,7 +318,8 @@ static struct {
     ffmpeg::FFmpegPacker *ffmpeg_packer;
     video::Encoder *encoder;
     audio::Recorder *audio_recorder;
-
+    Region *region;
+    Region *region2;
 
     uint64_t last_read_pcm_ms;
     uint64_t last_read_cam_ms;
@@ -972,6 +978,20 @@ static void _mmf_vi_frame_free(int ch, void **frame_info)
 }
 
 
+std::string formatRecordTime(int milliseconds) {
+    int totalSeconds = milliseconds / 1000;
+    int minutes = totalSeconds / 60;
+    int seconds = totalSeconds % 60;
+
+    std::ostringstream oss;
+    oss << std::setw(2) << std::setfill('0') << minutes
+        << ":" 
+        << std::setw(2) << std::setfill('0') << seconds;
+    
+    return oss.str();
+}
+
+
 int _main(int argc, char* argv[])
 {
     mmf_deinit_v2(true);
@@ -1033,10 +1053,11 @@ int _main(int argc, char* argv[])
 
     int cam_w = 1920;
     int cam_h = 1080;
-    int cam2_w = 160;
-    int cam2_h = 120;
+    int cam2_w = 320;
+    int cam2_h = 240;
 
     image::Format cam_fmt = image::Format::FMT_YVU420SP;
+    image::Format cam2_fmt = image::Format::FMT_RGB888;
     int cam_fps = 30;
     int cam_buffer_num = 3;
     int cam_bitrate = 9 * 1000 * 1000;
@@ -1045,7 +1066,17 @@ int _main(int argc, char* argv[])
     priv.video_stop_flag = false;
 
     priv.cam = new camera::Camera(cam_w, cam_h, cam_fmt, "", cam_fps, cam_buffer_num);
-    priv.cam2 = priv.cam->add_channel(cam2_w, cam2_h, cam_fmt, cam_fps, cam_buffer_num);
+    priv.cam2 = priv.cam->add_channel(cam2_w, cam2_h, cam2_fmt, cam_fps, cam_buffer_num);
+
+/*
+            auto string_size = image::string_size("0000-00-00 00:00:00");
+            auto region_w = 600;
+            auto region_h = 300;
+            auto region_x = 0;
+            auto region_y = 0;
+            priv.region = new Region(region_x, region_y, region_w, region_h, image::FMT_BGRA8888, priv.cam);
+            err::check_null_raise(priv.region, "region open failed");
+*/
 
     priv.disp = new display::Display();
 
@@ -1113,7 +1144,7 @@ int _main(int argc, char* argv[])
     
     // 构造文件名
     std::string output_path = "/root/" + custom_dir + "/" + std::to_string(record_number) + ".mp4";
-    printf("OutputPath = %s", output_path.c_str());
+    printf("OutputPath = %s\n", output_path.c_str());
     priv.ffmpeg_packer->config2("path", output_path.c_str());
 
     // priv.ffmpeg_packer->open();
@@ -1164,6 +1195,20 @@ int _main(int argc, char* argv[])
 
 //printf("*** from vi get data\n");
 
+
+        const char* time_str = get_current_time_string();
+
+        if (priv.region) {
+            if(time::ticks_ms() - priv.last_update_region_ms > 800) {
+                printf("******* REGION *********\n");
+                auto img = priv.region->get_canvas();
+                img->draw_string(24, 24, time_str, image::COLOR_BLACK, 2);
+                img->draw_string(22, 22, time_str, image::COLOR_WHITE, 2);
+                priv.region->update_canvas();
+                priv.last_update_region_ms = time::ticks_ms();
+            }
+        }
+
         // 从VI获取一帧数据
         int ch = priv.cam->get_channel();
         int res = _mmf_vi_frame_pop(ch, &frame, &f, 40);
@@ -1177,12 +1222,12 @@ int _main(int argc, char* argv[])
         }
 
 
-printf("*** push to venc\n");
+DEBUG_PRINT("*** push to venc\n");
         // 将帧数据推送至VENC
         int res2 = mmf_venc_push2(1, frame);
         DEBUG_PRINT("frame venc push %s", res2 == 0 ? "success" : "fail");
 
-printf("*** from venc get data\n");
+DEBUG_PRINT("*** from venc get data\n");
         // 从编码器通道1取出编码数据
         mmf_stream_t venc_stream = {0};
         if (0 == mmf_venc_pop(1, &venc_stream)) {
@@ -1191,7 +1236,7 @@ printf("*** from venc get data\n");
             }
         }
 
-printf("*** config pts sync\n");
+DEBUG_PRINT("*** config pts sync\n");
         // 配置视频PTS与音频PTS同步
         if (priv.ffmpeg_packer && recorderManager.isOpened()) {
             double temp_us = priv.ffmpeg_packer->video_pts_to_us(priv.video_pts);
@@ -1201,7 +1246,7 @@ printf("*** config pts sync\n");
         // printf("*** 取出的编码数据: %d \n", venc_stream.count);
 
 
-printf("*** found venc stream?\n");
+DEBUG_PRINT("*** found venc stream?\n");
         if (found_venc_stream) {
             // 如果 packer 没打开且是第一帧（含SPS/PPS），配置 SPS/PPS 并打开
             if (priv.ffmpeg_packer && recorderManager.isWaitingForSPS()) {
@@ -1242,7 +1287,7 @@ printf("*** found venc stream?\n");
                 }
             }
 
-printf("*** push video to packeter\n");
+DEBUG_PRINT("*** push video to packeter\n");
             // 如果 packer 已经打开，把编码数据推进去
             if (recorderManager.isOpened()) {
                 
@@ -1281,7 +1326,7 @@ printf("*** push video to packeter\n");
             }
 
 
-printf("*** push audio to packeter\n");
+DEBUG_PRINT("*** push audio to packeter\n");
             if (priv.audio_en && recorderManager.isOpened()) { 
                 //printf("Audio is enabled and ffmpeg_packer is opened.\n"); // Check if audio is enabled and ffmpeg_packer is opened.
 
@@ -1352,14 +1397,14 @@ printf("*** push audio to packeter\n");
         }
 
 
-printf("*** release venc\n");
+DEBUG_PRINT("*** release venc\n");
         // 释放VENC资源
         mmf_venc_free(1);
 
         // 将帧数据推送至VO
-        mmf_vo_frame_push2(0, 0, 2, frame);
+        // mmf_vo_frame_push2(0, 0, 2, frame);
 
-printf("*** release frame\n");
+DEBUG_PRINT("*** release frame\n");
         // 释放帧数据
         _mmf_vi_frame_free(ch, &frame);
 #if 0
@@ -1369,20 +1414,41 @@ printf("*** release frame\n");
 
         delete img;
 
-printf("*** read from cam2\n");
+
+image::Image* disp_img = new image::Image(priv.disp->width(), priv.disp->height(), image::FMT_RGB888);
+
+
+DEBUG_PRINT("disp_img format=%d", disp_img->format());
+
+
+DEBUG_PRINT("*** read from cam2\n");
 image::Image* img2 = priv.cam2->read();
 
-DEBUG_PRINT("img2 read ptr = %p", img2);
-if(!img2) {
-    DEBUG_PRINT("img2 read fail");
-    time::sleep_ms(10);
-    continue;
+
+img2->draw_string(13, 13, time_str, image::COLOR_BLACK);
+img2->draw_string(12, 12, time_str, image::COLOR_WHITE);
+
+
+DEBUG_PRINT("img2 read ptr = %p, format=%d", img2, img2->format());
+if(img2) {
+    DEBUG_PRINT("*** img_queue push img2\n");
+    
+    disp_img->draw_image(priv.disp->width() / 2 - img2->width() / 2, priv.disp->height() / 2 - img2->height() / 2, *img2);
+
+    if (recorderManager.isRecording()) {
+        disp_img->draw_string(12, 12, formatRecordTime(recorderManager.getRecordDuration()).c_str(), image::COLOR_WHITE);       
+    } else {
+        disp_img->draw_string(12, 12, "Ready", image::COLOR_WHITE);
+    }
+
+    // disp_img->draw_string(0, 0, time_str, image::Color::from_rgb(255,255,255));
+
+    img_queue.push(img2);
 }
 
 //printf("*** disp show img2\n");
-//priv.disp->show(*img2);
-printf("*** img_queue push img2\n");
-img_queue.push(img2);
+priv.disp->show(*disp_img);
+delete disp_img;
 
         //image::Image *img2 = priv.cam2->read();    
         //priv.disp->show(*img2);
@@ -1422,8 +1488,7 @@ if(priv.video_stop_flag) {
 #endif
 //printf("==================================\n");
         uint64_t curr_ms = time::ticks_ms();
-DEBUG_PRINT("loop end tick = %d", curr_ms);
-        // log::info("loop use %lld ms\r\n", curr_ms - last_ms);
+        log::info("loop use %lld ms\r\n", curr_ms - last_ms);
         last_ms = curr_ms;
     }
 
@@ -1443,6 +1508,11 @@ DEBUG_PRINT("loop end tick = %d", curr_ms);
     std::cout << "Server stopped.\n";
 
     printf("准备关闭视频流\n");
+
+    if (priv.region) {
+        delete priv.region;
+        priv.region = nullptr;
+    }
 
     priv.ffmpeg_packer->close();
     delete priv.encoder;
