@@ -11,6 +11,151 @@
 #include <mutex>
 #include <pthread.h>
 
+#include <stdio.h>      // perror(), printf()
+#include <stdlib.h>     // exit()
+#include <stdint.h>     // uint32_t, uintptr_t
+#include <fcntl.h>      // open(), O_RDWR, O_SYNC
+#include <sys/mman.h>   // mmap(), munmap(), PROT_*, MAP_*
+
+#define PAGE_SIZE       4096
+#define GPIO_BASE       0x03020000
+#define GPIO_CFG_OFFSET 0x0004     // 配置寄存器偏移
+#define GPIO_DATA_OFFSET 0x0050    // 数据寄存器偏移
+
+
+class Maix_GUI_Activity;
+class Activity_LVGL;
+
+static Activity_LVGL* current_activity = nullptr;
+
+void handler_back();
+
+// 物理地址映射到虚拟地址
+volatile uint32_t *map_physical_address(off_t phys_addr) {
+    int mem_fd = open("/dev/mem", O_RDWR | O_SYNC);
+    if (mem_fd < 0) {
+        perror("open /dev/mem");
+        exit(1);
+    }
+
+    void *map_base = mmap(
+            NULL,
+            PAGE_SIZE,
+            PROT_READ | PROT_WRITE,
+            MAP_SHARED,
+            mem_fd,
+            phys_addr & ~(PAGE_SIZE - 1)
+            );
+
+    close(mem_fd);
+
+    if (map_base == MAP_FAILED) {
+        perror("mmap");
+        exit(1);
+    }
+
+    return (volatile uint32_t *)((char *)map_base + (phys_addr & (PAGE_SIZE - 1)));
+}
+
+// 写32位值
+void mmio_write_32(off_t addr, uint32_t value) {
+    volatile uint32_t *ptr = map_physical_address(addr);
+    *ptr = value;
+    munmap((void *)((uintptr_t)ptr & ~(PAGE_SIZE - 1)), PAGE_SIZE);
+}
+
+// 读32位值
+uint32_t mmio_read_32(off_t addr) {
+    volatile uint32_t *ptr = map_physical_address(addr);
+    uint32_t value = *ptr;
+    munmap((void *)((uintptr_t)ptr & ~(PAGE_SIZE - 1)), PAGE_SIZE);
+    return value;
+}
+
+// 初始化 GPIO 输入功能（将某位设为0，配置为输入）
+void init_input_gpio_a(int num) {
+    off_t address = GPIO_BASE + GPIO_CFG_OFFSET;
+    uint32_t val = mmio_read_32(address);
+    val &= ~(1 << num);  // 清除该位，设为输入
+    mmio_write_32(address, val);
+}
+
+// 读取 GPIO 输入值
+int read_input_gpio_a(int num) {
+    off_t address = GPIO_BASE + GPIO_DATA_OFFSET;
+    uint32_t val = mmio_read_32(address);
+    return (val >> num) & 0x1;
+}
+
+void init_key()
+{
+    init_input_gpio_a(22);
+    init_input_gpio_a(23);
+    init_input_gpio_a(25);
+    init_input_gpio_a(30);
+}
+
+class KeyDetector {
+    public:
+        using Callback = std::function<void()>;
+
+        struct KeyConfig {
+            int gpio_pin;
+            int trigger_count;
+            Callback callback;
+            int count = 0;
+        };
+
+        void add_key(int id, int gpio_pin, int trigger_count, Callback callback) {
+            printf("ADD KEY %d \n", gpio_pin);
+            keys_[id] = KeyConfig{gpio_pin, trigger_count, callback, 0};
+        }
+
+        void update() {
+            for (auto& [id, config] : keys_) {
+                int value = read_input_gpio_a(config.gpio_pin);
+                if (value == 0) {
+                    config.count++;
+                    if (config.count == config.trigger_count && config.callback) {
+                        config.callback();
+                    }
+                } else {
+                    config.count = 0;
+                }
+            }
+        }
+
+    private:
+        std::unordered_map<int, KeyConfig> keys_;
+};
+
+
+KeyDetector detector;
+
+
+void setup_keys() {
+    detector.add_key(1, 25, 2, [](){
+        log::info("Key left trigger");
+        //trigger_left_button();
+    });
+
+    detector.add_key(2, 22, 5, [](){
+        log::info("Key mid triggered");
+        handler_back();
+    });
+
+    detector.add_key(3, 23, 2, [](){
+        log::info("Key right triggered");
+        //trigger_right_button();
+    });
+
+    detector.add_key(4, 30, 1, [](){
+        log::info("Key user triggered");
+        //trigger_user_button();
+    });
+}
+
+
 // #define SDL_MAIN_HANDLED /*To fix SDL's "undefined reference to WinMain" issue*/
 // #define _DEFAULT_SOURCE /* needed for usleep() */
 
@@ -127,6 +272,10 @@ void lv_ui_mutex_unlock()
 template <typename T_OBJ>
 void Maix_GUI<T_OBJ>::run()
 {
+
+    init_key();
+    setup_keys();
+
     // enable recursive mutex
     pthread_mutexattr_t attr;
     pthread_mutexattr_init(&attr);
@@ -134,6 +283,9 @@ void Maix_GUI<T_OBJ>::run()
     pthread_mutex_init(&g_lv_ui_mutex, &attr);
     while (!app::need_exit())
     {
+
+        detector.update();
+
         /* Periodically call the lv_task handler.
          * It could be done in a timer interrupt or an OS task too.*/
         lv_ui_mutex_lock(-1);
@@ -262,6 +414,11 @@ public:
                 lv_screen_load_anim(scr, LV_SCR_LOAD_ANIM_MOVE_LEFT, 200, 0, false);
             lv_ui_mutex_unlock();
         }
+
+        current_activity = this;
+
+        printf("*** current activity changed ***\n");    
+    
         activated = true;
     }
     void destroy(Maix_Activity_MSG *msg = nullptr)
@@ -288,6 +445,9 @@ public:
                 // root activity, do nothing
             }
         }
+        
+        current_activity = nullptr;
+        
         activated = false;
     }
     static void return_event_cb(lv_event_t *e)
@@ -338,11 +498,11 @@ public:
     }
 
 public:
+    Maix_GUI_Activity* activity;
     lv_obj_t *scr;
     string id;
     bool ret_gesture;
 private:
-    Maix_GUI_Activity* activity;
     lv_obj_t *scr_arg;
     lv_obj_t *left_obj;
     lv_obj_t *parent_scr;
@@ -435,3 +595,13 @@ void* Maix_GUI_Activity::get_raw()
     return ((Activity_LVGL*)data)->scr;
 }
 
+
+void handler_back() {
+    printf("*** hadnler back\n");
+
+    if(current_activity) {
+        current_activity->destroy();
+    } else {
+        app::set_exit_flag(true);
+    }
+}

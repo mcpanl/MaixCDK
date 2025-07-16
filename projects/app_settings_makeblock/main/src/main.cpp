@@ -26,11 +26,12 @@
 #include <thread>
 #include "maix_comm.hpp"
 
-
 bool showing_msg = false;
 display::Display *p_display = NULL;
 
-static Maix_GUI_Activity *main_activity = NULL, *info_activity = NULL, *language_activity = NULL, *wifi_activity = NULL;
+Maix_GUI_Activity* main_activity = nullptr;
+
+static Maix_GUI_Activity *info_activity = NULL, *language_activity = NULL, *wifi_activity = NULL;
 static Maix_GUI_Activity *comm_activity = NULL, *about_activity = NULL, *poweroff_activity = NULL, *volume_activity = NULL;
 static Maix_GUI_Activity *upgrade_maixpy = NULL, *upgrade_lib_activity = NULL, *auto_start_activity = NULL, *backlight_activity = NULL, *usb_settings = NULL;
 static Maix_GUI_Activity *datetime = NULL;
