@@ -895,11 +895,12 @@ void jpeg_worker_thread(DroppingQueue<image::Image*>& img_queue,
 
         std::vector<uint8_t> jpeg(jpeg_data, jpeg_data + jpeg_size);
         jpeg_queue.push(std::move(jpeg));
-
+/*
         char buffer[256];
         snprintf(buffer, sizeof(buffer), "JPEG_SIZE = %d\n", jpeg_size);
 
         server->broadcastText(buffer);
+*/
 
         delete jpg_img;
         delete img;
@@ -1165,6 +1166,8 @@ int _main(int argc, char* argv[])
     err::check_raise(priv.rtsp->start());
 #endif
 
+    uint64_t total_audio_samples_sent = 0;
+
     uint64_t last_ms = time::ticks_ms();
     int cnt = 0;
     while(!app::need_exit()) {
@@ -1278,6 +1281,8 @@ DEBUG_PRINT("*** found venc stream?\n");
                                 priv.audio_recorder->reset();
                             }
 
+                            total_audio_samples_sent = 0;
+
                             priv.last_read_cam_ms = 0;
                             priv.video_pts = 0;
                             priv.audio_pts = 0;
@@ -1361,24 +1366,34 @@ DEBUG_PRINT("*** push audio to packeter\n");
                 auto remain_frame_bytes = remain_frame_count * bytes_per_frame;
                 //printf("Remaining frame bytes: %llu\n", remain_frame_bytes); // Output the remaining frame bytes.
 
-                read_pcm_size = (read_pcm_size + 1023) & ~1023;
-                //printf("Adjusted read_pcm_size: %d\n", read_pcm_size); // Debug adjusted PCM size.
+/*
+read_pcm_size = remain_frame_bytes;
+read_pcm_size = std::max(read_pcm_size, 1024);
+read_pcm_size = (read_pcm_size + 1023) & ~1023;
+*/
+                //read_pcm_size = (read_pcm_size + 1023) & ~1023;
+                printf("Adjusted read_pcm_size: %d\n", read_pcm_size); // Debug adjusted PCM size.
 
                 if (read_pcm_size > remain_frame_bytes) {
                     read_pcm_size = remain_frame_bytes;
-                    //printf("Read PCM size exceeded remaining bytes, adjusted to: %d\n", read_pcm_size); // Debug if adjustment happens.
+                    printf("Read PCM size exceeded remaining bytes, adjusted to: %d\n", read_pcm_size); // Debug if adjustment happens.
                 }
 
                 Bytes *pcm_data = priv.audio_recorder->record_bytes(read_pcm_size);
                 if (pcm_data && pcm_data->data) {
-                    //printf("Recorded PCM data: data_len = %d\n", pcm_data->data_len); // Debug PCM data length.
-                    //printf("pcm_data->data = %p, data_len = %d\n", pcm_data->data, pcm_data->data_len);
+                    printf("Recorded PCM data: data_len = %d\n", pcm_data->data_len); // Debug PCM data length.
+                    printf("pcm_data->data = %p, data_len = %d\n", pcm_data->data, pcm_data->data_len);
                     if (pcm_data->data_len > 0) {
+/*
+int samples_this_frame = read_pcm_size / 2;  // mono * 16bit = 2 bytes/sample
 
-#if ENABLE_PIPE
-                        static int audio_frame_index = 1;  // 全局或静态变量记录帧编号
-                        save_audio_to_file(pcm_data->data, pcm_data->data_len, audio_frame_index++);
-#endif
+uint64_t sample_rate = 48000;
+uint64_t time_base = 1000000;
+
+priv.audio_pts = total_audio_samples_sent * time_base / sample_rate;
+
+printf("[AUDIO] pts: %d, pcm_len: %d\n", priv.audio_pts, pcm_data->data_len);
+*/
                         // log::info("[AUDIO] pts:%d  pts %f s", priv.audio_pts, priv.ffmpeg_packer->audio_pts_to_us(priv.audio_pts) / 1000000);
                         if (err::ERR_NONE != priv.ffmpeg_packer->push(pcm_data->data, pcm_data->data_len, priv.audio_pts, true)) {
                             log::error("ffmpeg push failed!");
@@ -1386,6 +1401,8 @@ DEBUG_PRINT("*** push audio to packeter\n");
                         } else {
                            // printf("ffmpeg push succeeded.\n"); // Debug ffmpeg push success.
                         }
+    // 更新累计
+    //total_audio_samples_sent += samples_this_frame;
                     }
                     delete pcm_data;
                     //printf("PCM data deleted.\n"); // Debug PCM data deletion.
@@ -1488,7 +1505,7 @@ if(priv.video_stop_flag) {
 #endif
 //printf("==================================\n");
         uint64_t curr_ms = time::ticks_ms();
-        log::info("loop use %lld ms\r\n", curr_ms - last_ms);
+        // log::info("loop use %lld ms\r\n", curr_ms - last_ms);
         last_ms = curr_ms;
     }
 
