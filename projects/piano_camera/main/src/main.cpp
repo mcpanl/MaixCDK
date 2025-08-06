@@ -10,6 +10,7 @@
 #include "maix_basic.hpp"
 #include "maix_ffmpeg.hpp"
 #include "sophgo_middleware.hpp"
+#include "maix_pmu.hpp"
 #include "csignal"
 #include <iostream>
 #include <termios.h>
@@ -49,6 +50,10 @@
 
 #define ENABLE_DEBUG 0
 
+
+
+#define UPDATE_LINE(fmt, ...) printf("\r" fmt, ##__VA_ARGS__); fflush(stdout)
+
 #if ENABLE_DEBUG
 
 // 获取当前时间字符串，格式为 HH:MM:SS.mmm
@@ -84,6 +89,7 @@ inline const char* current_time_str() {
 
 using namespace maix;
 using namespace maix::network;
+using namespace ext_dev;
 
 #define PORT 8090
 #define ENABLE_RTSP 0
@@ -95,7 +101,247 @@ std::string custom_dir = "videos";
 std::string local_ip = "0.0.0.0";
 std::string broadcast_ip = "255.255.255.255";
 
+int udp_w = 320;
+int udp_h = 240;
+
 int udp_port = 5006;
+
+const char* get_current_time_string();
+
+enum class RepeatType {
+    Once = 0,
+    Daily = 1,
+    Weekly = 2,
+    Monthly = 3
+};
+
+struct RecordingTask {
+    std::string studentId;
+    std::string startTimeStr;   // 格式 "YYYY-MM-DD HH:MM"
+    int durationMinutes;
+    RepeatType repeatType;
+    std::string weekdayStr;     // "Monday", "Tuesday", ...
+    int monthlyDay;
+};
+
+class TaskScheduler {
+public:
+    void addTask(const RecordingTask& task) {
+        std::lock_guard<std::mutex> lock(taskMutex);
+        tasks.push_back(task);
+    }
+
+    void printTaskList() {
+        std::lock_guard<std::mutex> lock(taskMutex);
+
+        const int idWidth = 13;
+        const int timeWidth = 21;
+        const int durationWidth = 10;
+        const int repeatWidth = 11;
+        const int weekdayWidth = 10;
+        const int monthDayWidth = 12;
+
+        auto repeatToStr = [](RepeatType rt) -> std::string {
+            switch (rt) {
+                case RepeatType::Once: return "Once";
+                case RepeatType::Daily: return "Daily";
+                case RepeatType::Weekly: return "Weekly";
+                case RepeatType::Monthly: return "Monthly";
+                default: return "Unknown";
+            }
+        };
+
+        auto printLine = [&]() {
+            std::cout
+                << "+" << std::string(idWidth, '-')
+                << "+" << std::string(timeWidth, '-')
+                << "+" << std::string(durationWidth, '-')
+                << "+" << std::string(repeatWidth, '-')
+                << "+" << std::string(weekdayWidth, '-')
+                << "+" << std::string(monthDayWidth, '-')
+                << "+" << std::endl;
+        };
+
+        printLine();
+        std::cout << "| " << std::left << std::setw(idWidth - 1) << "Student ID"
+                  << "| " << std::setw(timeWidth - 1) << "Start Time"
+                  << "| " << std::setw(durationWidth - 1) << "Duration"
+                  << "| " << std::setw(repeatWidth - 1) << "Repeat"
+                  << "| " << std::setw(weekdayWidth - 1) << "Weekday"
+                  << "| " << std::setw(monthDayWidth - 1) << "Month Day"
+                  << "|" << std::endl;
+        printLine();
+
+        for (const auto& task : tasks) {
+            std::cout << "| " << std::left << std::setw(idWidth - 1) << task.studentId
+                      << "| " << std::setw(timeWidth - 1) << task.startTimeStr
+                      << "| " << std::setw(durationWidth - 1) << task.durationMinutes
+                      << "| " << std::setw(repeatWidth - 1) << repeatToStr(task.repeatType)
+                      << "| " << std::setw(weekdayWidth - 1) << task.weekdayStr
+                      << "| " << std::setw(monthDayWidth - 1) << task.monthlyDay
+                      << "|" << std::endl;
+        }
+
+        printLine();
+    }
+
+    void loadFromFile(const std::string& filename) {
+        std::ifstream file(filename);
+        if (!file) {
+            std::cerr << "无法打开任务文件: " << filename << std::endl;
+            return;
+        }
+
+        std::string line;
+        // 跳过表头
+        if (!std::getline(file, line)) return;
+
+        while (std::getline(file, line)) {
+            std::istringstream ss(line);
+            RecordingTask task;
+            int repeatTypeInt;
+
+            ss >> std::quoted(task.studentId);
+            ss.ignore(1); // 跳过逗号
+
+            ss >> std::quoted(task.startTimeStr);
+            ss.ignore(1);
+
+            ss >> task.durationMinutes;
+            ss.ignore(1);
+
+            ss >> repeatTypeInt;
+            ss.ignore(1);
+
+            ss >> std::quoted(task.weekdayStr);
+            ss.ignore(1);
+
+            ss >> task.monthlyDay;
+
+            task.repeatType = static_cast<RepeatType>(repeatTypeInt);
+            addTask(task);
+        }
+    }
+
+    void saveToFile(const std::string& filename) {
+        std::ofstream file(filename);
+        if (!file) {
+            std::cerr << "无法写入任务文件: " << filename << std::endl;
+            return;
+        }
+
+        std::lock_guard<std::mutex> lock(taskMutex);
+
+        // 可选：写入表头
+        file << "\"studentId\",\"startTimeStr\",durationMinutes,repeatType,\"weekdayStr\",monthlyDay\n";
+
+        for (const auto& task : tasks) {
+            file << std::quoted(task.studentId) << ","
+                 << std::quoted(task.startTimeStr) << ","
+                 << task.durationMinutes << ","
+                 << static_cast<int>(task.repeatType) << ","
+                 << std::quoted(task.weekdayStr) << ","
+                 << task.monthlyDay << "\n";
+        }
+    }
+
+    void run() {
+        checkAndRunTasks();
+        // while (true) {
+        //     std::this_thread::sleep_for(std::chrono::seconds(800));
+        // }
+    }
+
+private:
+    std::vector<RecordingTask> tasks;
+    std::mutex taskMutex;
+
+    std::tm parseTime(const std::string& timeStr) {
+        std::tm tm = {};
+        std::istringstream ss(timeStr);
+        ss >> std::get_time(&tm, "%Y-%m-%d %H:%M");
+        return tm;
+    }
+
+    int weekdayStringToInt(const std::string& weekday) {
+        std::string wd = weekday;
+        std::transform(wd.begin(), wd.end(), wd.begin(), ::tolower);
+
+        if (wd == "sunday") return 0;
+        if (wd == "monday") return 1;
+        if (wd == "tuesday") return 2;
+        if (wd == "wednesday") return 3;
+        if (wd == "thursday") return 4;
+        if (wd == "friday") return 5;
+        if (wd == "saturday") return 6;
+        return -1;
+    }
+
+    void checkAndRunTasks() {
+        auto now = std::chrono::system_clock::now();
+        std::time_t now_t = std::chrono::system_clock::to_time_t(now);
+        std::tm* now_tm = std::localtime(&now_t);
+
+        std::lock_guard<std::mutex> lock(taskMutex);
+
+        printf("** TASK RUNNING **\n");
+
+        for (const auto& task : tasks) {
+            std::tm task_tm = parseTime(task.startTimeStr);
+            bool shouldRun = false;
+
+            switch (task.repeatType) {
+                case RepeatType::Once:
+                    if (now_tm->tm_year == task_tm.tm_year &&
+                        now_tm->tm_mon == task_tm.tm_mon &&
+                        now_tm->tm_mday == task_tm.tm_mday &&
+                        now_tm->tm_hour == task_tm.tm_hour &&
+                        now_tm->tm_min == task_tm.tm_min) {
+                        shouldRun = true;
+                    }
+                    break;
+
+                case RepeatType::Daily:
+                    if (now_tm->tm_hour == task_tm.tm_hour &&
+                        now_tm->tm_min == task_tm.tm_min) {
+                        shouldRun = true;
+                    }
+                    break;
+
+                case RepeatType::Weekly:
+                    if (now_tm->tm_wday == weekdayStringToInt(task.weekdayStr) &&
+                        now_tm->tm_hour == task_tm.tm_hour &&
+                        now_tm->tm_min == task_tm.tm_min) {
+                        shouldRun = true;
+                    }
+                    break;
+
+                case RepeatType::Monthly:
+                    if (now_tm->tm_mday == task.monthlyDay &&
+                        now_tm->tm_hour == task_tm.tm_hour &&
+                        now_tm->tm_min == task_tm.tm_min) {
+                        shouldRun = true;
+                    }
+                    break;
+            }
+
+            if (shouldRun) {
+                std::thread(&TaskScheduler::executeTask, this, task).detach();
+            }
+        }
+    }
+
+    void executeTask(RecordingTask task) {
+        std::cout << "🎥 开始录像: 学生ID = " << task.studentId
+                  << ", 时长 = " << task.durationMinutes << " 分钟" << std::endl;
+
+        std::this_thread::sleep_for(std::chrono::minutes(task.durationMinutes));
+
+        std::cout << "✅ 录像结束: 学生ID = " << task.studentId << std::endl;
+    }
+};
+
+
 
 template <typename T>
 class DroppingQueue {
@@ -165,7 +411,7 @@ void udp_broadcast_thread(DroppingQueue<std::vector<uint8_t>>& queue, std::atomi
     log::info(broadcast_ip.c_str());
 
     const char* BROADCAST_IP = broadcast_ip.c_str();
-    const size_t MAX_PACKET_SIZE = 1200;
+    const size_t MAX_PACKET_SIZE = 1400;
     const size_t HEADER_SIZE = 12;
     const size_t CHUNK_SIZE = MAX_PACKET_SIZE - HEADER_SIZE;
     
@@ -233,76 +479,11 @@ void udp_broadcast_thread(DroppingQueue<std::vector<uint8_t>>& queue, std::atomi
             
         }
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(125));
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 
     close(sock);
 }
-
-
-
-#if 0
-void jpeg_worker_thread(DroppingQueue<image::Image*>& img_queue,
-                        DroppingQueue<std::vector<uint8_t>>& jpeg_queue,
-                        std::atomic<bool>& running)
-
-void jpeg_worker_thread(DroppingQueue<std::unique_ptr<maix::image::Image>>& img_queue,
-                        DroppingQueue<std::vector<uint8_t>>& jpeg_queue,
-                        std::atomic<bool>& running)
-{
-    printf("*** START jpeg_worker ***\n");
-
-    while (running) {
-#if 0
-        image::Image* img = nullptr;
-        if (!img_queue.try_pop(img)) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(30));
-            continue;
-        }
-
-        image::Image* jpg_img = img->to_format(image::FMT_JPEG);
-        uint8_t* jpeg_data = (uint8_t*)jpg_img->data();
-        size_t jpeg_size = jpg_img->data_size();
-
-        std::vector<uint8_t> jpeg(jpeg_data, jpeg_data + jpeg_size);
-        jpeg_queue.push(std::move(jpeg));
-
-        delete jpg_img;
-        delete img;
-#endif
-
-std::unique_ptr<image::Image> img;
-if (!img_queue.try_pop(img)) {
-    printf("jpeg_worker: no try_pop result\n");
-    std::this_thread::sleep_for(std::chrono::milliseconds(30));
-    continue;
-}
-printf("jpeg_worker: got image\n");
-
-if (!img) {
-    printf("jpeg_worker: got nullptr image, skipping\n");
-    continue;
-}
-
-auto jpg_img = std::unique_ptr<image::Image>(img->to_format(image::FMT_JPEG));
-if (!jpg_img) {
-    printf("jpeg_worker: to_format failed\n");
-    continue;
-}
-//printf("jpeg_worker: to_format done\n");
-
-uint8_t* jpeg_data = static_cast<uint8_t*>(jpg_img->data());
-size_t jpeg_size = jpg_img->data_size();
-std::cout << "Address of jpg_img->data(): " << static_cast<const void*>(jpg_img->data()) << std::endl;
-
-std::vector<uint8_t> jpeg(jpeg_data, jpeg_data + jpeg_size);
-jpeg_queue.push(std::move(jpeg));
-//printf("jpeg_worker: jpeg pushed, size = %zu\n", jpeg_size);
-
-        std::this_thread::sleep_for(std::chrono::milliseconds(30));
-    }
-}
-#endif
 
 static std::vector<uint8_t> g_sps_pps_buf;
 
@@ -318,6 +499,10 @@ static struct {
     ffmpeg::FFmpegPacker *ffmpeg_packer;
     video::Encoder *encoder;
     audio::Recorder *audio_recorder;
+    pmu::PMU *pmu;
+
+    TaskScheduler *scheduler;
+
     Region *region;
     Region *region2;
 
@@ -335,50 +520,111 @@ static struct {
 
 
     bool video_stop_flag;
+
+    std::string device_key;
+    long disk_total;
+    long disk_used;
+
+    int bat_percent;
+    bool is_charging;
+    bool is_vbus_in;
 } priv;
 
 
-#if ENABLE_PIPE
-int pipe_fd = -1;
+void task_worker_thread(std::atomic<bool>& running) {
+    while (running) {
+        if (priv.scheduler) {
+            priv.scheduler -> run();
+        }
 
-void save_video_to_file(const uint8_t *data, int size, int index) {
-    if (pipe_fd < 0 || size <= 0 || data == nullptr) return;
-
-    // 每帧都写入 SPS/PPS + 帧数据
-    if (!g_sps_pps_buf.empty()) {
-        write(pipe_fd, g_sps_pps_buf.data(), g_sps_pps_buf.size());
-    }
-    write(pipe_fd, data, size);
-}
-
-void save_audio_to_file(const uint8_t *data, int size, int index) {
-
-}
-#endif
-
-#if 0
-void save_video_to_file(const uint8_t *data, int size, int index) {
-    char filename[64];
-    snprintf(filename, sizeof(filename), "/root/%03d.bin", index);
-    std::ofstream ofs(filename, std::ios::binary);
-    if (ofs.is_open()) {
-        ofs.write((const char *)data, size);
-        ofs.close();
+        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
     }
 }
 
-void save_audio_to_file(const uint8_t *data, int size, int index) {
-    write(ffmpeg_audio_fd, data, size);
-    char filename[64];
-    snprintf(filename, sizeof(filename), "/root/%03d_audio.bin", index);
-    std::ofstream ofs(filename, std::ios::binary);
-    if (ofs.is_open()) {
-        ofs.write((const char *)data, size);
-        ofs.close();
+void cam2_worker_thread(DroppingQueue<image::Image*>& img_queue, std::atomic<bool>& running)
+{
+    // printf("^^ CAM2 WORKER RUN\n");
+    uint64_t last_pmu_ms = time::ticks_ms();
+
+    while(running) {
+        // printf("^^ CAM2 LOOP\n");
+        try {
+            uint64_t curr_ms = time::ticks_ms();
+            image::Image* disp_img = nullptr;
+            image::Image* img = nullptr;
+
+            if (priv.disp) {
+                disp_img = new image::Image(priv.disp->width(), priv.disp->height(), image::FMT_RGB888);
+            }
+
+            if (priv.cam2) {
+                // printf("^^ CAM2 READ\n");
+                 img = priv.cam2->read();
+                // printf("^^ CAM2 READ END\n");
+            }
+
+            if (disp_img) {
+                const char* time_str = get_current_time_string();
+
+                if (img) {
+                    disp_img->draw_image(priv.disp->width() - img->width(), priv.disp->height() / 2 - img->height() / 2, *img);
+
+                    img->draw_string(24, 24, time_str, image::COLOR_BLACK, 1, 1);
+                    img->draw_string(24 - 1, 24 - 1, time_str, image::COLOR_WHITE, 1, 1);
+
+                    if (priv.bat_percent) {
+                        std::string bat_text = "[" + std::to_string(priv.bat_percent) + "%]";
+                        if (priv.is_charging) {
+                            img->draw_string(254, 24, bat_text, image::COLOR_BLACK, 1, 1);
+                            img->draw_string(254 - 1, 24 - 1, bat_text, image::COLOR_GREEN, 1, 1);
+                        } else {
+                            img->draw_string(254, 24, bat_text, image::COLOR_BLACK, 1, 1);
+                            img->draw_string(254 - 1, 24 - 1, bat_text, image::COLOR_WHITE, 1, 1);
+                        }
+                    }
+
+                }
+
+
+                priv.disp->show(*disp_img);
+                delete disp_img;
+            }
+
+            if (img) {
+                img_queue.push(img);  // 向队列插入图像
+                // printf("^^ CAM2 pushed new image\n");
+            }
+
+
+            if (curr_ms - last_pmu_ms > 1000) {
+                if (priv.pmu) {
+                    priv.bat_percent = priv.pmu->get_bat_percent();
+                    priv.is_charging = priv.pmu->is_charging();
+                    priv.is_vbus_in = priv.pmu->is_vbus_in();
+
+                    if (priv.bat_percent < 10) {
+                        priv.pmu->set_bat_charging_cur(200);
+                    } else if (priv.bat_percent < 25) {
+                        priv.pmu->set_bat_charging_cur(400);
+                    } else if (priv.bat_percent < 45) {
+                        priv.pmu->set_bat_charging_cur(600);
+                    } else if (priv.bat_percent < 60) {
+                        priv.pmu->set_bat_charging_cur(800);
+                    } else {
+                        priv.pmu->set_bat_charging_cur(1000);
+                    }
+                }
+
+                last_pmu_ms = curr_ms;
+            }
+        } catch (const err::Exception& e) {
+            printf("\n^^ CAM2 READ ERROR!!!!!!!!!!\n");
+        }
+
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(75));
     }
 }
-#endif
-
 
 class RecorderManager
 {
@@ -594,41 +840,6 @@ private:
             queueCond.notify_one();
         }
 
-/*
-        void run() {
-            while (active) {
-                // Read
-                char buffer[1024];
-                ssize_t bytes_read = recv(fd, buffer, sizeof(buffer), 0);
-                if (bytes_read <= 0) {
-                    std::cout << "Client disconnected: " << fd << std::endl;
-                    break;
-                }
-                if (onMessage) {
-                    std::vector<char> data(buffer, buffer + bytes_read);
-                    onMessage(fd, data);
-                }
-
-                // Send
-                std::unique_lock<std::mutex> lock(queueMutex);
-                queueCond.wait_for(lock, std::chrono::milliseconds(10), [this]() { return !sendQueue.empty() || !active; });
-
-                while (!sendQueue.empty()) {
-                    auto& msg = sendQueue.front();
-                    ssize_t sent = send(fd, msg.data(), msg.size(), 0);
-                    if (sent < 0) {
-                        std::cerr << "Send error on client: " << fd << std::endl;
-                        active = false;
-                        break;
-                    }
-                    sendQueue.pop();
-                }
-            }
-
-            active = false;  // Mark as inactive for server cleanup
-        }
-*/
-
 void runSelectLoop() {
     // 设置为非阻塞（可选，但推荐）
     int flags = fcntl(fd, F_GETFL, 0);
@@ -685,45 +896,6 @@ void runSelectLoop() {
     active = false;
     queueCond.notify_all();
 }
-
-/*
-    void readLoop() {
-        while (!app::need_exit() && active) {
-            char buffer[1024];
-            ssize_t bytes_read = recv(fd, buffer, sizeof(buffer), 0);
-            if (bytes_read <= 0) {
-                std::cout << "Client disconnected: " << fd << std::endl;
-                break;
-            }
-            if (onMessage) {
-                std::vector<char> data(buffer, buffer + bytes_read);
-                onMessage(fd, data);
-            }
-        }
-        active = false;
-        queueCond.notify_all();  // in case write is waiting
-    }
-
-    void writeLoop() {
-        while (!app::need_exit() && active) {
-            std::unique_lock<std::mutex> lock(queueMutex);
-            queueCond.wait(lock, [this]() { return !sendQueue.empty() || !active || app::need_exit(); });
-
-            while (!app::need_exit() && !sendQueue.empty()) {
-                auto msg = sendQueue.front();
-                sendQueue.pop();
-                lock.unlock();  // unlock during potentially long send
-                ssize_t sent = send(fd, msg.data(), msg.size(), 0);
-                lock.lock();  // re-lock
-                if (sent < 0) {
-                    std::cerr << "Send error on client: " << fd << std::endl;
-                    active = false;
-                    break;
-                }
-            }
-        }
-    }
-*/
 
 void readLoop() {
     while (!app::need_exit() && active) {
@@ -847,7 +1019,7 @@ void writeLoop() {
                 }
                 client->start();
             } else {
-                std::this_thread::sleep_for(std::chrono::milliseconds(100));  // avoid busy waiting
+                std::this_thread::sleep_for(std::chrono::milliseconds(125));  // avoid busy waiting
             }
         }
 
@@ -877,12 +1049,25 @@ void jpeg_worker_thread(DroppingQueue<image::Image*>& img_queue,
             continue;
         }
 
-        DEBUG_PRINT("jpeg_worker: got image %p", img);
-        DEBUG_PRINT("jpeg_worker: got image of size %zu", img->data_size());
+
+        // image::Image* udp_img = nullptr;
+        // udp_img = img->resize(udp_w, udp_h, image::Fit::FIT_FILL, image::ResizeMethod::BILINEAR);
+
+        // delete img;
+
+        // if (!udp_img) {
+            // printf("jpeg_worker: got nullptr udp_image, skipping\n");
+            // continue;
+        // }
+
+        // DEBUG_PRINT("jpeg_worker: got udp_image %p", img);
+        // DEBUG_PRINT("jpeg_worker: got udp_image of size %zu", udp_img->data_size());
 
         image::Image* jpg_img = img->to_format(image::FMT_JPEG);
         DEBUG_PRINT("jpeg_worker: formated image %p", jpg_img);
         DEBUG_PRINT("jpeg_worker: formated jpeg of size %zu", jpg_img->data_size());
+
+        // printf("JPEG SIZE: %zu\n", jpg_img->data_size());
 
         if (!jpg_img) {
             printf("jpeg_worker: to_format failed\n");
@@ -905,7 +1090,7 @@ void jpeg_worker_thread(DroppingQueue<image::Image*>& img_queue,
         delete jpg_img;
         delete img;
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(30));
+        std::this_thread::sleep_for(std::chrono::milliseconds(125));
     }
 }
 
@@ -997,6 +1182,38 @@ int _main(int argc, char* argv[])
 {
     mmf_deinit_v2(true);
 
+    priv.device_key = sys::device_key();
+    printf("DEVICE KEY = %s\n", priv.device_key.c_str());
+
+    std::map<std::string, unsigned long long> disk_usage = sys::disk_usage("/");
+    if (disk_usage.find("total") != disk_usage.end()) {
+        priv.disk_total = disk_usage["total"];
+    }
+
+    if (disk_usage.find("used") != disk_usage.end()) {
+        priv.disk_used = disk_usage["used"];
+    }
+
+    printf("DISK %lld / %lld\n", priv.disk_used, priv.disk_total);
+
+
+    priv.pmu = new pmu::PMU("axp2101");
+
+    priv.scheduler = new TaskScheduler();
+
+    RecordingTask task;
+    task.studentId = "S201901";
+    task.startTimeStr = "2025-08-04 04:59";
+    task.durationMinutes = 2;
+    task.repeatType = RepeatType::Once;
+    task.weekdayStr = "Monday";
+    task.monthlyDay = 0;
+
+    priv.scheduler->addTask(task);
+    priv.scheduler->saveToFile("/root/s.csv");
+
+    priv.scheduler->printTaskList();
+
     std::vector<std::string> wifi_ifaces = wifi::list_devices();
     for(auto &iface : wifi_ifaces)
     {
@@ -1032,9 +1249,14 @@ int _main(int argc, char* argv[])
     // 启动 JPEG 转换线程
     std::thread jpeg_thread(jpeg_worker_thread, std::ref(img_queue), std::ref(jpeg_queue), std::ref(running));
 
-    // 启动线程
+    // 启动 UDP 线程
     std::thread udp_thread(udp_broadcast_thread, std::ref(jpeg_queue), std::ref(running));
 
+    // 启动线程
+    std::thread cam2_thread(cam2_worker_thread, std::ref(img_queue), std::ref(running));
+
+    // 启动线程
+    std::thread task_thread(task_worker_thread, std::ref(running));
 
 #if ENABLE_PIPE
     printf("Open PIPE\n");
@@ -1053,15 +1275,17 @@ int _main(int argc, char* argv[])
 */
 
     int cam_w = 1920;
+    // int cam_w = 1920;
     int cam_h = 1080;
+    // int cam_h = 1080;
     int cam2_w = 320;
     int cam2_h = 240;
 
     image::Format cam_fmt = image::Format::FMT_YVU420SP;
     image::Format cam2_fmt = image::Format::FMT_RGB888;
-    int cam_fps = 30;
-    int cam_buffer_num = 3;
-    int cam_bitrate = 9 * 1000 * 1000;
+    int cam_fps = 24;
+    int cam_buffer_num = 6;
+    int cam_bitrate = 7 * 1000 * 1000;
 
     priv.audio_en = true;
     priv.video_stop_flag = false;
@@ -1126,6 +1350,17 @@ int _main(int argc, char* argv[])
             priv.video_stop_flag = true;
             recorderManager.stopRecord();
             server->broadcastText("Recording stopped.\n");
+        } else if (msg == "info") {
+            std::string status = recorderManager.isRecording() ? "Recording" : "Stopped";
+            std::string duration = std::to_string(recorderManager.getRecordDuration()) + " ms";
+            std::string filesize = std::to_string(recorderManager.getRecordFileSize()) + " bytes";
+
+            std::string info = 
+                "Status: " + status + "\n" +
+                "Duration: " + duration + "\n" +
+                "File Size: " + filesize + "\n";
+
+            server->broadcastText(info);
         } else if (msg == "status") {
             std::string status = recorderManager.isRecording() ? "Recording\n" : "Stopped\n";
             server->broadcastText("Status: " + status + "\n");
@@ -1319,10 +1554,7 @@ DEBUG_PRINT("*** push video to packeter\n");
                                 );
                         priv.last_read_cam_ms = time::ticks_ms();
                     }
-#if ENABLE_PIPE
-                    static int video_frame_index = 1;  // 全局或静态变量记录帧编号
-                    save_video_to_file(data, data_size, video_frame_index++);
-#endif
+
                     // 推入 ffmpeg 打包器
                     if (err::ERR_NONE != priv.ffmpeg_packer->push(data, data_size, priv.video_pts)) {
                         log::error("ffmpeg push failed!");
@@ -1342,7 +1574,7 @@ DEBUG_PRINT("*** push audio to packeter\n");
                 int read_pcm_size = 0;
 
                 if (priv.last_read_pcm_ms == 0) {
-                    loop_ms = 30;
+                    loop_ms = 41;
                     read_pcm_size = frame_size_per_second * loop_ms * 1.5 / 1000;
                     priv.audio_pts = 0;
                     priv.last_read_pcm_ms = time::ticks_ms();
@@ -1372,17 +1604,17 @@ read_pcm_size = std::max(read_pcm_size, 1024);
 read_pcm_size = (read_pcm_size + 1023) & ~1023;
 */
                 //read_pcm_size = (read_pcm_size + 1023) & ~1023;
-                printf("Adjusted read_pcm_size: %d\n", read_pcm_size); // Debug adjusted PCM size.
+                //printf("Adjusted read_pcm_size: %d\n", read_pcm_size); // Debug adjusted PCM size.
 
                 if (read_pcm_size > remain_frame_bytes) {
                     read_pcm_size = remain_frame_bytes;
-                    printf("Read PCM size exceeded remaining bytes, adjusted to: %d\n", read_pcm_size); // Debug if adjustment happens.
+                    //printf("Read PCM size exceeded remaining bytes, adjusted to: %d\n", read_pcm_size); // Debug if adjustment happens.
                 }
 
                 Bytes *pcm_data = priv.audio_recorder->record_bytes(read_pcm_size);
                 if (pcm_data && pcm_data->data) {
-                    printf("Recorded PCM data: data_len = %d\n", pcm_data->data_len); // Debug PCM data length.
-                    printf("pcm_data->data = %p, data_len = %d\n", pcm_data->data, pcm_data->data_len);
+                    //printf("Recorded PCM data: data_len = %d\n", pcm_data->data_len); // Debug PCM data length.
+                    //printf("pcm_data->data = %p, data_len = %d\n", pcm_data->data, pcm_data->data_len);
                     if (pcm_data->data_len > 0) {
 /*
 int samples_this_frame = read_pcm_size / 2;  // mono * 16bit = 2 bytes/sample
@@ -1432,6 +1664,7 @@ DEBUG_PRINT("*** release frame\n");
         delete img;
 
 
+/*
 image::Image* disp_img = new image::Image(priv.disp->width(), priv.disp->height(), image::FMT_RGB888);
 
 
@@ -1442,30 +1675,35 @@ DEBUG_PRINT("*** read from cam2\n");
 image::Image* img2 = priv.cam2->read();
 
 
-img2->draw_string(13, 13, time_str, image::COLOR_BLACK);
-img2->draw_string(12, 12, time_str, image::COLOR_WHITE);
+img2->draw_string(170, 420, time_str, image::COLOR_BLACK, 1.5, 2);
+img2->draw_string(170 - 2, 420 - 2, time_str, image::COLOR_WHITE, 1.5, 2);
 
 
 DEBUG_PRINT("img2 read ptr = %p, format=%d", img2, img2->format());
 if(img2) {
     DEBUG_PRINT("*** img_queue push img2\n");
     
-    disp_img->draw_image(priv.disp->width() / 2 - img2->width() / 2, priv.disp->height() / 2 - img2->height() / 2, *img2);
+    disp_img->draw_image(priv.disp->width() - img2->width(), priv.disp->height() / 2 - img2->height() / 2, *img2);
 
     if (recorderManager.isRecording()) {
-        disp_img->draw_string(12, 12, formatRecordTime(recorderManager.getRecordDuration()).c_str(), image::COLOR_WHITE);       
+        disp_img->draw_string(68, 36, formatRecordTime(recorderManager.getRecordDuration()).c_str(), image::COLOR_RED, 2, 2);       
     } else {
-        disp_img->draw_string(12, 12, "Ready", image::COLOR_WHITE);
+        disp_img->draw_string(68, 36, "Ready", image::COLOR_GREEN, 2, 2);
     }
 
     // disp_img->draw_string(0, 0, time_str, image::Color::from_rgb(255,255,255));
 
-    img_queue.push(img2);
+    // img_queue.push(img2);
 }
+
+// disp_img->draw_rect(60, 0, 640, 60, image::Color::from_rgb(200, 200, 200), -1);
 
 //printf("*** disp show img2\n");
 priv.disp->show(*disp_img);
 delete disp_img;
+if(img2) {
+    delete img2;
+}
 
         //image::Image *img2 = priv.cam2->read();    
         //priv.disp->show(*img2);
@@ -1474,7 +1712,7 @@ delete disp_img;
 //std::unique_ptr<image::Image> img2(priv.cam2->read());
 //priv.disp->show(*img2);
 //img_queue.push(std::move(img2)); // 自动管理内存
-
+*/
 
 if(priv.video_stop_flag) {
     printf("*** 主循环触发停止录像 ***\n");
@@ -1503,18 +1741,22 @@ if(priv.video_stop_flag) {
 
         delete img2;
 #endif
-//printf("==================================\n");
         uint64_t curr_ms = time::ticks_ms();
-        // log::info("loop use %lld ms\r\n", curr_ms - last_ms);
-        last_ms = curr_ms;
+
+        const uint64_t target_frame_time = 1000 / 24; // 24fps ≈ 41ms per frame
+        uint64_t elapsed = curr_ms - last_ms;
+
+        UPDATE_LINE("* loop at %lld ms, target %lld ms, sleep %lld ms", curr_ms - last_ms, target_frame_time, target_frame_time - elapsed);
+
+        if (elapsed < target_frame_time) {
+            time::sleep_ms(target_frame_time - elapsed);  // 延迟补足帧时间
+        }
+
+        last_ms = time::ticks_ms();  // 更新为真正进入下一帧的时间
     }
 
 #if ENABLE_RTSP
     priv.rtsp->stop();
-#endif
-
-#if ENABLE_PIPE
-    close(pipe_fd);
 #endif
 
     running = false;
@@ -1539,6 +1781,8 @@ if(priv.video_stop_flag) {
 #endif
     delete priv.cam2;
     delete priv.cam;
+    delete priv.pmu;
+    delete priv.scheduler;
     return 0;
 }
 
