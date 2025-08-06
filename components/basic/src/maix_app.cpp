@@ -19,6 +19,8 @@
 #include <assert.h>
 
 #define APP_ROOT_PATH "/maixapp"
+#define MEDIA_ROOT_PATH "/mnt/media_storage"
+
 namespace maix::app
 {
     // cache system config info
@@ -286,7 +288,7 @@ namespace maix::app
      */
     string get_picture_path()
     {
-        string path = string(APP_ROOT_PATH "/share/picture");
+        string path = string(MEDIA_ROOT_PATH "/share/picture");
         if (fs::mkdir(path, true, true) != err::ERR_NONE)
         {
             log::error("mkdir %s failed\n", path.c_str());
@@ -299,7 +301,7 @@ namespace maix::app
      */
     string get_video_path()
     {
-        string path = string(APP_ROOT_PATH "/share/video");
+        string path = string(MEDIA_ROOT_PATH "/share/video");
         if (fs::mkdir(path, true, true) != err::ERR_NONE)
         {
             log::error("mkdir %s failed\n", path.c_str());
