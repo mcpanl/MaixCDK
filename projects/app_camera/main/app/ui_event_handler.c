@@ -93,6 +93,7 @@ static struct {
 };
 
 
+void show_toast(const char *text, uint32_t duration_ms);
 static void touch_start_video_start(void);
 static void touch_start_video_stop(void);
 
@@ -102,6 +103,60 @@ int g_has_small_image = 0;
 
 static lv_obj_t *g_toast = NULL;
 
+void set_camera_mode(bool video_mode, bool is_show_toast)
+{
+	DEBUG_EN(1);
+
+    if (lv_obj_has_state(g_start_snap_button, LV_STATE_USER_1)) {
+        // 正在录像，不允许切换
+        printf("Recording\n");
+        if(is_show_toast) {
+            show_toast("Recording. Cannot switch.", 2000);
+        }
+
+        // UI 状态强制恢复成录像按钮状态（防止点击拍照按钮误显示）
+        lv_obj_add_state(g_camera_video_button, LV_STATE_CHECKED);
+        lv_obj_clear_state(g_camera_image_button, LV_STATE_CHECKED);
+        return;
+    }
+
+    if (video_mode) {
+        // 录像模式
+        lv_obj_add_state(g_camera_video_button, LV_STATE_CHECKED);
+        lv_obj_clear_state(g_camera_image_button, LV_STATE_CHECKED);
+
+        lv_obj_add_flag(g_start_snap_button, LV_OBJ_FLAG_CHECKABLE);
+        lv_obj_add_state(g_start_snap_button, LV_STATE_CHECKED);
+
+        lv_obj_add_flag(g_small_img, LV_OBJ_FLAG_HIDDEN);
+
+        g_camera_mode = 1;
+        DEBUG_PRT("ready to record video!\n");
+    } else {
+        // 拍照模式
+        if (lv_obj_has_flag(g_start_snap_button, LV_OBJ_FLAG_CHECKABLE)) {
+            if (lv_obj_has_state(g_start_snap_button, LV_STATE_CHECKED)) {
+                // 模拟用户松开录像按钮，尝试触发录像停止
+                lv_obj_send_event(g_start_snap_button, LV_EVENT_RELEASED, NULL);
+                lv_obj_add_flag(g_video_running_screen, LV_OBJ_FLAG_HIDDEN);
+                DEBUG_PRT("video try stop!\n");
+
+                priv.camera_video_try_stop_flag = 1;
+            }
+
+            lv_obj_remove_flag(g_start_snap_button, LV_OBJ_FLAG_CHECKABLE);
+            lv_obj_clear_state(g_start_snap_button, LV_STATE_USER_1);
+        }
+
+        lv_obj_add_state(g_camera_image_button, LV_STATE_CHECKED);
+        lv_obj_clear_state(g_camera_video_button, LV_STATE_CHECKED);
+
+        lv_obj_remove_flag(g_small_img, LV_OBJ_FLAG_HIDDEN);
+
+        g_camera_mode = 0;
+        DEBUG_PRT("ready to snap photo!\n");
+    }
+}
 
 void toast_ready_cb(lv_anim_t *a)
 {
@@ -159,29 +214,40 @@ void trigger_left_button(void)
 {
 	DEBUG_EN(1);
 	DEBUG_PRT("LEFT CLICK on ui\n");
+
+    set_camera_mode(false, true); // 切换到拍照模式
+
+/*
     lv_obj_add_state(g_camera_image_button, LV_STATE_CHECKED);
     lv_obj_clear_state(g_camera_video_button, LV_STATE_CHECKED);
     touch_video_camera(g_camera_image_button); // 切换到拍照模式
+*/
 }
 
 void trigger_right_button(void)
 {
     DEBUG_EN(1);
     DEBUG_PRT("RIGHT CLICK on ui\n");
+
+    set_camera_mode(true, false);  // 切换到录像模式
+
+/*
     lv_obj_clear_state(g_camera_image_button, LV_STATE_CHECKED);
     lv_obj_add_state(g_camera_video_button, LV_STATE_CHECKED);
     touch_video_camera(g_camera_video_button); // 切换到录像模式
+ */
 }
 
 
 void trigger_user_button_safe(void * param)
 {
-        if (lv_obj_get_state(g_camera_video_button) == LV_STATE_CHECKED) {
+        if (lv_obj_has_state(g_camera_video_button, LV_STATE_CHECKED)) {
             
             if (!lv_obj_has_state(g_start_snap_button, LV_STATE_USER_1)) {
                 touch_start_video_start();
             } else {
                 touch_start_video_stop();
+                set_camera_mode(true, false);
             }
         } else {
             touch_start_pic();
@@ -372,6 +438,13 @@ void touch_video_camera(lv_obj_t *clicked_btn)
 {
     DEBUG_EN(1);
 
+    if (clicked_btn == g_camera_video_button) {
+        set_camera_mode(true, false);  // 切换到录像模式
+    } else if (clicked_btn == g_camera_image_button) {
+        set_camera_mode(false, true); // 切换到拍照模式
+    }
+
+/*
     if (lv_obj_has_state(g_start_snap_button, LV_STATE_USER_1)) {
         printf("Recording\n");
         show_toast("Recording. Cannot switch.", 2000);
@@ -399,7 +472,7 @@ void touch_video_camera(lv_obj_t *clicked_btn)
         // 切换到拍照模式
 
         if (lv_obj_has_flag(g_start_snap_button, LV_OBJ_FLAG_CHECKABLE)) {
-            if (lv_obj_get_state(g_start_snap_button) == LV_STATE_CHECKED) {
+            if (lv_obj_has_state(g_start_snap_button, LV_STATE_CHECKED)) {
                 lv_obj_send_event(g_start_snap_button, LV_EVENT_RELEASED, NULL);
                 lv_obj_add_flag(g_video_running_screen, LV_OBJ_FLAG_HIDDEN);
                 DEBUG_PRT("video try stop!\n");
@@ -417,6 +490,7 @@ void touch_video_camera(lv_obj_t *clicked_btn)
         DEBUG_PRT("ready to snap photo!\n");
         g_camera_mode = 0;
     }
+*/
 }
 
 void event_touch_video_camera_cb(lv_event_t *e)
@@ -461,28 +535,12 @@ void touch_start_video(int flag)
     DEBUG_EN(0);
     DEBUG_PRT("[video]\n");
 
-    // auto __start = []() {
-    //     lv_obj_remove_flag(g_video_running_screen, LV_OBJ_FLAG_HIDDEN);
-    //     lv_obj_remove_state(g_start_snap_button, LV_STATE_PRESSED);
-    //     lv_obj_add_state(g_start_snap_button, LV_STATE_USER_1);
-    //     DEBUG_PRT("video start\n");
-    //     priv.camera_video_start_flag = 1;
-    // }
-
-    if (flag > 0) {
-        lv_image_dsc_t* img_desc = (lv_image_dsc_t*)lv_obj_get_style_bg_image_src(g_start_snap_button, 0);
-        if (img_desc == &img_video_ready) {
-            touch_start_video_start();
-        } else {
-            touch_start_video_stop();
-        }
+    if (flag > 0 || !lv_obj_has_state(g_start_snap_button, LV_STATE_USER_1)) {
+        touch_start_video_start();
     } else {
-        if (lv_obj_get_state(g_start_snap_button) == LV_STATE_FOCUSED) {
-            touch_start_video_start();
-        } else {
-            touch_start_video_stop();
-        }
+        touch_start_video_stop();
     }
+
 }
 
 void touch_start_pic()
@@ -495,12 +553,17 @@ void touch_start_pic()
 
 void event_touch_start_cb(lv_event_t * e)
 {
-    DEBUG_EN(0);
+    DEBUG_EN(1);
     lv_event_code_t code = lv_event_get_code(e);
     if (code == LV_EVENT_CLICKED) {
-        if (lv_obj_get_state(g_camera_video_button) == LV_STATE_CHECKED) {
+        if (lv_obj_has_state(g_camera_video_button, LV_STATE_CHECKED)) {
+            DEBUG_PRT("[**********] now is video mode\n");
             touch_start_video(-1);
+
+            set_camera_mode(true, false);
+
         } else {
+            DEBUG_PRT("[**********] now is photo mode\n");
             touch_start_pic();
         }
     }
