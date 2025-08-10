@@ -103,6 +103,7 @@ std::string broadcast_ip = "255.255.255.255";
 
 int udp_w = 320;
 int udp_h = 240;
+int udp_sleep_ms = 100;
 
 int udp_port = 5006;
 
@@ -440,7 +441,7 @@ void udp_broadcast_thread(DroppingQueue<std::vector<uint8_t>>& queue, std::atomi
     while (!app::need_exit() && running) {
         std::vector<uint8_t> jpeg_data;
         if (!queue.try_pop(jpeg_data)) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
             continue;
         }
 
@@ -479,7 +480,7 @@ void udp_broadcast_thread(DroppingQueue<std::vector<uint8_t>>& queue, std::atomi
             
         }
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        std::this_thread::sleep_for(std::chrono::milliseconds(udp_sleep_ms));
     }
 
     close(sock);
@@ -551,12 +552,14 @@ void cam2_worker_thread(DroppingQueue<image::Image*>& img_queue, std::atomic<boo
         // printf("^^ CAM2 LOOP\n");
         try {
             uint64_t curr_ms = time::ticks_ms();
-            image::Image* disp_img = nullptr;
+            // image::Image* disp_img = nullptr;
             image::Image* img = nullptr;
 
+/*
             if (priv.disp2) {
                 disp_img = new image::Image(priv.disp2->width(), priv.disp2->height(), image::FMT_RGB888);
             }
+*/
 
             if (priv.cam2) {
                 // printf("^^ CAM2 READ\n");
@@ -564,6 +567,7 @@ void cam2_worker_thread(DroppingQueue<image::Image*>& img_queue, std::atomic<boo
                 // printf("^^ CAM2 READ END\n");
             }
 
+/*
             if (disp_img) {
                 const char* time_str = get_current_time_string();
 
@@ -590,6 +594,7 @@ void cam2_worker_thread(DroppingQueue<image::Image*>& img_queue, std::atomic<boo
                 // priv.disp2->show(*disp_img);
                 delete disp_img;
             }
+*/
 
             if (img) {
                 img_queue.push(img);  // 向队列插入图像
@@ -604,15 +609,15 @@ void cam2_worker_thread(DroppingQueue<image::Image*>& img_queue, std::atomic<boo
                     priv.is_vbus_in = priv.pmu->is_vbus_in();
 
                     if (priv.bat_percent < 10) {
-                        priv.pmu->set_bat_charging_cur(200);
-                    } else if (priv.bat_percent < 25) {
                         priv.pmu->set_bat_charging_cur(400);
+                    } else if (priv.bat_percent < 25) {
+                        priv.pmu->set_bat_charging_cur(500);
                     } else if (priv.bat_percent < 45) {
                         priv.pmu->set_bat_charging_cur(600);
                     } else if (priv.bat_percent < 60) {
-                        priv.pmu->set_bat_charging_cur(800);
+                        priv.pmu->set_bat_charging_cur(700);
                     } else {
-                        priv.pmu->set_bat_charging_cur(1000);
+                        priv.pmu->set_bat_charging_cur(800);
                     }
                 }
 
@@ -623,7 +628,7 @@ void cam2_worker_thread(DroppingQueue<image::Image*>& img_queue, std::atomic<boo
         }
 
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(75));
+        std::this_thread::sleep_for(std::chrono::milliseconds(udp_sleep_ms));
     }
 }
 
@@ -1041,7 +1046,7 @@ void jpeg_worker_thread(DroppingQueue<image::Image*>& img_queue,
     while (!app::need_exit() && running) {
         image::Image* img = nullptr;
         if (!img_queue.try_pop(img)) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(30));
+            std::this_thread::sleep_for(std::chrono::milliseconds(udp_sleep_ms));
             continue;
         }
 
@@ -1091,7 +1096,7 @@ void jpeg_worker_thread(DroppingQueue<image::Image*>& img_queue,
         delete jpg_img;
         delete img;
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(125));
+        std::this_thread::sleep_for(std::chrono::milliseconds(udp_sleep_ms));
     }
 }
 
@@ -1275,6 +1280,15 @@ int _main(int argc, char* argv[])
     server.start();
 */
 
+    // 音频参数
+    const int sample_rate = 48000;
+    const int bytes_per_sample = 2 * 1; // 16bit * 单声道
+    double sample_error_acc = 0.0;      // 累积误差（小数采样点）
+    int64_t audio_pts = 0;              // 音频 PTS（单位：采样点）
+
+    uint64_t last_audio_ms = time::ticks_ms(); // 上一次推送音频的时间
+    // 音频参数 END
+
     int cam_w = 1920;
     // int cam_w = 1920;
     int cam_h = 1080;
@@ -1305,7 +1319,7 @@ int _main(int argc, char* argv[])
 */
 
     priv.disp = new display::Display();
-    priv.disp2 = priv.disp->add_channel();
+    // priv.disp2 = priv.disp->add_channel();
 
     printf("[U] init audio_recorder\n");
     priv.audio_recorder = new audio::Recorder();
@@ -1564,7 +1578,47 @@ DEBUG_PRINT("*** push video to packeter\n");
                 }
             }
 
+            DEBUG_PRINT("*** push audio to packeter next\n");
 
+            if (priv.audio_en && recorderManager.isOpened()) {
+                uint64_t _curr_ms = time::ticks_ms();
+                double elapsed_ms = (double)(_curr_ms - last_audio_ms);
+                last_audio_ms = _curr_ms;
+
+                // 理想采样数（包含误差修正）
+                double ideal_samples = (sample_rate * elapsed_ms / 1000.0) + sample_error_acc;
+                int samples_needed = (int)(ideal_samples + 0.5);
+                sample_error_acc = ideal_samples - samples_needed;
+
+                // 获取剩余可读取的帧数
+                auto remain_frame_count = priv.audio_recorder->get_remaining_frames();
+
+                // 限制实际读取的采样数不超过可用帧数
+                int samples_to_read = std::min(samples_needed, (int)remain_frame_count);
+
+                // 如果需要帧对齐，比如要求读取数是N的倍数，可以这样做：
+                // int frame_align = 4; // 假设设备要求每次读取4帧对齐
+                // samples_to_read = (samples_to_read / frame_align) * frame_align;
+
+                if (samples_to_read > 0) {
+                    int read_pcm_size = samples_to_read * bytes_per_sample;
+                    audio_pts += samples_to_read;
+                    printf("@ pcm_read=%d, audio_pts=%d\n", read_pcm_size, audio_pts);
+
+                    Bytes *pcm_data = priv.audio_recorder->record_bytes(read_pcm_size);
+                    if (pcm_data) {
+                        printf("@@ pcm_len=%d\n", pcm_data->data_len);
+
+                        if (err::ERR_NONE != priv.ffmpeg_packer->push(pcm_data->data, pcm_data->data_len, audio_pts, true)) {
+                            log::error("ffmpeg push failed!");
+                            printf("ffmpeg push failed!\n"); // Debug ffmpeg push failure.
+                        }
+
+                        delete pcm_data;
+                    }
+                }
+            }
+#if 0
 DEBUG_PRINT("*** push audio to packeter\n");
             if (priv.audio_en && recorderManager.isOpened()) { 
                 //printf("Audio is enabled and ffmpeg_packer is opened.\n"); // Check if audio is enabled and ffmpeg_packer is opened.
@@ -1644,18 +1698,20 @@ printf("[AUDIO] pts: %d, pcm_len: %d\n", priv.audio_pts, pcm_data->data_len);
                     printf("Failed to record PCM data.\n"); // Debug PCM data recording failure.
                 }
             }
+#endif
 
         }
+
 
 
 DEBUG_PRINT("*** release venc\n");
         // 释放VENC资源
         mmf_venc_free(1);
 
-        priv.disp->push(frame, image::FIT_COVER);
+        // priv.disp->push(frame, image::FIT_COVER);
 
         // 将帧数据推送至VO
-        // mmf_vo_frame_push2(0, 0, 2, frame);
+        mmf_vo_frame_push2(0, 0, 2, frame);
 
 DEBUG_PRINT("*** release frame\n");
         // 释放帧数据
