@@ -30,6 +30,11 @@ void on_language_gui(Maix_GUI_Activity *activity, void *obj, Maix_Activity_MSG *
     {
         langs_str += lang + "\n";
     }
+
+    if (!langs_str.empty()) {
+        langs_str.pop_back(); // 移除最后一个 '\n'
+    }
+
     // set font
     lv_obj_set_style_text_font(ddlist, &lv_font_montserrat_16, LV_PART_INDICATOR);
     lv_obj_set_style_bg_color(ddlist, theme_btn_color, LV_PART_MAIN);
