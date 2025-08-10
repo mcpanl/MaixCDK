@@ -492,6 +492,7 @@ static struct {
     camera::Camera *cam;
     camera::Camera *cam2;
     display::Display *disp;
+    display::Display *disp2;
 #if ENABLE_RTSP
     rtsp::Rtsp *rtsp;
 #endif
@@ -553,8 +554,8 @@ void cam2_worker_thread(DroppingQueue<image::Image*>& img_queue, std::atomic<boo
             image::Image* disp_img = nullptr;
             image::Image* img = nullptr;
 
-            if (priv.disp) {
-                disp_img = new image::Image(priv.disp->width(), priv.disp->height(), image::FMT_RGB888);
+            if (priv.disp2) {
+                disp_img = new image::Image(priv.disp2->width(), priv.disp2->height(), image::FMT_RGB888);
             }
 
             if (priv.cam2) {
@@ -586,7 +587,7 @@ void cam2_worker_thread(DroppingQueue<image::Image*>& img_queue, std::atomic<boo
                 }
 
 
-                priv.disp->show(*disp_img);
+                // priv.disp2->show(*disp_img);
                 delete disp_img;
             }
 
@@ -1194,7 +1195,7 @@ int _main(int argc, char* argv[])
         priv.disk_used = disk_usage["used"];
     }
 
-    printf("DISK %lld / %lld\n", priv.disk_used, priv.disk_total);
+    printf("DISK %ld / %ld\n", priv.disk_used, priv.disk_total);
 
 
     priv.pmu = new pmu::PMU("axp2101");
@@ -1304,6 +1305,7 @@ int _main(int argc, char* argv[])
 */
 
     priv.disp = new display::Display();
+    priv.disp2 = priv.disp->add_channel();
 
     printf("[U] init audio_recorder\n");
     priv.audio_recorder = new audio::Recorder();
@@ -1650,6 +1652,8 @@ DEBUG_PRINT("*** release venc\n");
         // 释放VENC资源
         mmf_venc_free(1);
 
+        priv.disp->push(frame, image::FIT_COVER);
+
         // 将帧数据推送至VO
         // mmf_vo_frame_push2(0, 0, 2, frame);
 
@@ -1746,7 +1750,7 @@ if(priv.video_stop_flag) {
         const uint64_t target_frame_time = 1000 / 24; // 24fps ≈ 41ms per frame
         uint64_t elapsed = curr_ms - last_ms;
 
-        UPDATE_LINE("* loop at %lld ms, target %lld ms, sleep %lld ms", curr_ms - last_ms, target_frame_time, target_frame_time - elapsed);
+        UPDATE_LINE("* loop at %ld ms, target %ld ms, sleep %ld ms", curr_ms - last_ms, target_frame_time, target_frame_time - elapsed);
 
         if (elapsed < target_frame_time) {
             time::sleep_ms(target_frame_time - elapsed);  // 延迟补足帧时间
