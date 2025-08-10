@@ -23,9 +23,8 @@ namespace maix::i18n
      */
     static std::vector<std::string> locales = {
         "en",
-        "zh",
-        "zh-tw",
-        "ja"};
+        "zh"
+};
 
     /**
      * i18n language names list
@@ -33,9 +32,7 @@ namespace maix::i18n
      */
     const static std::vector<std::string> names = {
         "English",
-        "简体中文",
-        "繁體中文",
-        "日本語"};
+        "简体中文"};
 
     /**
      * Get system config of locale.

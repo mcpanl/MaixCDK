@@ -37,6 +37,9 @@
 #include <functional>
 #include <unordered_map>
 
+#include <iostream>
+#include <chrono>
+#include <string>
 
 #include "ui_event_handler.h"
 
@@ -1901,6 +1904,26 @@ static int app_config_param(void)
 
 static void _capture_image(maix::camera::Camera &camera, maix::image::Image *img)
 {
+
+    // 获取当前时间点
+    auto now = std::chrono::system_clock::now();
+
+    // 转换为秒级时间戳
+    auto timestamp_sec = std::chrono::duration_cast<std::chrono::seconds>(
+        now.time_since_epoch()
+    ).count();
+
+    // 转换为毫秒级时间戳
+    auto timestamp_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        now.time_since_epoch()
+    ).count();
+
+    std::string sec_str = std::to_string(timestamp_sec);
+    std::string ms_str  = std::to_string(timestamp_ms);
+
+    std::cout << "秒级时间戳: " << sec_str << std::endl;
+    std::cout << "毫秒级时间戳: " << ms_str << std::endl;
+
     //char *date = strdup("0000-00-00");
     char *date = ui_get_sys_date();
     if (date) {
@@ -1911,6 +1934,7 @@ static void _capture_image(maix::camera::Camera &camera, maix::image::Image *img
         if (!fs::exists(picture_path)) {
             fs::mkdir(picture_path);
         }
+/*
         std::vector<std::string> *file_list = fs::listdir(picture_path);
         if (file_list) {
             auto it = std::find(file_list->begin(), file_list->end(), ".thumbnail");
@@ -1920,8 +1944,12 @@ static void _capture_image(maix::camera::Camera &camera, maix::image::Image *img
         }
 
         printf("file_list_cnt:%ld\n", file_list->size());
-        string picture_save_path = picture_path + "/" + std::to_string(file_list->size()) +".jpg";
-        std::string thumbnail_path = picture_path + "/.thumbnail/" + std::to_string(file_list->size()) +".jpg";
+*/
+
+        string picture_save_path = picture_path + "/" + ms_str +".jpg";
+        // string picture_save_path = picture_path + "/" + std::to_string(file_list->size()) +".jpg";
+        std::string thumbnail_path = picture_path + "/.thumbnail/" + ms_str +".jpg";
+        // std::string thumbnail_path = picture_path + "/.thumbnail/" + std::to_string(file_list->size()) +".jpg";
         printf("picture_path path:%s  picture_save_path:%s\n", picture_path.c_str(), picture_save_path.c_str());
 
         if (img) {
@@ -1974,7 +2002,8 @@ static void _capture_image(maix::camera::Camera &camera, maix::image::Image *img
             printf("save raw photo\n");
             image::Image *raw = camera.read_raw();
             if (raw) {
-                string raw_save_path = picture_path + "/" + std::to_string(file_list->size()) + "_" + image::fmt_names[raw->format()] + ".raw";
+                string raw_save_path = picture_path + "/" + ms_str + "_" + image::fmt_names[raw->format()] + ".raw";
+                // string raw_save_path = picture_path + "/" + std::to_string(file_list->size()) + "_" + image::fmt_names[raw->format()] + ".raw";
                 log::info("save raw to %s", raw_save_path.c_str());
                 save_buff_to_file((char *)raw_save_path.c_str(), (uint8_t *)raw->data(), raw->data_size());
                 delete raw;
@@ -1982,7 +2011,7 @@ static void _capture_image(maix::camera::Camera &camera, maix::image::Image *img
             }
         }
 
-        free(file_list);
+        // free(file_list);
         free(date);
     } else {
         printf("get date failed!\n");
@@ -2010,6 +2039,26 @@ int app_loop(maix::camera::Camera &camera, maix::display::Display &disp, maix::d
         }
     }
     if (priv.video_start_flag && !priv.video_prepare_is_ok) {
+
+    	// 获取当前时间点
+    	auto now = std::chrono::system_clock::now();
+
+    	// 转换为秒级时间戳
+    	auto timestamp_sec = std::chrono::duration_cast<std::chrono::seconds>(
+    	    now.time_since_epoch()
+    	).count();
+
+    	// 转换为毫秒级时间戳
+    	auto timestamp_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+    	    now.time_since_epoch()
+    	).count();
+
+    	std::string sec_str = std::to_string(timestamp_sec);
+    	std::string ms_str  = std::to_string(timestamp_ms);
+
+    	std::cout << "秒级时间戳: " << sec_str << std::endl;
+    	std::cout << "毫秒级时间戳: " << ms_str << std::endl;
+
         printf("Prepare record video\n");
         //char *date = strdup("0000-00-00"); 
         char *date = ui_get_sys_date();
@@ -2021,9 +2070,10 @@ int app_loop(maix::camera::Camera &camera, maix::display::Display &disp, maix::d
             if (!fs::exists(video_path)) {
                 fs::mkdir(video_path);
             }
-            std::vector<std::string> *file_list = fs::listdir(video_path);
-            string video_mp4_path = video_path + "/" + std::to_string(file_list->size()) +".mp4";
-            free(file_list);
+            // std::vector<std::string> *file_list = fs::listdir(video_path);
+            string video_mp4_path = video_path + "/" + ms_str +".mp4";
+            // string video_mp4_path = video_path + "/" + std::to_string(file_list->size()) +".mp4";
+            // free(file_list);
             free(date);
 
             if (priv.ffmpeg_packer) {

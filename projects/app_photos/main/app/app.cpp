@@ -10,7 +10,145 @@
 #include <sys/stat.h>
 #include "sophgo_middleware.hpp"
 
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <unistd.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <stdio.h>
+
+#include <unordered_map>
+#include <functional>
+
 using namespace maix;
+
+
+#define PAGE_SIZE       4096
+#define GPIO_BASE       0x03020000
+#define GPIO_CFG_OFFSET 0x0004     // 配置寄存器偏移
+#define GPIO_DATA_OFFSET 0x0050    // 数据寄存器偏移
+
+// 物理地址映射到虚拟地址
+volatile uint32_t *map_physical_address(off_t phys_addr) {
+    int mem_fd = open("/dev/mem", O_RDWR | O_SYNC);
+    if (mem_fd < 0) {
+        perror("open /dev/mem");
+        exit(1);
+    }
+
+    void *map_base = mmap(
+            NULL,
+            PAGE_SIZE,
+            PROT_READ | PROT_WRITE,
+            MAP_SHARED,
+            mem_fd,
+            phys_addr & ~(PAGE_SIZE - 1)
+            );
+
+    close(mem_fd);
+
+    if (map_base == MAP_FAILED) {
+        perror("mmap");
+        exit(1);
+    }
+
+    return (volatile uint32_t *)((char *)map_base + (phys_addr & (PAGE_SIZE - 1)));
+}
+
+// 写32位值
+void mmio_write_32(off_t addr, uint32_t value) {
+    volatile uint32_t *ptr = map_physical_address(addr);
+    *ptr = value;
+    munmap((void *)((uintptr_t)ptr & ~(PAGE_SIZE - 1)), PAGE_SIZE);
+}
+
+// 读32位值
+uint32_t mmio_read_32(off_t addr) {
+    volatile uint32_t *ptr = map_physical_address(addr);
+    uint32_t value = *ptr;
+    munmap((void *)((uintptr_t)ptr & ~(PAGE_SIZE - 1)), PAGE_SIZE);
+    return value;
+}
+
+// 初始化 GPIO 输入功能（将某位设为0，配置为输入）
+void init_input_gpio_a(int num) {
+    off_t address = GPIO_BASE + GPIO_CFG_OFFSET;
+    uint32_t val = mmio_read_32(address);
+    val &= ~(1 << num);  // 清除该位，设为输入
+    mmio_write_32(address, val);
+}
+
+// 读取 GPIO 输入值
+int read_input_gpio_a(int num) {
+    off_t address = GPIO_BASE + GPIO_DATA_OFFSET;
+    uint32_t val = mmio_read_32(address);
+    return (val >> num) & 0x1;
+}
+
+
+class KeyDetector {
+    public:
+        using Callback = std::function<void()>;
+
+        struct KeyConfig {
+            int gpio_pin;
+            int trigger_count;
+            Callback callback;
+            int count = 0;
+        };
+
+        void add_key(int id, int gpio_pin, int trigger_count, Callback callback) {
+            printf("ADD KEY %d \n", gpio_pin);
+            keys_[id] = KeyConfig{gpio_pin, trigger_count, callback, 0};
+        }
+
+        void update() {
+            for (auto& [id, config] : keys_) {
+                int value = read_input_gpio_a(config.gpio_pin);
+                if (value == 0) {
+                    config.count++;
+                    if (config.count == config.trigger_count && config.callback) {
+                        config.callback();
+                    }
+                } else {
+                    config.count = 0;
+                }
+            }
+        }
+
+    private:
+        std::unordered_map<int, KeyConfig> keys_;
+};
+
+
+KeyDetector detector;
+
+void init_key()
+{
+    init_input_gpio_a(22);
+    init_input_gpio_a(23);
+    init_input_gpio_a(25);
+    init_input_gpio_a(30);
+}
+
+void setup_keys() {
+    detector.add_key(1, 25, 2, [](){
+        log::info("Key left trigger");
+    });
+
+    detector.add_key(2, 22, 5, [](){
+        log::info("Key mid triggered");
+        app::set_exit_flag(true);
+    });
+
+    detector.add_key(3, 23, 2, [](){
+        log::info("Key right triggered");
+    });
+
+    detector.add_key(4, 30, 1, [](){
+        log::info("Key user triggered");
+    });
+}
 
 LV_IMG_DECLARE(test_img_128x128);
 LV_IMG_DECLARE(test_img_552_368);
@@ -594,6 +732,36 @@ static void decoder_release()
     }
 }
 
+
+static const char *get_filename(const char *fullpath) {
+    const char *slash = strrchr(fullpath, '/');  // 找最后一个 '/'
+    if (!slash) {
+        slash = strrchr(fullpath, '\\');  // 兼容 Windows 路径
+    }
+    return slash ? slash + 1 : fullpath;  // 返回文件名部分
+}
+
+static char *find_thumbnail_path_by_path(const char *path)
+{
+    const char *filename = get_filename(path); // 取出目标文件名
+    photos_list_t *photos = priv.photos;
+
+    if (photos) {
+        for (int i = 0; i < photos->photo_directory_num; i++) {
+            photo_directory_t *dir = &photos->photo_directory[i];
+            for (int j = 0; j < dir->photos_num; j++) {
+                photo_t *photo = &dir->photos[j];
+                const char *photo_filename = get_filename(photo->path);
+                if (!strcmp(photo_filename, filename)) { // 文件名相等
+                    return photo->thumbnail_path;
+                }
+            }
+        }
+    }
+    return NULL;
+}
+
+/*
 static char *find_thumbnail_path_by_path(char *path)
 {
     photos_list_t *photos = priv.photos;
@@ -611,6 +779,7 @@ static char *find_thumbnail_path_by_path(char *path)
 
     return NULL;
 }
+*/
 
 void nv21_to_bgra_crop_resize(uint8_t *src_nv21, uint8_t *dst_rgb, int src_width, int src_height, int dst_width, int dst_height) {
     int src_frame_size = src_width * src_height;
@@ -856,12 +1025,16 @@ static void free_thumbnail_image(lv_image_dsc_t *dsc)
 
 int app_pre_init(void)
 {
-    priv.base_path = (char *)"/maixapp/share/picture";
+    std::string path = maix::app::get_picture_path();
+    priv.base_path = strdup(path.c_str());  // 分配一份可写内存
     return 0;
 }
 
 int app_init(display::Display *disp)
 {
+    init_key();
+    setup_keys();
+
     ui_all_screen_init();
 
     if (disp) {
@@ -879,7 +1052,7 @@ int app_init(display::Display *disp)
         priv.disp_h = 368;
     }
 
-    priv.photo_video = new PhotoVideo("/maixapp/share/picture", "/maixapp/share/video");
+    priv.photo_video = new PhotoVideo(maix::app::get_picture_path(), maix::app::get_video_path());
     priv.photo_video->collect_video_photo();
     // priv.photo_video->print_video_photo_list();
 
@@ -1187,6 +1360,8 @@ static void play_video(void)
 
 int app_loop(void)
 {
+    detector.update();
+
     if (ui_get_touch_video_bar_release_flag()) {
         printf("release video bar\r\n");
         double value = ui_get_video_bar_value();
