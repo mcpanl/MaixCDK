@@ -1609,7 +1609,7 @@ DEBUG_PRINT("*** push video to packeter\n");
                     if (pcm_data) {
                         printf("@@ pcm_len=%d\n", pcm_data->data_len);
 
-                        if (err::ERR_NONE != priv.ffmpeg_packer->push(pcm_data->data, pcm_data->data_len, audio_pts, true)) {
+                        if (err::ERR_NONE != priv.ffmpeg_packer->push(pcm_data->data, pcm_data->data_len, priv.audio_pts, true)) {
                             log::error("ffmpeg push failed!");
                             printf("ffmpeg push failed!\n"); // Debug ffmpeg push failure.
                         }
