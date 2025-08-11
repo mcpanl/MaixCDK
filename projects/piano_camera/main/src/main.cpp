@@ -285,7 +285,7 @@ private:
 
         std::lock_guard<std::mutex> lock(taskMutex);
 
-        printf("** TASK RUNNING **\n");
+        // printf("** TASK RUNNING **\n");
 
         for (const auto& task : tasks) {
             std::tm task_tm = parseTime(task.startTimeStr);
@@ -1298,9 +1298,9 @@ int _main(int argc, char* argv[])
 
     image::Format cam_fmt = image::Format::FMT_YVU420SP;
     image::Format cam2_fmt = image::Format::FMT_RGB888;
-    int cam_fps = 24;
-    int cam_buffer_num = 6;
-    int cam_bitrate = 7 * 1000 * 1000;
+    int cam_fps = 25;
+    int cam_buffer_num = 4;
+    int cam_bitrate = 9 * 1000 * 1000;
 
     priv.audio_en = true;
     priv.video_stop_flag = false;
@@ -1422,33 +1422,12 @@ int _main(int argc, char* argv[])
     uint64_t last_ms = time::ticks_ms();
     int cnt = 0;
     while(!app::need_exit()) {
-//printf("=================================\n");
-#if ENABLE_RTSP
-        rgn_img = region->get_canvas();
-        const char* time_str = get_current_time_string();
-        rgn_img->draw_string(24, 24, time_str, image::COLOR_WHITE);
-        region->update_canvas();
-        delete rgn_img;
-#endif
-
 
         maix::image::Image *img = nullptr;
-
-#if 0
-        try {
-            img = priv.cam2->read();
-        } catch (std::exception &e) {
-            time::sleep_ms(10);
-            continue;
-        }
-#endif
 
         bool found_venc_stream = false;
         void *frame = NULL;
         mmf_frame_info_t f;
-
-//printf("*** from vi get data\n");
-
 
         const char* time_str = get_current_time_string();
 
@@ -1603,11 +1582,11 @@ DEBUG_PRINT("*** push video to packeter\n");
                 if (samples_to_read > 0) {
                     int read_pcm_size = samples_to_read * bytes_per_sample;
                     audio_pts += samples_to_read;
-                    printf("@ pcm_read=%d, audio_pts=%d\n", read_pcm_size, audio_pts);
+                    // printf("@ pcm_read=%d, audio_pts=%d\n", read_pcm_size, audio_pts);
 
                     Bytes *pcm_data = priv.audio_recorder->record_bytes(read_pcm_size);
                     if (pcm_data) {
-                        printf("@@ pcm_len=%d\n", pcm_data->data_len);
+                        // printf("@@ pcm_len=%d\n", pcm_data->data_len);
 
                         if (err::ERR_NONE != priv.ffmpeg_packer->push(pcm_data->data, pcm_data->data_len, priv.audio_pts, true)) {
                             log::error("ffmpeg push failed!");
@@ -1618,87 +1597,6 @@ DEBUG_PRINT("*** push video to packeter\n");
                     }
                 }
             }
-#if 0
-DEBUG_PRINT("*** push audio to packeter\n");
-            if (priv.audio_en && recorderManager.isOpened()) { 
-                //printf("Audio is enabled and ffmpeg_packer is opened.\n"); // Check if audio is enabled and ffmpeg_packer is opened.
-
-                int frame_size_per_second = priv.ffmpeg_packer->get_audio_frame_size_per_second();
-                //printf("Frame size per second: %d\n", frame_size_per_second); // Output the frame size per second.
-
-                uint64_t loop_ms = 0;
-                int read_pcm_size = 0;
-
-                if (priv.last_read_pcm_ms == 0) {
-                    loop_ms = 41;
-                    read_pcm_size = frame_size_per_second * loop_ms * 1.5 / 1000;
-                    priv.audio_pts = 0;
-                    priv.last_read_pcm_ms = time::ticks_ms();
-                    //printf("First read: loop_ms = %llu, read_pcm_size = %d\n", loop_ms, read_pcm_size); // Debug first read condition.
-                } else {
-                    loop_ms = time::ticks_ms() - priv.last_read_pcm_ms;
-                    priv.last_read_pcm_ms = time::ticks_ms();
-                    //printf("Subsequent read: loop_ms = %llu\n", loop_ms); // Debug subsequent read condition.
-
-                    read_pcm_size = frame_size_per_second * loop_ms * 1.5 / 1000;
-                    priv.audio_pts += priv.ffmpeg_packer->audio_us_to_pts(loop_ms * 1000);
-                    //printf("read_pcm_size = %d, audio_pts = %llu\n", read_pcm_size, priv.audio_pts); // Debug PCM size and audio PTS.
-                }
-
-                auto remain_frame_count = priv.audio_recorder->get_remaining_frames();
-                //printf("Remaining frames: %llu\n", remain_frame_count); // Output the remaining frames.
-
-                auto bytes_per_frame = priv.audio_recorder->frame_size();
-                //printf("Bytes per frame: %d\n", bytes_per_frame); // Output the bytes per frame.
-
-                auto remain_frame_bytes = remain_frame_count * bytes_per_frame;
-                //printf("Remaining frame bytes: %llu\n", remain_frame_bytes); // Output the remaining frame bytes.
-
-/*
-read_pcm_size = remain_frame_bytes;
-read_pcm_size = std::max(read_pcm_size, 1024);
-read_pcm_size = (read_pcm_size + 1023) & ~1023;
-*/
-                //read_pcm_size = (read_pcm_size + 1023) & ~1023;
-                //printf("Adjusted read_pcm_size: %d\n", read_pcm_size); // Debug adjusted PCM size.
-
-                if (read_pcm_size > remain_frame_bytes) {
-                    read_pcm_size = remain_frame_bytes;
-                    //printf("Read PCM size exceeded remaining bytes, adjusted to: %d\n", read_pcm_size); // Debug if adjustment happens.
-                }
-
-                Bytes *pcm_data = priv.audio_recorder->record_bytes(read_pcm_size);
-                if (pcm_data && pcm_data->data) {
-                    //printf("Recorded PCM data: data_len = %d\n", pcm_data->data_len); // Debug PCM data length.
-                    //printf("pcm_data->data = %p, data_len = %d\n", pcm_data->data, pcm_data->data_len);
-                    if (pcm_data->data_len > 0) {
-/*
-int samples_this_frame = read_pcm_size / 2;  // mono * 16bit = 2 bytes/sample
-
-uint64_t sample_rate = 48000;
-uint64_t time_base = 1000000;
-
-priv.audio_pts = total_audio_samples_sent * time_base / sample_rate;
-
-printf("[AUDIO] pts: %d, pcm_len: %d\n", priv.audio_pts, pcm_data->data_len);
-*/
-                        // log::info("[AUDIO] pts:%d  pts %f s", priv.audio_pts, priv.ffmpeg_packer->audio_pts_to_us(priv.audio_pts) / 1000000);
-                        if (err::ERR_NONE != priv.ffmpeg_packer->push(pcm_data->data, pcm_data->data_len, priv.audio_pts, true)) {
-                            log::error("ffmpeg push failed!");
-                            printf("ffmpeg push failed!\n"); // Debug ffmpeg push failure.
-                        } else {
-                           // printf("ffmpeg push succeeded.\n"); // Debug ffmpeg push success.
-                        }
-    // 更新累计
-    //total_audio_samples_sent += samples_this_frame;
-                    }
-                    delete pcm_data;
-                    //printf("PCM data deleted.\n"); // Debug PCM data deletion.
-                } else {
-                    printf("Failed to record PCM data.\n"); // Debug PCM data recording failure.
-                }
-            }
-#endif
 
         }
 
@@ -1711,96 +1609,24 @@ DEBUG_PRINT("*** release venc\n");
         // priv.disp->push(frame, image::FIT_COVER);
 
         // 将帧数据推送至VO
-        mmf_vo_frame_push2(0, 0, 2, frame);
+        mmf_vo_frame_push2(0, 0, 1, frame);
 
 DEBUG_PRINT("*** release frame\n");
         // 释放帧数据
         _mmf_vi_frame_free(ch, &frame);
-#if 0
-        img_queue.push(img);
-        priv.disp->show(*img);
-#endif
 
         delete img;
 
-
-/*
-image::Image* disp_img = new image::Image(priv.disp->width(), priv.disp->height(), image::FMT_RGB888);
-
-
-DEBUG_PRINT("disp_img format=%d", disp_img->format());
-
-
-DEBUG_PRINT("*** read from cam2\n");
-image::Image* img2 = priv.cam2->read();
-
-
-img2->draw_string(170, 420, time_str, image::COLOR_BLACK, 1.5, 2);
-img2->draw_string(170 - 2, 420 - 2, time_str, image::COLOR_WHITE, 1.5, 2);
-
-
-DEBUG_PRINT("img2 read ptr = %p, format=%d", img2, img2->format());
-if(img2) {
-    DEBUG_PRINT("*** img_queue push img2\n");
-    
-    disp_img->draw_image(priv.disp->width() - img2->width(), priv.disp->height() / 2 - img2->height() / 2, *img2);
-
-    if (recorderManager.isRecording()) {
-        disp_img->draw_string(68, 36, formatRecordTime(recorderManager.getRecordDuration()).c_str(), image::COLOR_RED, 2, 2);       
-    } else {
-        disp_img->draw_string(68, 36, "Ready", image::COLOR_GREEN, 2, 2);
+    if(priv.video_stop_flag) {
+        printf("*** 主循环触发停止录像 ***\n");
+        if (priv.ffmpeg_packer) {
+            priv.ffmpeg_packer->close();
+            printf("*** 包装器关闭完成\n");
+        }
+        printf("*** 主循环触发停止录像 完毕 ***\n");
+        priv.video_stop_flag = false;
     }
 
-    // disp_img->draw_string(0, 0, time_str, image::Color::from_rgb(255,255,255));
-
-    // img_queue.push(img2);
-}
-
-// disp_img->draw_rect(60, 0, 640, 60, image::Color::from_rgb(200, 200, 200), -1);
-
-//printf("*** disp show img2\n");
-priv.disp->show(*disp_img);
-delete disp_img;
-if(img2) {
-    delete img2;
-}
-
-        //image::Image *img2 = priv.cam2->read();    
-        //priv.disp->show(*img2);
-        //img_queue.push(std::move(img2));
-
-//std::unique_ptr<image::Image> img2(priv.cam2->read());
-//priv.disp->show(*img2);
-//img_queue.push(std::move(img2)); // 自动管理内存
-*/
-
-if(priv.video_stop_flag) {
-    printf("*** 主循环触发停止录像 ***\n");
-    if (priv.ffmpeg_packer) {
-        priv.ffmpeg_packer->close();
-        printf("*** 包装器关闭完成\n");
-    }
-    printf("*** 主循环触发停止录像 完毕 ***\n");
-    priv.video_stop_flag = false;
-}
-
-#if 0
-        image::Image *img2 = priv.cam2->read();
-        image::Image *jpg_img = img2->to_format(image::FMT_JPEG);
-
-        priv.disp->show(*img2);
-
-        uint8_t* jpeg_data = (uint8_t*)jpg_img->data();
-        size_t jpeg_size = jpg_img->data_size();
-
-    
-        // 主线程中不断 push 最新 jpeg 数据
-        std::vector<uint8_t> jpeg(jpeg_data, jpeg_data + jpeg_size);
-        jpeg_queue.push(std::move(jpeg)); // 用移动语义，避免拷贝
-
-
-        delete img2;
-#endif
         uint64_t curr_ms = time::ticks_ms();
 
         const uint64_t target_frame_time = 1000 / 24; // 24fps ≈ 41ms per frame
