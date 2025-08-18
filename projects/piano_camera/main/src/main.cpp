@@ -46,6 +46,11 @@
 #include <sstream>
 
 
+#include <bluetooth/bluetooth.h>
+#include <bluetooth/hci.h>
+#include <bluetooth/hci_lib.h>
+
+
 #include "region.hpp"
 
 #define ENABLE_DEBUG 0
@@ -101,11 +106,309 @@ std::string custom_dir = "videos";
 std::string local_ip = "0.0.0.0";
 std::string broadcast_ip = "255.255.255.255";
 
-int udp_w = 320;
-int udp_h = 240;
-int udp_sleep_ms = 100;
+int udp_w = 48;
+int udp_h = 48;
+int img2_sleep_ms = 50;
+int tcp_sleep_ms = 50    ;
+int udp_sleep_count = 0;
+int udp_sleep_count_max = 4;
+int udp_sleep_ms = tcp_sleep_ms * udp_sleep_count_max;
+// 每8次TCP循环发送1次UDP广播
+
 
 int udp_port = 5006;
+
+
+class TcpServer {
+public:
+    TcpServer() : server_fd(-1), running(false) {}
+
+    ~TcpServer() {
+        stop();
+    }
+
+    void start() {
+        running = true;
+        server_thread = std::thread(&TcpServer::run, this);
+    }
+
+    void stop() {
+        printf("**** SERVER STOP ****\n");
+        running = false;
+
+        if (server_fd != -1) {
+            close(server_fd);
+            server_fd = -1;
+        }
+
+        {
+            std::lock_guard<std::mutex> lock(client_mutex);
+            for (auto& [fd, client] : clients) {
+                printf("    **** wait client stop...\n");
+                client->stop();
+            }
+            clients.clear();
+        }
+#if 0
+        if (server_thread.joinable()) {
+            server_thread.join();
+        }
+#endif
+    }
+
+    void setMessageCallback(std::function<void(int, const std::vector<char>&)> callback) {
+        onMessage = callback;
+    }
+
+    void broadcastText(const std::string& message) {
+        std::vector<char> data(message.begin(), message.end());
+        broadcastBinary(data);
+    }
+
+    void broadcastBinary(const std::vector<char>& data) {
+        std::lock_guard<std::mutex> lock(client_mutex);
+        for (auto& [fd, client] : clients) {
+            client->sendData(data);
+        }
+    }
+
+private:
+    struct ClientHandler {
+        int fd;
+        std::thread thread;
+
+        std::thread readThread;
+        std::thread writeThread;
+
+        std::queue<std::vector<char>> sendQueue;
+        std::mutex queueMutex;
+        std::condition_variable queueCond;
+        std::atomic<bool> active;
+        std::function<void(int, const std::vector<char>&)> onMessage;
+
+        ClientHandler(int client_fd, std::function<void(int, const std::vector<char>&)> messageCallback)
+            : fd(client_fd), active(true), onMessage(std::move(messageCallback)) {}
+
+        void start() {
+            //thread = std::thread(&ClientHandler::runSelectLoop, this);
+            readThread = std::thread(&ClientHandler::readLoop, this);
+            writeThread = std::thread(&ClientHandler::writeLoop, this);
+        }
+
+        void stop() {
+
+            printf("**** CLIENT HANDLER STOP ****\n");
+
+            active = false;
+            shutdown(fd, SHUT_RDWR);
+            queueCond.notify_all();
+
+            if (readThread.joinable()) readThread.join();
+            if (writeThread.joinable()) writeThread.join();
+#if 0
+            if (thread.joinable()) {
+                thread.join();
+            }
+#endif
+            close(fd);
+        }
+
+        void sendData(const std::vector<char>& data) {
+            {
+                std::lock_guard<std::mutex> lock(queueMutex);
+                sendQueue.push(data);
+            }
+            queueCond.notify_one();
+        }
+
+void runSelectLoop() {
+    // 设置为非阻塞（可选，但推荐）
+    int flags = fcntl(fd, F_GETFL, 0);
+    fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+
+    while (!app::need_exit() && active) {
+        fd_set read_fds, write_fds;
+        FD_ZERO(&read_fds);
+        FD_ZERO(&write_fds);
+
+        FD_SET(fd, &read_fds);
+        if (!sendQueue.empty()) {
+            FD_SET(fd, &write_fds);
+        }
+
+        timeval timeout = {1, 0}; // 1 秒超时
+        int max_fd = fd;
+
+        int ret = select(max_fd + 1, &read_fds, &write_fds, nullptr, &timeout);
+        if (ret < 0) {
+            if (errno == EINTR) continue;
+            std::cerr << "select error on fd: " << fd << std::endl;
+            break;
+        }
+
+        if (FD_ISSET(fd, &read_fds)) {
+            char buffer[1024];
+            ssize_t bytes_read = recv(fd, buffer, sizeof(buffer), 0);
+            if (bytes_read <= 0) {
+                std::cout << "Client disconnected: " << fd << std::endl;
+                break;
+            }
+
+            if (onMessage) {
+                std::vector<char> data(buffer, buffer + bytes_read);
+                onMessage(fd, data);
+            }
+        }
+
+        if (FD_ISSET(fd, &write_fds)) {
+            std::unique_lock<std::mutex> lock(queueMutex);
+            if (!sendQueue.empty()) {
+                auto msg = sendQueue.front();
+                ssize_t sent = send(fd, msg.data(), msg.size(), 0);
+                if (sent < 0) {
+                    std::cerr << "Send error on client: " << fd << std::endl;
+                    break;
+                }
+                sendQueue.pop();
+            }
+        }
+    }
+
+    active = false;
+    queueCond.notify_all();
+}
+
+void readLoop() {
+    while (!app::need_exit() && active) {
+        fd_set read_fds;
+        FD_ZERO(&read_fds);
+        FD_SET(fd, &read_fds);
+
+        int ret = select(fd + 1, &read_fds, nullptr, nullptr, nullptr);
+        if (ret < 0) {
+            if (errno == EINTR) continue;
+            std::cerr << "[readLoop] select error\n";
+            break;
+        }
+
+        if (FD_ISSET(fd, &read_fds)) {
+            char buffer[1024];
+            ssize_t bytes_read = recv(fd, buffer, sizeof(buffer), 0);
+            if (bytes_read <= 0) {
+                std::cout << "Client disconnected: " << fd << std::endl;
+                break;
+            }
+
+            if (onMessage) {
+                std::vector<char> data(buffer, buffer + bytes_read);
+                onMessage(fd, data);
+            }
+        }
+    }
+
+    active = false;
+    queueCond.notify_all();  // wake writeLoop if needed
+}
+
+void writeLoop() {
+    while (!app::need_exit() && active) {
+        std::unique_lock<std::mutex> lock(queueMutex);
+        queueCond.wait(lock, [this]() {
+            return !sendQueue.empty() || !active || app::need_exit();
+        });
+
+        while (!sendQueue.empty() && active && !app::need_exit()) {
+            fd_set write_fds;
+            FD_ZERO(&write_fds);
+            FD_SET(fd, &write_fds);
+
+            lock.unlock();  // 解锁以避免 select 被互斥阻塞
+            int ret = select(fd + 1, nullptr, &write_fds, nullptr, nullptr);
+            lock.lock();
+
+            if (ret < 0) {
+                if (errno == EINTR) continue;
+                std::cerr << "[writeLoop] select error\n";
+                break;
+            }
+
+            if (FD_ISSET(fd, &write_fds)) {
+                auto msg = sendQueue.front();
+                ssize_t sent = send(fd, msg.data(), msg.size(), 0);
+                if (sent < 0) {
+                    std::cerr << "Send error on client: " << fd << std::endl;
+                    active = false;
+                    break;
+                }
+
+                sendQueue.pop();
+            }
+        }
+    }
+}
+
+    };
+
+    int server_fd;
+    std::thread server_thread;
+    std::unordered_map<int, std::shared_ptr<ClientHandler>> clients;
+    std::mutex client_mutex;
+    std::atomic<bool> running;
+
+    std::function<void(int, const std::vector<char>&)> onMessage;
+
+    void run() {
+        server_fd = socket(AF_INET, SOCK_STREAM, 0);
+        if (server_fd < 0) {
+            std::cerr << "Socket creation failed\n";
+            return;
+        }
+
+        int opt = 1;
+        setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+
+        sockaddr_in address{};
+        address.sin_family = AF_INET;
+        address.sin_addr.s_addr = INADDR_ANY;
+        address.sin_port = htons(PORT);
+
+        if (bind(server_fd, (sockaddr*)&address, sizeof(address)) < 0) {
+            std::cerr << "Bind failed\n";
+            close(server_fd);
+            return;
+        }
+
+        if (listen(server_fd, SOMAXCONN) < 0) {
+            std::cerr << "Listen failed\n";
+            close(server_fd);
+            return;
+        }
+
+        std::cout << "Server listening on port " << PORT << "...\n";
+
+        while (!app::need_exit() && running) {
+            sockaddr_in client_addr{};
+            socklen_t client_len = sizeof(client_addr);
+            int client_fd = accept(server_fd, (sockaddr*)&client_addr, &client_len);
+            if (client_fd >= 0) {
+                std::cout << "New client connected: " << client_fd << "\n";
+
+                auto client = std::make_shared<ClientHandler>(client_fd, onMessage);
+                {
+                    std::lock_guard<std::mutex> lock(client_mutex);
+                    clients[client_fd] = client;
+                }
+                client->start();
+            } else {
+                std::this_thread::sleep_for(std::chrono::milliseconds(125));  // avoid busy waiting
+            }
+        }
+
+        std::cout << "Server stopped accepting new clients.\n";
+    }
+};
+
+std::shared_ptr<TcpServer> server;
 
 const char* get_current_time_string();
 
@@ -404,7 +707,118 @@ std::string guess_netmask(const std::string& ip)
         return "255.255.255.0"; // assume 192.168.x.x
 }
 
-void udp_broadcast_thread(DroppingQueue<std::vector<uint8_t>>& queue, std::atomic<bool>& running)
+
+void udp_broadcast_thread(DroppingQueue<std::vector<uint8_t>>& queue, std::atomic<bool>& running, std::shared_ptr<TcpServer> _server)
+{
+    broadcast_ip = "239.255.0.2";
+
+    log::info("***** UDP IP *****");
+    log::info(broadcast_ip.c_str());
+
+    const char* BROADCAST_IP = broadcast_ip.c_str();
+    const size_t MAX_PACKET_SIZE = 1400;
+    const size_t HEADER_SIZE = 12;
+    const size_t CHUNK_SIZE = MAX_PACKET_SIZE - HEADER_SIZE;
+
+    int sock = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sock < 0) {
+        perror("socket failed");
+        return;
+    }
+
+    int broadcastEnable = 1;
+    if (setsockopt(sock, SOL_SOCKET, SO_BROADCAST, &broadcastEnable, sizeof(broadcastEnable)) < 0) {
+        perror("setsockopt failed");
+        close(sock);
+        return;
+    }
+
+    in_addr_t local_ip_binary = inet_addr(local_ip.c_str());
+
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(udp_port);
+    addr.sin_addr.s_addr = inet_addr(BROADCAST_IP);
+
+    uint32_t frame_id = 0;
+
+    uint8_t cnt = 0;
+
+    while (!app::need_exit() && running) {
+        std::vector<uint8_t> jpeg_data;
+        if (!queue.try_pop(jpeg_data)) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            continue;
+        }
+
+        printf("\n[SEND TCP] -> %d\n", jpeg_data.size());
+
+        if (_server) {
+            size_t total_size = jpeg_data.size();
+            if (total_size == 0) return;
+
+            // ==== 整体 JPEG 前置长度头（4字节） ====
+            uint32_t len = htonl(static_cast<uint32_t>(total_size)); // 网络字节序
+            std::vector<char> len_buf(reinterpret_cast<char*>(&len), reinterpret_cast<char*>(&len) + 4);
+
+            // 先发送长度头
+            _server->broadcastBinary(len_buf);
+
+            // ==== 发送完整 JPEG 数据 ====
+            // 转换类型：unsigned char -> char
+            std::vector<char> jpeg_buf(jpeg_data.begin(), jpeg_data.end());
+            _server->broadcastBinary(jpeg_buf);
+        }
+
+
+
+        // === UDP 发送逻辑保持原样 ===
+        udp_sleep_count++;
+        if (udp_sleep_count < udp_sleep_count_max) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(tcp_sleep_ms));
+            continue;
+        }
+        udp_sleep_count = 0;
+
+        size_t jpeg_size = jpeg_data.size();
+        uint16_t total_packets = (jpeg_size + CHUNK_SIZE - 1) / CHUNK_SIZE;
+        frame_id++;
+
+        for (uint16_t packet_id = 0; packet_id < total_packets; ++packet_id) {
+            size_t start = packet_id * CHUNK_SIZE;
+            size_t end = std::min(start + CHUNK_SIZE, jpeg_size);
+            size_t payload_size = end - start;
+
+            uint8_t buffer[MAX_PACKET_SIZE];
+
+            // UDP Header: frame_id (4) | total_packets (2) | packet_id (2) | local_ip (4)
+            buffer[0] = (frame_id >> 24) & 0xFF;
+            buffer[1] = (frame_id >> 16) & 0xFF;
+            buffer[2] = (frame_id >> 8) & 0xFF;
+            buffer[3] = frame_id & 0xFF;
+            buffer[4] = (total_packets >> 8) & 0xFF;
+            buffer[5] = total_packets & 0xFF;
+            buffer[6] = (packet_id >> 8) & 0xFF;
+            buffer[7] = packet_id & 0xFF;
+
+            memcpy(buffer + 8, &local_ip_binary, 4);
+            memcpy(buffer + HEADER_SIZE, jpeg_data.data() + start, payload_size);
+
+            ssize_t sent = sendto(sock, buffer, HEADER_SIZE + payload_size, 0,
+                                  (struct sockaddr*)&addr, sizeof(addr));
+            if (sent < 0) {
+                perror("UDP sendto failed");
+            }
+        }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(tcp_sleep_ms));
+    }
+
+    close(sock);
+}
+
+
+void udp_broadcast_thread2(DroppingQueue<std::vector<uint8_t>>& queue, std::atomic<bool>& running)
 {
     broadcast_ip = "239.255.0.2";
 
@@ -480,7 +894,7 @@ void udp_broadcast_thread(DroppingQueue<std::vector<uint8_t>>& queue, std::atomi
             
         }
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(udp_sleep_ms));
+        std::this_thread::sleep_for(std::chrono::milliseconds(tcp_sleep_ms));
     }
 
     close(sock);
@@ -628,7 +1042,7 @@ void cam2_worker_thread(DroppingQueue<image::Image*>& img_queue, std::atomic<boo
         }
 
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(udp_sleep_ms));
+        std::this_thread::sleep_for(std::chrono::milliseconds(img2_sleep_ms));
     }
 }
 
@@ -744,297 +1158,7 @@ private:
 };
 
 
-class TcpServer {
-public:
-    TcpServer() : server_fd(-1), running(false) {}
 
-    ~TcpServer() {
-        stop();
-    }
-
-    void start() {
-        running = true;
-        server_thread = std::thread(&TcpServer::run, this);
-    }
-
-    void stop() {
-        printf("**** SERVER STOP ****\n");
-        running = false;
-
-        if (server_fd != -1) {
-            close(server_fd);
-            server_fd = -1;
-        }
-
-        {
-            std::lock_guard<std::mutex> lock(client_mutex);
-            for (auto& [fd, client] : clients) {
-                printf("    **** wait client stop...\n");
-                client->stop();
-            }
-            clients.clear();
-        }
-#if 0
-        if (server_thread.joinable()) {
-            server_thread.join();
-        }
-#endif
-    }
-
-    void setMessageCallback(std::function<void(int, const std::vector<char>&)> callback) {
-        onMessage = callback;
-    }
-
-    void broadcastText(const std::string& message) {
-        std::vector<char> data(message.begin(), message.end());
-        broadcastBinary(data);
-    }
-
-    void broadcastBinary(const std::vector<char>& data) {
-        std::lock_guard<std::mutex> lock(client_mutex);
-        for (auto& [fd, client] : clients) {
-            client->sendData(data);
-        }
-    }
-
-private:
-    struct ClientHandler {
-        int fd;
-        std::thread thread;
-
-        std::thread readThread;
-        std::thread writeThread;
-
-        std::queue<std::vector<char>> sendQueue;
-        std::mutex queueMutex;
-        std::condition_variable queueCond;
-        std::atomic<bool> active;
-        std::function<void(int, const std::vector<char>&)> onMessage;
-
-        ClientHandler(int client_fd, std::function<void(int, const std::vector<char>&)> messageCallback)
-            : fd(client_fd), active(true), onMessage(std::move(messageCallback)) {}
-
-        void start() {
-            //thread = std::thread(&ClientHandler::runSelectLoop, this);
-            readThread = std::thread(&ClientHandler::readLoop, this);
-            writeThread = std::thread(&ClientHandler::writeLoop, this);
-        }
-
-        void stop() {
-
-            printf("**** CLIENT HANDLER STOP ****\n");
-
-            active = false;
-            shutdown(fd, SHUT_RDWR);
-            queueCond.notify_all();
-
-            if (readThread.joinable()) readThread.join();
-            if (writeThread.joinable()) writeThread.join();
-#if 0
-            if (thread.joinable()) {
-                thread.join();
-            }
-#endif
-            close(fd);
-        }
-
-        void sendData(const std::vector<char>& data) {
-            {
-                std::lock_guard<std::mutex> lock(queueMutex);
-                sendQueue.push(data);
-            }
-            queueCond.notify_one();
-        }
-
-void runSelectLoop() {
-    // 设置为非阻塞（可选，但推荐）
-    int flags = fcntl(fd, F_GETFL, 0);
-    fcntl(fd, F_SETFL, flags | O_NONBLOCK);
-
-    while (!app::need_exit() && active) {
-        fd_set read_fds, write_fds;
-        FD_ZERO(&read_fds);
-        FD_ZERO(&write_fds);
-
-        FD_SET(fd, &read_fds);
-        if (!sendQueue.empty()) {
-            FD_SET(fd, &write_fds);
-        }
-
-        timeval timeout = {1, 0}; // 1 秒超时
-        int max_fd = fd;
-
-        int ret = select(max_fd + 1, &read_fds, &write_fds, nullptr, &timeout);
-        if (ret < 0) {
-            if (errno == EINTR) continue;
-            std::cerr << "select error on fd: " << fd << std::endl;
-            break;
-        }
-
-        if (FD_ISSET(fd, &read_fds)) {
-            char buffer[1024];
-            ssize_t bytes_read = recv(fd, buffer, sizeof(buffer), 0);
-            if (bytes_read <= 0) {
-                std::cout << "Client disconnected: " << fd << std::endl;
-                break;
-            }
-
-            if (onMessage) {
-                std::vector<char> data(buffer, buffer + bytes_read);
-                onMessage(fd, data);
-            }
-        }
-
-        if (FD_ISSET(fd, &write_fds)) {
-            std::unique_lock<std::mutex> lock(queueMutex);
-            if (!sendQueue.empty()) {
-                auto msg = sendQueue.front();
-                ssize_t sent = send(fd, msg.data(), msg.size(), 0);
-                if (sent < 0) {
-                    std::cerr << "Send error on client: " << fd << std::endl;
-                    break;
-                }
-                sendQueue.pop();
-            }
-        }
-    }
-
-    active = false;
-    queueCond.notify_all();
-}
-
-void readLoop() {
-    while (!app::need_exit() && active) {
-        fd_set read_fds;
-        FD_ZERO(&read_fds);
-        FD_SET(fd, &read_fds);
-
-        int ret = select(fd + 1, &read_fds, nullptr, nullptr, nullptr);
-        if (ret < 0) {
-            if (errno == EINTR) continue;
-            std::cerr << "[readLoop] select error\n";
-            break;
-        }
-
-        if (FD_ISSET(fd, &read_fds)) {
-            char buffer[1024];
-            ssize_t bytes_read = recv(fd, buffer, sizeof(buffer), 0);
-            if (bytes_read <= 0) {
-                std::cout << "Client disconnected: " << fd << std::endl;
-                break;
-            }
-
-            if (onMessage) {
-                std::vector<char> data(buffer, buffer + bytes_read);
-                onMessage(fd, data);
-            }
-        }
-    }
-
-    active = false;
-    queueCond.notify_all();  // wake writeLoop if needed
-}
-
-void writeLoop() {
-    while (!app::need_exit() && active) {
-        std::unique_lock<std::mutex> lock(queueMutex);
-        queueCond.wait(lock, [this]() {
-            return !sendQueue.empty() || !active || app::need_exit();
-        });
-
-        while (!sendQueue.empty() && active && !app::need_exit()) {
-            fd_set write_fds;
-            FD_ZERO(&write_fds);
-            FD_SET(fd, &write_fds);
-
-            lock.unlock();  // 解锁以避免 select 被互斥阻塞
-            int ret = select(fd + 1, nullptr, &write_fds, nullptr, nullptr);
-            lock.lock();
-
-            if (ret < 0) {
-                if (errno == EINTR) continue;
-                std::cerr << "[writeLoop] select error\n";
-                break;
-            }
-
-            if (FD_ISSET(fd, &write_fds)) {
-                auto msg = sendQueue.front();
-                ssize_t sent = send(fd, msg.data(), msg.size(), 0);
-                if (sent < 0) {
-                    std::cerr << "Send error on client: " << fd << std::endl;
-                    active = false;
-                    break;
-                }
-
-                sendQueue.pop();
-            }
-        }
-    }
-}
-
-    };
-
-    int server_fd;
-    std::thread server_thread;
-    std::unordered_map<int, std::shared_ptr<ClientHandler>> clients;
-    std::mutex client_mutex;
-    std::atomic<bool> running;
-
-    std::function<void(int, const std::vector<char>&)> onMessage;
-
-    void run() {
-        server_fd = socket(AF_INET, SOCK_STREAM, 0);
-        if (server_fd < 0) {
-            std::cerr << "Socket creation failed\n";
-            return;
-        }
-
-        int opt = 1;
-        setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
-
-        sockaddr_in address{};
-        address.sin_family = AF_INET;
-        address.sin_addr.s_addr = INADDR_ANY;
-        address.sin_port = htons(PORT);
-
-        if (bind(server_fd, (sockaddr*)&address, sizeof(address)) < 0) {
-            std::cerr << "Bind failed\n";
-            close(server_fd);
-            return;
-        }
-
-        if (listen(server_fd, SOMAXCONN) < 0) {
-            std::cerr << "Listen failed\n";
-            close(server_fd);
-            return;
-        }
-
-        std::cout << "Server listening on port " << PORT << "...\n";
-
-        while (!app::need_exit() && running) {
-            sockaddr_in client_addr{};
-            socklen_t client_len = sizeof(client_addr);
-            int client_fd = accept(server_fd, (sockaddr*)&client_addr, &client_len);
-            if (client_fd >= 0) {
-                std::cout << "New client connected: " << client_fd << "\n";
-
-                auto client = std::make_shared<ClientHandler>(client_fd, onMessage);
-                {
-                    std::lock_guard<std::mutex> lock(client_mutex);
-                    clients[client_fd] = client;
-                }
-                client->start();
-            } else {
-                std::this_thread::sleep_for(std::chrono::milliseconds(125));  // avoid busy waiting
-            }
-        }
-
-        std::cout << "Server stopped accepting new clients.\n";
-    }
-};
-
-
-std::shared_ptr<TcpServer> server;
 
 
 void jpeg_worker_thread(DroppingQueue<image::Image*>& img_queue,
@@ -1096,7 +1220,7 @@ void jpeg_worker_thread(DroppingQueue<image::Image*>& img_queue,
         delete jpg_img;
         delete img;
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(udp_sleep_ms));
+        std::this_thread::sleep_for(std::chrono::milliseconds(img2_sleep_ms));
     }
 }
 
@@ -1256,7 +1380,7 @@ int _main(int argc, char* argv[])
     std::thread jpeg_thread(jpeg_worker_thread, std::ref(img_queue), std::ref(jpeg_queue), std::ref(running));
 
     // 启动 UDP 线程
-    std::thread udp_thread(udp_broadcast_thread, std::ref(jpeg_queue), std::ref(running));
+    std::thread udp_thread(udp_broadcast_thread, std::ref(jpeg_queue), std::ref(running), server);
 
     // 启动线程
     std::thread cam2_thread(cam2_worker_thread, std::ref(img_queue), std::ref(running));
@@ -1294,11 +1418,11 @@ int _main(int argc, char* argv[])
     int cam_h = 1080;
     // int cam_h = 1080;
     int cam2_w = 320;
-    int cam2_h = 240;
+    int cam2_h = 180;
 
     image::Format cam_fmt = image::Format::FMT_YVU420SP;
     image::Format cam2_fmt = image::Format::FMT_RGB888;
-    int cam_fps = 25;
+    int cam_fps = 24;
     int cam_buffer_num = 4;
     int cam_bitrate = 9 * 1000 * 1000;
 
