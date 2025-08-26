@@ -6,44 +6,40 @@
  */
 
 #include <stdint.h>
+#include <fstream>
+#include <iostream>
+#include <regex>
+#include <string>
 #include "maix_basic.hpp"
 #include "maix_err.hpp"
 #include "maix_audio.hpp"
 #include <sys/wait.h>
 #include "tinyalsa/pcm.h"
 #include "tinyalsa/mixer.h"
-#include <regex>
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
-#include <string>
-#include <ctime>
-#include <iostream>
-
 
 using namespace maix;
 
-void find_max_record_device(int &card, int &device)
-{
-    FILE* pipe = popen("arecord -l", "r");
-    if (!pipe) {
-        std::cerr << "Failed to execute 'arecord -l'" << std::endl;
-        return;
+// Find the highest numbered capture device by parsing /proc/asound/pcm
+bool find_max_record_device(int &card, int &device) {
+    log::info("Find other record device");
+    std::ifstream pcm_file("/proc/asound/pcm");
+    if (!pcm_file.is_open()) {
+        std::cerr << "Failed to open /proc/asound/pcm" << std::endl;
+        return false;
     }
 
-    std::regex regex_line(R"(card (\d+): .*, device (\d+):)");
-    char buffer[256];
+    std::string line;
+    std::regex regex_line(R"((\d+)-(\d+):.*capture)");
+    // Example match: "02-00: USB Audio : ... : capture 1"
+
     int max_card = -1, max_device = -1;
 
-    std::cout << "[Debug] arecord -l output:" << std::endl;
-
-    while (fgets(buffer, sizeof(buffer), pipe)) {
-        std::cout << buffer;  // 原始输出
-        std::cmatch match;
-        if (std::regex_search(buffer, match, regex_line)) {
+    while (std::getline(pcm_file, line)) {
+        std::smatch match;
+        if (std::regex_search(line, match, regex_line)) {
             int c = std::stoi(match[1].str());
             int d = std::stoi(match[2].str());
-            std::cout << "  [Matched] card: " << c << ", device: " << d << std::endl;
+
             if (c > max_card || (c == max_card && d > max_device)) {
                 max_card = c;
                 max_device = d;
@@ -51,14 +47,15 @@ void find_max_record_device(int &card, int &device)
         }
     }
 
-    pclose(pipe);
+    pcm_file.close();
 
     if (max_card >= 0) {
         card = max_card;
         device = max_device;
-        std::cout << "[Selected] card: " << card << ", device: " << device << std::endl;
+        return true;
     } else {
-        std::cerr << "[Error] No valid capture devices found." << std::endl;
+        std::cerr << "No capture devices found in /proc/asound/pcm" << std::endl;
+        return false;
     }
 }
 
@@ -277,34 +274,37 @@ namespace maix::audio
         param->path = path;
         param->block = block;
 
-// 自动选择最大编号的设备
-int selected_card = 0, selected_device = 0;
-find_max_record_device(selected_card, selected_device);
-std::cout << "[Recorder] Using card: " << selected_card << ", device: " << selected_device << std::endl;
-param->card = selected_card;
-param->device = selected_device;
+        // select device
+        int selected_card = 0, selected_device = 0;
+        if (find_max_record_device(selected_card, selected_device)) {
+            std::cout << "Using card: " << selected_card
+                      << ", device: " << selected_device << std::endl;
 
-if(selected_card > 0)
-{
-	printf("[Recorder] init with usb mic! channels=1, rate=48000, block=false\n");
-	config.channels = 1;
-	config.rate = 48000;
-	config.format = PCM_FORMAT_S16_LE;
-	param->block = false;
-}
+            param->card = selected_card;
+            param->device = selected_device;
 
-char test_cmd[256];
-snprintf(test_cmd, sizeof(test_cmd),
-         "arecord -q -D plughw:%d,%d -r 16000 -f S16_LE -c 1 -s 1024 /dev/null",
-         selected_card, selected_device);
+            if (selected_card > 0) {
+                config.channels = 1;
+                config.rate = 48000;
+                config.format = PCM_FORMAT_S16_LE;
+                param->block = false;
+            }
 
-std::cout << "[Recorder] Testing device with command: " << test_cmd << std::endl;
-int ret = system(test_cmd);
-if (ret != 0) {
-    std::cerr << "[Recorder] Warning: arecord test command failed with code " << ret << std::endl;
-}
+            uint32_t pcm_flag = PCM_IN | (!param->block ? PCM_NONBLOCK : 0);
+        }
 
-	uint32_t pcm_flag = PCM_IN | (!param->block ? PCM_NONBLOCK : 0);
+        char test_cmd[256];
+        snprintf(test_cmd, sizeof(test_cmd),
+                 "arecord -q -D plughw:%d,%d -r 16000 -f S16_LE -c 1 -s 1024 /dev/null",
+                 selected_card, selected_device);
+
+        std::cout << "[Recorder] Testing device with command: " << test_cmd << std::endl;
+        int ret = system(test_cmd);
+        if (ret != 0) {
+            std::cerr << "[Recorder] Warning: arecord test command failed with code " << ret << std::endl;
+        }
+
+	    uint32_t pcm_flag = PCM_IN | (!param->block ? PCM_NONBLOCK : 0);
 #ifdef PLATFORM_MAIXCAM
         // Fix segment error when start pcm with channel=2 for the first time.
         if (selected_card == 0 && (channel != 1 || sample_rate != 16000 || tinyalsa_format != PCM_FORMAT_S16_LE)) {
