@@ -1,0 +1,10 @@
+id: z_piano_camera
+name: Piano Camera
+name[zh]:
+version: 1.0.0
+icon: assets/logo.png
+author: MPH
+desc: Piano Camera
+desc[zh]:
+files:
+  assets: assets
