@@ -11,7 +11,7 @@
 #include "z_display.hpp"
 #include "z_encoder.hpp"
 #include "z_record_control.hpp"
-
+#include "EduScheduleManager.hpp"
 #include "mmf_vi_helper.hpp"
 
 #include <deque>
@@ -20,9 +20,18 @@
 #include <ctime>
 #include <sstream>
 #include <iomanip>
+#include <iostream>
+#include <thread>
+#include <chrono>
 
+#include "httplib.h"
+#include "json.hpp"
 
 using namespace maix;
+using namespace edu;
+
+using json = nlohmann::json;
+using namespace httplib;
 
 Priv priv;
 
@@ -78,6 +87,54 @@ int _main(int argc, char* argv[])
     uint64_t t = time::time_s();
 
     log::info("Program start at %d", t);
+    priv.manager = std::make_shared<EduScheduleManager>("/root/csv_data");
+
+    priv.manager->createDevice(Device{"Device_1","设备1"});
+    Teacher teacher{"Teacher_201","教师201",{}};
+    priv.manager->createTeacher(teacher);
+
+    Student student1{"S201901", "小明"};
+    Student student2{"S201902", "小红"};
+    priv.manager->createStudent(student1);
+    priv.manager->createStudent(student2);
+
+    Teacher teacher_updated = teacher;
+    teacher_updated.studentIds = {"S201901", "S201902"};
+    priv.manager->editTeacher(teacher_updated);
+
+    priv.manager->saveAll();
+
+    priv.manager->printAllHierarchy(std::cout);
+
+    Server svr;
+    // GET /hello
+    svr.Get("/getAll", [](const Request& req, Response& res) {
+        json result = {
+            {"errCode", 0},
+            {"errMsg", ""},
+            {"data", priv.manager->toHierarchyJson()}
+        };
+        res.set_content(result.dump(), "application/json");
+    });
+
+    std::thread server_thread([&]() {
+        std::cout << "HTTP server running at http://localhost:8080\n";
+        svr.listen("0.0.0.0", 8080);  // 阻塞，直到 svr.stop() 被调用
+        std::cout << "HTTP server stopped.\n";
+    });
+
+    while (!app::need_exit()) {
+        printf("Tick at %lu\n", time::ticks_ms());
+        time::sleep_ms(1000);
+    }
+
+    svr.stop();
+
+    // 等待子线程退出
+    server_thread.join();
+    std::cout << "Program finished.\n";
+
+    return 0;
 
     priv.display = new z::Display();
     priv.display->showLogo("assets/logo.png");

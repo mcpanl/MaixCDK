@@ -11,12 +11,17 @@
 #include "z_encoder.hpp"
 #include "z_record_control.hpp"
 
+#include "EduScheduleManager.hpp"
+
+
 struct Priv {
     z::UdpServer *udp_server;
     z::TcpServer *tcp_server;
     z::Display *display;
     z::Encoder *encoder;
     z::RecordControl *recordControl;
+
+    std::shared_ptr<edu::EduScheduleManager> manager;
 
     maix::camera::Camera *cam;
     maix::camera::Camera *cam2;
