@@ -69,5 +69,7 @@ list(APPEND ADD_REQUIREMENTS basic vision FFmpeg ext_dev network)
 # you can directly use then, for example use it in add_custom_command
 ##############################################
 
+add_definitions(-D__dso_handle=__cvi_dso_handle)
+
 # register component, DYNAMIC or SHARED flags will make component compiled to dynamic(shared) lib
 register_component()

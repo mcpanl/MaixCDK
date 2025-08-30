@@ -10,6 +10,7 @@
 #include "z_display.hpp"
 #include "z_encoder.hpp"
 #include "z_record_control.hpp"
+#include "z_http.hpp"
 
 #include "EduScheduleManager.hpp"
 
@@ -20,6 +21,8 @@ struct Priv {
     z::Display *display;
     z::Encoder *encoder;
     z::RecordControl *recordControl;
+
+    std::shared_ptr<z::Http> http;
 
     std::shared_ptr<edu::EduScheduleManager> manager;
 
