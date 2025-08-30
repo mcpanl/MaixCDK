@@ -5,6 +5,11 @@
 #include "EduScheduleManager.hpp"
 #include <filesystem>
 
+#include <chrono>
+#include <ctime>
+#include <iomanip>
+#include <sstream>
+
 using nlohmann::json;
 
 namespace edu {
@@ -177,7 +182,7 @@ namespace edu {
     }
 
     // ----------------- 构造 & 关系维护 -----------------
-    EduScheduleManager::EduScheduleManager(std::string csvRoot): root(std::move(csvRoot)) {
+    EduScheduleManager::EduScheduleManager(std::string csvRoot) : root(std::move(csvRoot)) {
     }
 
     void EduScheduleManager::bindTeacherStudent(const std::string &teacherId, const std::string &studentId, bool add) {
@@ -318,6 +323,9 @@ namespace edu {
     // ----------------- CRUD（原生） -----------------
     void EduScheduleManager::createDevice(const Device &d) {
         if (devices.count(d.id)) throw std::runtime_error("设备已存在");
+
+        printf("[Create Device] %s\n", d.id.c_str());
+
         devices[d.id] = d;
     }
 
@@ -371,6 +379,53 @@ namespace edu {
         for (auto &[sid,s]: schedules) if (s.studentId == studentId) toDel.push_back(sid);
         for (auto &sid: toDel) deleteSchedule(sid);
         students.erase(studentId);
+    }
+
+    // 内部方法：根据 deviceId + teacherId 获取学生列表
+    std::vector<Student> EduScheduleManager::getStudentsByTeacher(const std::string &deviceId, const std::string &teacherId) {
+        auto it = teachers.find(teacherId);
+        if (it == teachers.end()) {
+            throw std::runtime_error("教师不存在");
+        }
+
+        const Teacher &t = it->second;
+        std::vector<Student> result;
+
+        for (const auto &sid : t.studentIds) {
+            auto sit = students.find(sid);
+            if (sit != students.end()) {
+                result.push_back(sit->second);
+            }
+        }
+
+        return result;
+    }
+
+    // 对外 JSON 方法
+    std::string EduScheduleManager::jsonGetStudentsByTeacher(const std::string &s) {
+        try {
+            auto j = json::parse(s);
+            std::string deviceId = j.value("deviceId", ""); // 预留
+            std::string teacherId = j.at("teacherId");
+
+            auto studentsList = getStudentsByTeacher(deviceId, teacherId);
+
+            json jstudents = json::array();
+            for (const auto &st : studentsList) {
+                jstudents.push_back({
+                    {"id", st.id},
+                    {"name", st.name},
+                    {"scheduleIds", st.scheduleIds}
+                });
+            }
+
+            json data;
+            data["students"] = jstudents;
+
+            return toJsonStr(true, data);
+        } catch (const std::exception &e) {
+            return toJsonStr(false, {}, e.what());
+        }
     }
 
     void EduScheduleManager::createSchedule(const Schedule &s) {
@@ -461,6 +516,50 @@ namespace edu {
         }
         return Nearest{prev, next1, next2};
     }
+
+    EduScheduleManager::Nearest EduScheduleManager::nearestByConditions(
+        const TimePoint &now,
+        const std::string &deviceId,
+        const std::string &teacherId,
+        const std::string &studentId
+    ) const {
+        // 查询范围：过去180天 + 未来365天
+        auto from = now - std::chrono::hours(24 * 180);
+        auto to   = now + std::chrono::hours(24 * 365);
+
+        // 展开所有 occurrence
+        auto all = expandAll(from, to);
+
+        // 按条件过滤
+        std::vector<Occurrence> filtered;
+        for (const auto &oc : all) {
+            if (!deviceId.empty()  && oc.deviceId  != deviceId)  continue;
+            if (!teacherId.empty() && oc.teacherId != teacherId) continue;
+            if (!studentId.empty() && oc.studentId != studentId) continue;
+            filtered.push_back(oc);
+        }
+
+        // 确保排序（expandAll 已经排过，但这里再保证一下）
+        std::sort(filtered.begin(), filtered.end(),
+                  [](const Occurrence &a, const Occurrence &b) {
+                      return a.start < b.start;
+                  });
+
+        // 找最近课程
+        std::optional<Occurrence> prev, next1, next2;
+        for (const auto &oc : filtered) {
+            if (oc.end <= now) {
+                prev = oc;
+            } else if (oc.start >= now) {
+                if (!next1) next1 = oc;
+                else if (!next2) next2 = oc;
+            }
+            if (oc.start > now && next2) break; // 找到两个未来课程就够了
+        }
+
+        return Nearest{prev, next1, next2};
+    }
+
 
     // ----------------- JSON 版 API -----------------
     static json JOk() {
@@ -792,7 +891,7 @@ namespace edu {
     }
 
     void EduScheduleManager::loadAll() {
-        devices.clear();
+        // devices.clear();
         teachers.clear();
         students.clear();
         schedules.clear();
@@ -810,10 +909,10 @@ namespace edu {
         };
 
         // devices
-        loadFile(root + "/devices.csv", [&](const std::vector<std::string> &c) {
-            if (c.size() < 2) return;
-            devices[c[0]] = Device{c[0], c[1]};
-        });
+        // loadFile(root + "/devices.csv", [&](const std::vector<std::string> &c) {
+        //     if (c.size() < 2) return;
+        //     devices[c[0]] = Device{c[0], c[1]};
+        // });
 
         // teachers
         loadFile(root + "/teachers.csv", [&](const std::vector<std::string> &c) {
@@ -932,38 +1031,169 @@ namespace edu {
         }
     }
 
+    nlohmann::json EduScheduleManager::getSchedulesByDevice(const std::string &deviceId) const {
+        nlohmann::json arr = nlohmann::json::array();
+        for (auto &[sid, sc]: schedules) {
+            if (sc.deviceId == deviceId) {
+                nlohmann::json j;
+                j["id"] = sc.id;
+                j["deviceId"] = sc.deviceId;
+                j["teacherId"] = sc.teacherId;
+                j["studentId"] = sc.studentId;
+                j["startDate"] = formatDate(sc.startDate);
+                j["endDate"] = formatDate(sc.endDate);
+                j["startTime"] = formatTime(sc.startTime);
+                j["endTime"] = formatTime(sc.endTime);
+                j["recur"] = static_cast<int>(sc.recur);
+
+                j["recur"] = static_cast<int>(sc.recur);
+                if (sc.recur == RecurrenceType::Weekly) {
+                    j["weekDay"] = sc.weekDay;
+                } else if (sc.recur == RecurrenceType::Monthly) {
+                    j["monthDay"] = sc.monthDay;
+                }
+
+                arr.push_back(j);
+            }
+        }
+        return arr;
+    }
+
+    nlohmann::json EduScheduleManager::getSchedulesByTeacher(const std::string &deviceId,
+                                                             const std::string &teacherId) const {
+        nlohmann::json arr = nlohmann::json::array();
+        for (auto &[sid, sc]: schedules) {
+            if (sc.deviceId == deviceId && sc.teacherId == teacherId) {
+                nlohmann::json j;
+                j["id"] = sc.id;
+                j["deviceId"] = sc.deviceId;
+                j["teacherId"] = sc.teacherId;
+                j["studentId"] = sc.studentId;
+                j["startDate"] = formatDate(sc.startDate);
+                j["endDate"] = formatDate(sc.endDate);
+                j["startTime"] = formatTime(sc.startTime);
+                j["endTime"] = formatTime(sc.endTime);
+                j["recur"] = static_cast<int>(sc.recur);
+
+                j["recur"] = static_cast<int>(sc.recur);
+                if (sc.recur == RecurrenceType::Weekly) {
+                    j["weekDay"] = sc.weekDay;
+                } else if (sc.recur == RecurrenceType::Monthly) {
+                    j["monthDay"] = sc.monthDay;
+                }
+
+                arr.push_back(j);
+            }
+        }
+        return arr;
+    }
+
+    nlohmann::json EduScheduleManager::getSchedulesByStudent(const std::string &deviceId,
+                                                             const std::string &teacherId,
+                                                             const std::string &studentId) const {
+        nlohmann::json arr = nlohmann::json::array();
+        auto now = Clock::now();
+        for (auto &[sid, sc]: schedules) {
+            if (sc.deviceId == deviceId && sc.teacherId == teacherId && sc.studentId == studentId) {
+                nlohmann::json j;
+                j["id"] = sc.id;
+                j["deviceId"] = sc.deviceId;
+                j["teacherId"] = sc.teacherId;
+                j["studentId"] = sc.studentId;
+                j["startDate"] = formatDate(sc.startDate);
+                j["endDate"] = formatDate(sc.endDate);
+                j["startTime"] = formatTime(sc.startTime);
+                j["endTime"] = formatTime(sc.endTime);
+
+                std::string recurStr;
+                switch(sc.recur) {
+                    case RecurrenceType::Once: recurStr = "once"; break;
+                    case RecurrenceType::Daily: recurStr = "daily"; break;
+                    case RecurrenceType::Weekly: recurStr = "weekly"; break;
+                    case RecurrenceType::Monthly: recurStr = "monthly"; break;
+                    default: recurStr = "once"; // 默认值
+                }
+                j["recur"] = recurStr;
+
+                if (sc.recur == RecurrenceType::Weekly) {
+                    j["weekDay"] = sc.weekDay;
+                } else if (sc.recur == RecurrenceType::Monthly) {
+                    j["monthDay"] = sc.monthDay;
+                }
+                auto nearest = nearestByConditions(now, deviceId, teacherId, studentId);
+
+                nlohmann::json nj = nlohmann::json::array();
+
+                auto occ2str = [&](const std::optional<Occurrence> &oc) -> std::string {
+                    if (!oc) return "";
+                    return formatDateTime(oc->start) + " ~ " + formatDateTime(oc->end);
+                };
+
+                if (nearest.prev)
+                    nj.push_back(occ2str(nearest.prev));
+                if (nearest.next1)
+                    nj.push_back(occ2str(nearest.next1));
+                if (nearest.next2)
+                    nj.push_back(occ2str(nearest.next2));
+
+                j["nearest"] = nj;
+
+                arr.push_back(j);
+            }
+        }
+        return arr;
+    }
+
+    nlohmann::json EduScheduleManager::getExceptionsBySchedule(const std::string &scheduleId) const {
+        nlohmann::json arr = nlohmann::json::array();
+        for (auto &[eid, ex]: exceptions) {
+            if (ex.scheduleId == scheduleId) {
+                nlohmann::json j;
+                j["id"] = ex.id;
+                j["scheduleId"] = ex.scheduleId;
+                j["date"] = formatDate(ex.date);
+                arr.push_back(j);
+            }
+        }
+        return arr;
+    }
+
+    void EduScheduleManager::assignStudentToTeacher(const std::string &teacherId, const std::string &studentId) {
+        bindTeacherStudent(teacherId, studentId, true);
+    }
+
     nlohmann::json EduScheduleManager::toHierarchyJson() const {
         nlohmann::json jTeachers = nlohmann::json::array();
 
-        for (const auto& [tid, teacher] : teachers) {
+        for (const auto &[tid, teacher]: teachers) {
             nlohmann::json jTeacher;
             jTeacher["id"] = teacher.id;
             jTeacher["name"] = teacher.name;
 
             nlohmann::json jStudents = nlohmann::json::array();
-            for (const auto& sid : teacher.studentIds) {
+            for (const auto &sid: teacher.studentIds) {
                 auto itStu = students.find(sid);
                 if (itStu == students.end()) continue;
-                const auto& stu = itStu->second;
+                const auto &stu = itStu->second;
 
                 nlohmann::json jStudent;
                 jStudent["id"] = stu.id;
                 jStudent["name"] = stu.name;
 
                 nlohmann::json jSchedules = nlohmann::json::array();
-                for (const auto& scid : stu.scheduleIds) {
+                for (const auto &scid: stu.scheduleIds) {
                     auto itSc = schedules.find(scid);
                     if (itSc == schedules.end()) continue;
-                    const auto& sc = itSc->second;
+                    const auto &sc = itSc->second;
 
                     nlohmann::json jSchedule;
                     jSchedule["id"] = sc.id;
                     jSchedule["deviceId"] = sc.deviceId;
                     jSchedule["startDate"] = formatDate(sc.startDate);
-                    jSchedule["endDate"]   = formatDate(sc.endDate);
+                    jSchedule["endDate"] = formatDate(sc.endDate);
                     jSchedule["startTime"] = formatTime(sc.startTime);
-                    jSchedule["endTime"]   = formatTime(sc.endTime);
-                    jSchedule["recur"]     = static_cast<int>(sc.recur);
+                    jSchedule["endTime"] = formatTime(sc.endTime);
+                    jSchedule["recur"] = static_cast<int>(sc.recur);
 
                     jSchedules.push_back(jSchedule);
                 }

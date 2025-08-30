@@ -1,5 +1,7 @@
 #include "z_display.hpp"
 #include "maix_basic.hpp"
+#include "z_record_control.hpp"
+#include "priv.hpp"
 
 using namespace maix;
 using namespace maix::ext_dev;
@@ -9,7 +11,7 @@ namespace z {
     Display::Display() {
         printf("==== Display ====\n");
 
-        disp = new display::Display(640, 480, image::FMT_RGB888);
+        disp = new display::Display(-1, -1, image::FMT_RGB888);
         width = disp->width();
         height = disp->height();
         centerX = width / 2;
@@ -17,7 +19,7 @@ namespace z {
 
         printf("W: %d, H: %d\n", width, height);
 
-        disp2 = disp->add_channel(640, 480, image::FMT_BGRA8888);
+        disp2 = disp->add_channel(-1, -1, image::FMT_BGRA8888);
 
         _running = true;
         _thread = std::thread(&Display::frameLoop, this);
@@ -34,6 +36,12 @@ namespace z {
 
         delete disp;
         delete disp2;
+
+        delete deviceKeyImg;
+        delete fpsImg;
+        delete batImg;
+        delete freeImg;
+        releaseGlyphCache();
     }
 
     std::string Display::getFreeSpaceString() {
@@ -84,6 +92,18 @@ namespace z {
 
         std::cout << "剩余空间: " << getFreeSpaceString() << std::endl;
 
+
+        // 预分配小图对象
+        deviceKeyImg = new image::Image(200, 40, image::FMT_BGRA8888);
+        fpsImg       = new image::Image(120, 40, image::FMT_BGRA8888);
+        batImg       = new image::Image(120, 40, image::FMT_BGRA8888);
+        freeImg      = new image::Image(200, 40, image::FMT_BGRA8888);
+
+        // 渲染固定 device_key，一次即可
+        deviceKeyImg->clear();
+        deviceKeyImg->draw_string(0, 0, device_key.c_str(), image::COLOR_WHITE, 2, 2);
+        initGlyphCache();
+
         while (_running && !app::need_exit()) {
             curr_ms = time::ticks_ms();
             if (curr_ms - last_pmu_ms > 10000) {
@@ -106,16 +126,46 @@ namespace z {
             }
 
             runFrame();
-            std::this_thread::sleep_for(std::chrono::milliseconds(40));
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
         }
     }
-
     void Display::runFrame() {
-        // image::Image *dispImage = new image::Image(width, height, image::FMT_BGRA8888);
+        image::Image* dispImage2 = new image::Image(disp->width(), disp->height(), image::FMT_BGRA8888);
+        if (priv.recordControl) {
+            if (priv.recordControl->state() == RecordControl::State::Recording) {
+                int totalSec = static_cast<int>(priv.recordControl->duration());
+                int minutes = totalSec / 60;
+                int seconds = totalSec % 60;
+
+                char recTime[16];
+                snprintf(recTime, sizeof(recTime), "%02d:%02d", minutes, seconds);
+                dispImage2->draw_rect(20 - 6, 82 - 6 , 116, 40, maix::image::COLOR_RED, -1);
+                draw_text_cached(dispImage2, 20, 82, recTime, false);
+            } else {
+                draw_text_cached(dispImage2, 20, 82, getFreeSpaceString(), false);
+            }
+        }
+
+        // 电池
+        char buffer[8];
+        snprintf(buffer, sizeof(buffer), "[%3d]", (int)bat_percent);
+        bool green = is_charging;
+        draw_text_cached(dispImage2, 550, 22, buffer, green);
+
+        // FPS
+        std::string str2 = std::to_string((int)_fps) + "FPS";
+
+        draw_text_cached(dispImage2, 520, 82, str2, false);
+
+        draw_text_cached(dispImage2, 20, 22, device_key, false);
+
+        disp2->show(*dispImage2, image::FIT_COVER);
+
+        delete dispImage2;
+    }
+#if 0
+    void Display::runFrame() {
         image::Image *dispImage2 = new image::Image(640, 480, image::FMT_BGRA8888);
-        // std::string str = "FPS=" + std::to_string(_fps);
-        // dispImage->draw_string(0, 0, str.c_str(), image::COLOR_WHITE);
-        // dispImage2->draw_rect(0,0,640, 480, image::COLOR_RED, -1);
 
         std::string str2 = std::to_string((int)_fps) + "FPS";
         dispImage2->draw_string(20, 82, getFreeSpaceString().c_str(), image::COLOR_WHITE, 2, 2);
@@ -133,12 +183,11 @@ namespace z {
 
         dispImage2->draw_string(20, 22, device_key.c_str(), image::COLOR_WHITE, 2, 2);
 
-
-        // disp->show(*dispImage);
         disp2->show(*dispImage2, image::FIT_COVER);
-        // delete dispImage;
+
         delete dispImage2;
     }
+#endif
 
     void Display::showLogo(const std::string &path) {
         image::Image *dispImage = new image::Image(width, height, image::Format::FMT_RGBA8888);
