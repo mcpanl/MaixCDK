@@ -11,6 +11,7 @@
 #include "z_display.hpp"
 #include "z_encoder.hpp"
 #include "z_record_control.hpp"
+#include "z_http.hpp"
 #include "../include/EduScheduleManager.hpp"
 #include "mmf_vi_helper.hpp"
 
@@ -35,30 +36,6 @@ using json = nlohmann::json;
 using namespace httplib;
 
 Priv priv;
-
-
-std::string generateRandomString(size_t length) {
-    // 字符池
-    const std::string chars =
-        "abcdefghijklmnopqrstuvwxyz"
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-        "0123456789";
-
-    // 使用 C++11 的随机数引擎和分布
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    std::uniform_int_distribution<> distrib(0, chars.size() - 1);
-
-    std::string result;
-    result.reserve(length);
-
-    for (size_t i = 0; i < length; ++i) {
-        result += chars[distrib(gen)];
-    }
-
-    return result;
-}
-
 
 // 确保目录存在
 static void ensure_dir(const std::string& path) {
@@ -111,277 +88,15 @@ int _main(int argc, char* argv[])
     uint64_t t = time::time_s();
 
     log::info("Program start at %d", t);
+
+
     priv.manager = std::make_shared<EduScheduleManager>("/root/csv_data");
 
     priv.manager->loadAll();
 
     priv.manager->createDevice(Device{"Device_1","设备1"});
 
-    Server svr;
-    // GET /hello
-    svr.Get("/getAll", [](const Request& req, Response& res) {
-        json result = {
-            {"errCode", 0},
-            {"errMsg", ""},
-            {"data", priv.manager->toHierarchyJson()}
-        };
-        res.set_content(result.dump(), "application/json");
-    });
-
-    // ================= 新增接口 =================
-    // 自动检测或创建教师
-    svr.Post("/teacher/autoCreate", [](const httplib::Request& req, httplib::Response& res) {
-        json result;
-        try {
-            auto body = json::parse(req.body);
-            std::string deviceId = body.value("deviceId", "");
-            auto arr = body.value("teachers", json::array());
-
-            for (auto &t : arr) {
-                std::string id = t.value("id", "");
-                std::string name = t.value("name", "");
-                if (id.empty()) continue;
-
-                auto teacher = edu::Teacher{id, name, {}};
-                try {
-#if 1
-                    // 逻辑A：存在则更新姓名
-                    priv.manager->editTeacher(teacher);
-#else
-                    // 逻辑B：存在则忽略
-                    priv.manager->createTeacher(teacher);
-#endif
-
-                } catch (...) {
-                    // 如果不存在会抛异常 -> 创建
-                    priv.manager->createTeacher(teacher);
-                }
-            }
-            priv.manager->saveAll();
-            result = {{"errCode", 0}, {"errMsg", ""}, {"data", nullptr}};
-        } catch (std::exception &e) {
-            result = {{"errCode", 1001}, {"errMsg", e.what()}, {"data", nullptr}};
-        }
-        res.set_content(result.dump(), "application/json");
-    });
-
-    // 自动检测或创建学生
-    svr.Post("/student/autoCreate", [](const httplib::Request& req, httplib::Response& res) {
-        json result;
-        try {
-            auto body = json::parse(req.body);
-            std::string deviceId = body.value("deviceId", "");
-            std::string teacherId = body.value("teacherId", "");
-            auto arr = body.value("students", json::array());
-
-            for (auto &s : arr) {
-                std::string id = s.value("id", "");
-                std::string name = s.value("name", "");
-                if (id.empty()) continue;
-
-                auto stu = edu::Student{id, name, {}};
-                try {
-#if 1
-                    priv.manager->editStudent(stu);
-#else
-                    priv.manager->createStudent(stu);
-#endif
-                } catch (...) {
-                    priv.manager->createStudent(stu);
-                }
-                // 建立教师-学生关系
-                priv.manager->assignStudentToTeacher(teacherId, id);
-            }
-            priv.manager->saveAll();
-            result = {{"errCode", 0}, {"errMsg", ""}, {"data", nullptr}};
-        } catch (std::exception &e) {
-            result = {{"errCode", 1001}, {"errMsg", e.what()}, {"data", nullptr}};
-        }
-        res.set_content(result.dump(), "application/json");
-    });
-
-    // 获取教师下的学生列表
-    svr.Get(R"(/teacher/(\w+)/device/(\w+)/students)", [](const httplib::Request& req, httplib::Response& res) {
-        json result;
-        try {
-            std::string teacherId = req.matches[1];
-            std::string deviceId = req.matches[2];
-
-            auto studentsList = priv.manager->getStudentsByTeacher(deviceId, teacherId);
-
-            json jstudents = json::array();
-            for (const auto &st : studentsList) {
-                jstudents.push_back({
-                    {"id", st.id},
-                    {"name", st.name},
-                    {"scheduleIds", st.scheduleIds}
-                });
-            }
-
-            json data;
-            data["students"] = jstudents;
-
-            result = {{"errCode", 0}, {"errMsg", ""}, {"data", data}};
-        } catch (std::exception &e) {
-            result = {{"errCode", 1001}, {"errMsg", e.what()}, {"data", nullptr}};
-        }
-        res.set_content(result.dump(), "application/json");
-    });
-
-    // 获取设备的课程列表
-    svr.Get(R"(/device/(\w+)/schedules)", [](const httplib::Request& req, httplib::Response& res) {
-        json result;
-        try {
-            std::string deviceId = req.matches[1];
-            json data = priv.manager->getSchedulesByDevice(deviceId);
-            result = {{"errCode", 0}, {"errMsg", ""}, {"data", data}};
-        } catch (std::exception &e) {
-            result = {{"errCode", 1001}, {"errMsg", e.what()}, {"data", nullptr}};
-        }
-        res.set_content(result.dump(), "application/json");
-    });
-
-    // 获取教师的课程列表
-    svr.Get(R"(/teacher/(\w+)/device/(\w+)/schedules)", [](const httplib::Request& req, httplib::Response& res) {
-        json result;
-        try {
-            std::string teacherId = req.matches[1];
-            std::string deviceId = req.matches[2];
-            json data = priv.manager->getSchedulesByTeacher(deviceId, teacherId);
-            result = {{"errCode", 0}, {"errMsg", ""}, {"data", data}};
-        } catch (std::exception &e) {
-            result = {{"errCode", 1001}, {"errMsg", e.what()}, {"data", nullptr}};
-        }
-        res.set_content(result.dump(), "application/json");
-    });
-
-    // 获取学生的课程列表
-    svr.Get(R"(/student/(\w+)/teacher/(\w+)/device/(\w+)/schedules)", [](const httplib::Request& req, httplib::Response& res) {
-        json result;
-        try {
-            std::string studentId = req.matches[1];
-            std::string teacherId = req.matches[2];
-            std::string deviceId = req.matches[3];
-            json data = priv.manager->getSchedulesByStudent(deviceId, teacherId, studentId);
-            result = {{"errCode", 0}, {"errMsg", ""}, {"data", data}};
-        } catch (std::exception &e) {
-            result = {{"errCode", 1001}, {"errMsg", e.what()}, {"data", nullptr}};
-        }
-        res.set_content(result.dump(), "application/json");
-    });
-
-    // 创建/编辑课程
-    svr.Post("/schedule/save", [](const httplib::Request& req, httplib::Response& res) {
-        json result;
-        try {
-            auto body = json::parse(req.body);
-            edu::Schedule s;
-            s.id = body.value("courseId", "");
-            s.deviceId = body.value("deviceId", "");
-            s.teacherId = body.value("teacherId", "");
-            s.studentId = body.value("studentId", "");
-            s.startDate = edu::parseDate(body.value("startDate", "1970-01-01"));
-            s.endDate   = edu::parseDate(body.value("endDate", "1970-01-01"));
-            s.startTime = edu::parseTime(body.value("startTime", "00:00:00"));
-            s.endTime   = edu::parseTime(body.value("endTime", "00:00:00"));
-            s.recur = edu::RecurrenceType::Once;
-            std::string recurType = body.value("recurType", "once");
-            if (recurType=="daily") s.recur=edu::RecurrenceType::Daily;
-            else if (recurType=="weekly") {s.recur=edu::RecurrenceType::Weekly; s.weekDay=body.value("weekDay",1);}
-            else if (recurType=="monthly"){s.recur=edu::RecurrenceType::Monthly; s.monthDay=body.value("monthDay",1);}
-
-            if (s.id.empty()) {
-                // 创建
-                s.id = generateRandomString(12);
-                priv.manager->createSchedule(s);
-            } else {
-                priv.manager->editSchedule(s);
-            }
-
-            priv.manager->saveAll();
-
-            result = {{"errCode",0},{"errMsg",""},{"data", {{"courseId", s.id}}}};
-        } catch (std::exception &e) {
-            result = {{"errCode",1001},{"errMsg",e.what()},{"data",nullptr}};
-        }
-        res.set_content(result.dump(), "application/json");
-    });
-
-    // 删除课程
-    svr.Post("/schedule/delete", [](const httplib::Request& req, httplib::Response& res) {
-        json result;
-        try {
-            auto body=json::parse(req.body);
-            std::string courseId=body.value("courseId","");
-            priv.manager->deleteSchedule(courseId);
-            result={ {"errCode",0},{"errMsg",""},{"data",nullptr} };
-        } catch(std::exception&e){
-            result={ {"errCode",1001},{"errMsg",e.what()},{"data",nullptr} };
-        }
-
-        priv.manager->saveAll();
-
-        res.set_content(result.dump(),"application/json");
-    });
-
-    // 获取课程例外情况
-    svr.Get(R"(/schedule/(\w+)/exceptions)", [](const httplib::Request& req, httplib::Response& res) {
-        json result;
-        try{
-            std::string courseId=req.matches[1];
-            json data=json::array();
-            auto hier=priv.manager->toHierarchyJson();
-            for(auto &[eid,ex]: hier["exceptions"].items()){
-                if(ex["scheduleId"]==courseId){
-                    data.push_back(ex);
-                }
-            }
-            result={ {"errCode",0},{"errMsg",""},{"data",data} };
-        }catch(std::exception&e){
-            result={ {"errCode",1001},{"errMsg",e.what()},{"data",nullptr} };
-        }
-        res.set_content(result.dump(),"application/json");
-    });
-
-    // 编辑课程例外情况
-    svr.Post("/schedule/editExceptions", [](const httplib::Request& req, httplib::Response& res) {
-        json result;
-        try{
-            auto body=json::parse(req.body);
-            std::string courseId=body.value("courseId","");
-            auto arr=body.value("dates",json::array());
-
-            // 先删除旧的
-            auto hier=priv.manager->toHierarchyJson();
-            for(auto &[eid,ex]: hier["exceptions"].items()){
-                if(ex["scheduleId"]==courseId){
-                    priv.manager->deleteException(eid);
-                }
-            }
-            // 新增
-            for(auto &d: arr){
-                edu::YMD y=edu::parseDate(d.get<std::string>());
-                edu::ScheduleException se;
-                se.scheduleId=courseId;
-                se.id=courseId+"#"+d.get<std::string>();
-                se.date=y;
-                priv.manager->createException(se);
-            }
-
-            priv.manager->saveAll();
-
-            result={ {"errCode",0},{"errMsg",""},{"data",nullptr} };
-        }catch(std::exception&e){
-            result={ {"errCode",1001},{"errMsg",e.what()},{"data",nullptr} };
-        }
-        res.set_content(result.dump(),"application/json");
-    });
-
-    std::thread server_thread([&]() {
-        std::cout << "HTTP server running at http://localhost:8080\n";
-        svr.listen("0.0.0.0", 8080);  // 阻塞，直到 svr.stop() 被调用
-        std::cout << "HTTP server stopped.\n";
-    });
+    priv.http = std::make_shared<z::Http>();
 
     priv.display = new z::Display();
     priv.display->showLogo("assets/logo.png");
@@ -504,16 +219,6 @@ int _main(int argc, char* argv[])
             time::sleep_ms(5);
             continue;
         }
-
-        // printf("capture_ms = %lu\n", capture_ms);
-
-/*
-        if (priv.recordControl->state() == z::RecordControl::State::Recording) {
-            std::cout << "正在录制，时长: " << priv.recordControl->duration() << " 秒\n";
-        } else {
-            std::cout << "未在录制\n";
-        }
-*/
 
         mmf_vo_frame_push2(0, 0, 1, frame);
         // mmf_vo_frame_push2(0, 0, 2, frame);
@@ -647,11 +352,12 @@ int _main(int argc, char* argv[])
         }
     }
 
-    svr.stop();
+    // svr.stop();
 
     // 等待子线程退出
-    server_thread.join();
+    // server_thread.join();
     std::cout << "Program finished.\n";
+    delete priv.display;
 
     log::info("Program exit");
     delete priv.encoder;
@@ -661,7 +367,6 @@ int _main(int argc, char* argv[])
 
     delete priv.tcp_server;
     delete priv.udp_server;
-    delete priv.display;
     delete priv.recordControl;
 
     return 0;

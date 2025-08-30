@@ -2,9 +2,23 @@
 #include "maix_basic.hpp"
 #include "z_record_control.hpp"
 #include "priv.hpp"
-
+#include <chrono>
+#include <ctime>
+#include <iomanip>
+#include <sstream>
 using namespace maix;
 using namespace maix::ext_dev;
+
+// 获取当前日期时间字符串，格式为 YYYY-MM-DD HH:MM:SS
+std::string get_current_datetime() {
+    auto now = std::chrono::system_clock::now();
+    auto in_time_t = std::chrono::system_clock::to_time_t(now);
+
+    std::stringstream ss;
+    ss << std::put_time(std::localtime(&in_time_t), "%H:%M:%S");
+    return ss.str();
+}
+
 
 namespace z {
 
@@ -138,26 +152,36 @@ namespace z {
                 int seconds = totalSec % 60;
 
                 char recTime[16];
-                snprintf(recTime, sizeof(recTime), "%02d:%02d", minutes, seconds);
-                dispImage2->draw_rect(20 - 6, 82 - 6 , 116, 40, maix::image::COLOR_RED, -1);
-                draw_text_cached(dispImage2, 20, 82, recTime, false);
+                if (minutes < 100) {
+                    // 前面留一个空格 + 两位补零
+                    snprintf(recTime, sizeof(recTime), " %02d:%02d", minutes, seconds);
+                } else {
+                    // 直接正常显示
+                    snprintf(recTime, sizeof(recTime), "%d:%02d", minutes, seconds);
+                }
+
+                dispImage2->draw_rect(20 - 6, 18 - 6 , 132, 40, maix::image::COLOR_RED, -1);
+                draw_text_cached(dispImage2, 20, 18, recTime, false);
             } else {
-                draw_text_cached(dispImage2, 20, 82, getFreeSpaceString(), false);
+                draw_text_cached(dispImage2, 20, 18, getFreeSpaceString(), false);
             }
         }
+
+        std::string datetime_str = get_current_datetime();
+        draw_text_cached(dispImage2, 260, 18, datetime_str, false);
 
         // 电池
         char buffer[8];
         snprintf(buffer, sizeof(buffer), "[%3d]", (int)bat_percent);
         bool green = is_charging;
-        draw_text_cached(dispImage2, 550, 22, buffer, green);
+        draw_text_cached(dispImage2, 530, 18, buffer, green);
 
         // FPS
         std::string str2 = std::to_string((int)_fps) + "FPS";
 
-        draw_text_cached(dispImage2, 520, 82, str2, false);
+        draw_text_cached(dispImage2, 510, 82, str2, false);
 
-        draw_text_cached(dispImage2, 20, 22, device_key, false);
+        draw_text_cached(dispImage2, 20, 82, device_key, false);
 
         disp2->show(*dispImage2, image::FIT_COVER);
 

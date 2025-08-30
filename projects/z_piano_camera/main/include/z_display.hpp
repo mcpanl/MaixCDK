@@ -47,23 +47,25 @@ namespace z {
         std::unordered_map<char, maix::image::Image*> glyph_white;
         std::unordered_map<char, maix::image::Image*> glyph_green;
         void initGlyphCache() {
-            const std::string chars = "FPS%GBMKT:0123456789.abcdefghijklmnopqrstuvwxyz[]/ ";
+            const std::string chars = " []/%:.0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
 
             for (char c : chars) {
                 // 获取字符大小
                 auto sz = maix::image::string_size(std::string(1, c).c_str(), 2, 2);
-                int w = sz.width();
-                int h = sz.height() + 6;
+                int w = sz.width() + 2;
+                int h = sz.height() + 6 + 2;
 
                 // 白色版本
                 maix::image::Image* img_white = new maix::image::Image(w, h, maix::image::FMT_BGRA8888);
                 img_white->clear();
+                img_white->draw_string(0 + 2, 6 + 2, std::string(1, c).c_str(), maix::image::COLOR_BLACK, 2, 2);
                 img_white->draw_string(0, 6, std::string(1, c).c_str(), maix::image::COLOR_WHITE, 2, 2);
                 glyph_white[c] = img_white;
 
                 // 绿色版本
                 maix::image::Image* img_green = new maix::image::Image(w, h, maix::image::FMT_BGRA8888);
                 img_green->clear();
+                img_green->draw_string(0 + 2, 6 + 2, std::string(1, c).c_str(), maix::image::COLOR_BLACK, 2, 2);
                 img_green->draw_string(0, 6, std::string(1, c).c_str(), maix::image::COLOR_GREEN, 2, 2);
                 glyph_green[c] = img_green;
             }
@@ -89,7 +91,7 @@ namespace z {
 
                 maix::image::Image* glyph = cache[c];
                 target->draw_image(cursor_x, y, *glyph);
-                cursor_x += glyph->width();  // 按字宽推进
+                cursor_x += glyph->width() - 2;  // 按字宽推进
             }
         }
     public:
