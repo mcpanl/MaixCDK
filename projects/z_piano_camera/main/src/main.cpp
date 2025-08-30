@@ -11,7 +11,7 @@
 #include "z_display.hpp"
 #include "z_encoder.hpp"
 #include "z_record_control.hpp"
-#include "EduScheduleManager.hpp"
+#include "../include/EduScheduleManager.hpp"
 #include "mmf_vi_helper.hpp"
 
 #include <deque>
@@ -23,6 +23,7 @@
 #include <iostream>
 #include <thread>
 #include <chrono>
+#include <random>
 
 #include "httplib.h"
 #include "json.hpp"
@@ -34,6 +35,29 @@ using json = nlohmann::json;
 using namespace httplib;
 
 Priv priv;
+
+
+std::string generateRandomString(size_t length) {
+    // 字符池
+    const std::string chars =
+        "abcdefghijklmnopqrstuvwxyz"
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        "0123456789";
+
+    // 使用 C++11 的随机数引擎和分布
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_int_distribution<> distrib(0, chars.size() - 1);
+
+    std::string result;
+    result.reserve(length);
+
+    for (size_t i = 0; i < length; ++i) {
+        result += chars[distrib(gen)];
+    }
+
+    return result;
+}
 
 
 // 确保目录存在
@@ -77,8 +101,8 @@ static std::vector<uint8_t> g_sps_pps_buf;
 
 
 uint64_t last_start_time = 0;       // 上次开始时间
-const int record_duration_ms = 60 * 1000; // 录制 10 秒
-const int start_interval_ms = 50 * 1000 + 10 * 1000; // 每 5 秒触发一次
+const int record_duration_ms = 15 * 1 * 1000; // 录制 10 秒
+const int start_interval_ms = 15 * 1 * 1000 + 5 * 1000; // 每 15 秒触发一次
 
 int _main(int argc, char* argv[])
 {
@@ -89,22 +113,9 @@ int _main(int argc, char* argv[])
     log::info("Program start at %d", t);
     priv.manager = std::make_shared<EduScheduleManager>("/root/csv_data");
 
+    priv.manager->loadAll();
+
     priv.manager->createDevice(Device{"Device_1","设备1"});
-    Teacher teacher{"Teacher_201","教师201",{}};
-    priv.manager->createTeacher(teacher);
-
-    Student student1{"S201901", "小明"};
-    Student student2{"S201902", "小红"};
-    priv.manager->createStudent(student1);
-    priv.manager->createStudent(student2);
-
-    Teacher teacher_updated = teacher;
-    teacher_updated.studentIds = {"S201901", "S201902"};
-    priv.manager->editTeacher(teacher_updated);
-
-    priv.manager->saveAll();
-
-    priv.manager->printAllHierarchy(std::cout);
 
     Server svr;
     // GET /hello
@@ -117,24 +128,260 @@ int _main(int argc, char* argv[])
         res.set_content(result.dump(), "application/json");
     });
 
+    // ================= 新增接口 =================
+    // 自动检测或创建教师
+    svr.Post("/teacher/autoCreate", [](const httplib::Request& req, httplib::Response& res) {
+        json result;
+        try {
+            auto body = json::parse(req.body);
+            std::string deviceId = body.value("deviceId", "");
+            auto arr = body.value("teachers", json::array());
+
+            for (auto &t : arr) {
+                std::string id = t.value("id", "");
+                std::string name = t.value("name", "");
+                if (id.empty()) continue;
+
+                auto teacher = edu::Teacher{id, name, {}};
+                try {
+#if 1
+                    // 逻辑A：存在则更新姓名
+                    priv.manager->editTeacher(teacher);
+#else
+                    // 逻辑B：存在则忽略
+                    priv.manager->createTeacher(teacher);
+#endif
+
+                } catch (...) {
+                    // 如果不存在会抛异常 -> 创建
+                    priv.manager->createTeacher(teacher);
+                }
+            }
+            priv.manager->saveAll();
+            result = {{"errCode", 0}, {"errMsg", ""}, {"data", nullptr}};
+        } catch (std::exception &e) {
+            result = {{"errCode", 1001}, {"errMsg", e.what()}, {"data", nullptr}};
+        }
+        res.set_content(result.dump(), "application/json");
+    });
+
+    // 自动检测或创建学生
+    svr.Post("/student/autoCreate", [](const httplib::Request& req, httplib::Response& res) {
+        json result;
+        try {
+            auto body = json::parse(req.body);
+            std::string deviceId = body.value("deviceId", "");
+            std::string teacherId = body.value("teacherId", "");
+            auto arr = body.value("students", json::array());
+
+            for (auto &s : arr) {
+                std::string id = s.value("id", "");
+                std::string name = s.value("name", "");
+                if (id.empty()) continue;
+
+                auto stu = edu::Student{id, name, {}};
+                try {
+#if 1
+                    priv.manager->editStudent(stu);
+#else
+                    priv.manager->createStudent(stu);
+#endif
+                } catch (...) {
+                    priv.manager->createStudent(stu);
+                }
+                // 建立教师-学生关系
+                priv.manager->assignStudentToTeacher(teacherId, id);
+            }
+            priv.manager->saveAll();
+            result = {{"errCode", 0}, {"errMsg", ""}, {"data", nullptr}};
+        } catch (std::exception &e) {
+            result = {{"errCode", 1001}, {"errMsg", e.what()}, {"data", nullptr}};
+        }
+        res.set_content(result.dump(), "application/json");
+    });
+
+    // 获取教师下的学生列表
+    svr.Get(R"(/teacher/(\w+)/device/(\w+)/students)", [](const httplib::Request& req, httplib::Response& res) {
+        json result;
+        try {
+            std::string teacherId = req.matches[1];
+            std::string deviceId = req.matches[2];
+
+            auto studentsList = priv.manager->getStudentsByTeacher(deviceId, teacherId);
+
+            json jstudents = json::array();
+            for (const auto &st : studentsList) {
+                jstudents.push_back({
+                    {"id", st.id},
+                    {"name", st.name},
+                    {"scheduleIds", st.scheduleIds}
+                });
+            }
+
+            json data;
+            data["students"] = jstudents;
+
+            result = {{"errCode", 0}, {"errMsg", ""}, {"data", data}};
+        } catch (std::exception &e) {
+            result = {{"errCode", 1001}, {"errMsg", e.what()}, {"data", nullptr}};
+        }
+        res.set_content(result.dump(), "application/json");
+    });
+
+    // 获取设备的课程列表
+    svr.Get(R"(/device/(\w+)/schedules)", [](const httplib::Request& req, httplib::Response& res) {
+        json result;
+        try {
+            std::string deviceId = req.matches[1];
+            json data = priv.manager->getSchedulesByDevice(deviceId);
+            result = {{"errCode", 0}, {"errMsg", ""}, {"data", data}};
+        } catch (std::exception &e) {
+            result = {{"errCode", 1001}, {"errMsg", e.what()}, {"data", nullptr}};
+        }
+        res.set_content(result.dump(), "application/json");
+    });
+
+    // 获取教师的课程列表
+    svr.Get(R"(/teacher/(\w+)/device/(\w+)/schedules)", [](const httplib::Request& req, httplib::Response& res) {
+        json result;
+        try {
+            std::string teacherId = req.matches[1];
+            std::string deviceId = req.matches[2];
+            json data = priv.manager->getSchedulesByTeacher(deviceId, teacherId);
+            result = {{"errCode", 0}, {"errMsg", ""}, {"data", data}};
+        } catch (std::exception &e) {
+            result = {{"errCode", 1001}, {"errMsg", e.what()}, {"data", nullptr}};
+        }
+        res.set_content(result.dump(), "application/json");
+    });
+
+    // 获取学生的课程列表
+    svr.Get(R"(/student/(\w+)/teacher/(\w+)/device/(\w+)/schedules)", [](const httplib::Request& req, httplib::Response& res) {
+        json result;
+        try {
+            std::string studentId = req.matches[1];
+            std::string teacherId = req.matches[2];
+            std::string deviceId = req.matches[3];
+            json data = priv.manager->getSchedulesByStudent(deviceId, teacherId, studentId);
+            result = {{"errCode", 0}, {"errMsg", ""}, {"data", data}};
+        } catch (std::exception &e) {
+            result = {{"errCode", 1001}, {"errMsg", e.what()}, {"data", nullptr}};
+        }
+        res.set_content(result.dump(), "application/json");
+    });
+
+    // 创建/编辑课程
+    svr.Post("/schedule/save", [](const httplib::Request& req, httplib::Response& res) {
+        json result;
+        try {
+            auto body = json::parse(req.body);
+            edu::Schedule s;
+            s.id = body.value("courseId", "");
+            s.deviceId = body.value("deviceId", "");
+            s.teacherId = body.value("teacherId", "");
+            s.studentId = body.value("studentId", "");
+            s.startDate = edu::parseDate(body.value("startDate", "1970-01-01"));
+            s.endDate   = edu::parseDate(body.value("endDate", "1970-01-01"));
+            s.startTime = edu::parseTime(body.value("startTime", "00:00:00"));
+            s.endTime   = edu::parseTime(body.value("endTime", "00:00:00"));
+            s.recur = edu::RecurrenceType::Once;
+            std::string recurType = body.value("recurType", "once");
+            if (recurType=="daily") s.recur=edu::RecurrenceType::Daily;
+            else if (recurType=="weekly") {s.recur=edu::RecurrenceType::Weekly; s.weekDay=body.value("weekDay",1);}
+            else if (recurType=="monthly"){s.recur=edu::RecurrenceType::Monthly; s.monthDay=body.value("monthDay",1);}
+
+            if (s.id.empty()) {
+                // 创建
+                s.id = generateRandomString(12);
+                priv.manager->createSchedule(s);
+            } else {
+                priv.manager->editSchedule(s);
+            }
+
+            priv.manager->saveAll();
+
+            result = {{"errCode",0},{"errMsg",""},{"data", {{"courseId", s.id}}}};
+        } catch (std::exception &e) {
+            result = {{"errCode",1001},{"errMsg",e.what()},{"data",nullptr}};
+        }
+        res.set_content(result.dump(), "application/json");
+    });
+
+    // 删除课程
+    svr.Post("/schedule/delete", [](const httplib::Request& req, httplib::Response& res) {
+        json result;
+        try {
+            auto body=json::parse(req.body);
+            std::string courseId=body.value("courseId","");
+            priv.manager->deleteSchedule(courseId);
+            result={ {"errCode",0},{"errMsg",""},{"data",nullptr} };
+        } catch(std::exception&e){
+            result={ {"errCode",1001},{"errMsg",e.what()},{"data",nullptr} };
+        }
+
+        priv.manager->saveAll();
+
+        res.set_content(result.dump(),"application/json");
+    });
+
+    // 获取课程例外情况
+    svr.Get(R"(/schedule/(\w+)/exceptions)", [](const httplib::Request& req, httplib::Response& res) {
+        json result;
+        try{
+            std::string courseId=req.matches[1];
+            json data=json::array();
+            auto hier=priv.manager->toHierarchyJson();
+            for(auto &[eid,ex]: hier["exceptions"].items()){
+                if(ex["scheduleId"]==courseId){
+                    data.push_back(ex);
+                }
+            }
+            result={ {"errCode",0},{"errMsg",""},{"data",data} };
+        }catch(std::exception&e){
+            result={ {"errCode",1001},{"errMsg",e.what()},{"data",nullptr} };
+        }
+        res.set_content(result.dump(),"application/json");
+    });
+
+    // 编辑课程例外情况
+    svr.Post("/schedule/editExceptions", [](const httplib::Request& req, httplib::Response& res) {
+        json result;
+        try{
+            auto body=json::parse(req.body);
+            std::string courseId=body.value("courseId","");
+            auto arr=body.value("dates",json::array());
+
+            // 先删除旧的
+            auto hier=priv.manager->toHierarchyJson();
+            for(auto &[eid,ex]: hier["exceptions"].items()){
+                if(ex["scheduleId"]==courseId){
+                    priv.manager->deleteException(eid);
+                }
+            }
+            // 新增
+            for(auto &d: arr){
+                edu::YMD y=edu::parseDate(d.get<std::string>());
+                edu::ScheduleException se;
+                se.scheduleId=courseId;
+                se.id=courseId+"#"+d.get<std::string>();
+                se.date=y;
+                priv.manager->createException(se);
+            }
+
+            priv.manager->saveAll();
+
+            result={ {"errCode",0},{"errMsg",""},{"data",nullptr} };
+        }catch(std::exception&e){
+            result={ {"errCode",1001},{"errMsg",e.what()},{"data",nullptr} };
+        }
+        res.set_content(result.dump(),"application/json");
+    });
+
     std::thread server_thread([&]() {
         std::cout << "HTTP server running at http://localhost:8080\n";
         svr.listen("0.0.0.0", 8080);  // 阻塞，直到 svr.stop() 被调用
         std::cout << "HTTP server stopped.\n";
     });
-
-    while (!app::need_exit()) {
-        printf("Tick at %lu\n", time::ticks_ms());
-        time::sleep_ms(1000);
-    }
-
-    svr.stop();
-
-    // 等待子线程退出
-    server_thread.join();
-    std::cout << "Program finished.\n";
-
-    return 0;
 
     priv.display = new z::Display();
     priv.display->showLogo("assets/logo.png");
@@ -188,7 +435,6 @@ int _main(int argc, char* argv[])
     double sample_error_acc = 0.0;      // 累积误差（小数采样点）
     int64_t audio_pts = 0;              // 音频 PTS（单位：采样点）
 
-    uint64_t last_audio_ms = time::ticks_ms(); // 上一次推送音频的时间
 
     // --- FPS 统计 ---
     std::deque<long long> frame_times;
@@ -205,6 +451,13 @@ int _main(int argc, char* argv[])
 
     priv.recordControl = new z::RecordControl();
 
+    bool a = false;
+
+    uint64_t first_loop_time = time::ticks_ms();
+
+    static auto start_time = std::chrono::steady_clock::now();
+    uint64_t last_audio_ms = 0;
+
     while(!app::need_exit())
     {
         uint64_t now_ms = time::ticks_ms();
@@ -213,7 +466,7 @@ int _main(int argc, char* argv[])
 
         // 判断是否需要启动新录制
         if ((!priv.recordControl || priv.recordControl->state() == z::RecordControl::State::Ready) &&
-            (now_ms - last_start_time >= start_interval_ms)) {
+            (now_ms - last_start_time >= start_interval_ms) && now_ms - first_loop_time > 2000) {
 
             ensure_dir("/root/record");
             std::string filename = "/root/record/" + timestamp_str() + ".mp4";
@@ -223,12 +476,13 @@ int _main(int argc, char* argv[])
             last_start_time = now_ms;
 
             log::info("开始录制: %s", filename.c_str());
-            }
+        }
 
         // 判断是否需要停止录制
         if (priv.recordControl && priv.recordControl->state() == z::RecordControl::State::Recording) {
             double elapsed = priv.recordControl->duration();
             if (elapsed >= record_duration_ms / 1000.0) {
+                log::info("准备录制结束，持续: %.2f 秒", elapsed);
                 priv.recordControl->stop();
                 log::info("录制结束，持续: %.2f 秒", elapsed);
             }
@@ -239,13 +493,19 @@ int _main(int argc, char* argv[])
         mmf_frame_info_t f;
 
         int ch = priv.cam->get_channel();
+
         int res = _mmf_vi_frame_pop(ch, &frame, &f, 10);
+
+        auto capture_tp = std::chrono::steady_clock::now();
+        uint64_t capture_ms = std::chrono::duration_cast<std::chrono::milliseconds>(capture_tp - start_time).count();
 
         if (res != 0 || frame == nullptr) {
             printf("Failed to get frame, skipping...\n");
             time::sleep_ms(5);
             continue;
         }
+
+        // printf("capture_ms = %lu\n", capture_ms);
 
 /*
         if (priv.recordControl->state() == z::RecordControl::State::Recording) {
@@ -280,12 +540,13 @@ int _main(int argc, char* argv[])
                 data,
                 data_size,
                 sps_pps_buf,
-                time::ticks_ms()
+                capture_ms
             );
 
             priv.recordControl->handleAudioFrame(
                 sample_rate,
                 bytes_per_sample,
+                capture_ms,
                 last_audio_ms,
                 sample_error_acc
             );
@@ -293,7 +554,7 @@ int _main(int argc, char* argv[])
 
 
 
-#if 0
+#if 1
         if (isSuccess) {
             const auto& sps_pps_buf = priv.encoder->getSpsPps();
 
@@ -305,92 +566,6 @@ int _main(int argc, char* argv[])
             } else if (venc_stream.count > 1) {
                 data = venc_stream.data[2]; // 跳过 SPS/PPS，只取 IDR/P 帧
                 data_size = venc_stream.data_size[2];
-            }
-
-            // 配置音画同步
-            if (priv.ffmpeg_packer && priv.ffmpeg_packer->is_opened()) {
-                double temp_us = priv.ffmpeg_packer->video_pts_to_us(priv.video_pts);
-                priv.audio_pts = priv.ffmpeg_packer->audio_us_to_pts(temp_us);
-            }
-
-            // H264录制（整体+画面）
-            if (data_size > 0 && !sps_pps_buf.empty()) {
-                if(!priv.ffmpeg_packer->is_opened()) {
-                    priv.ffmpeg_packer->config_sps_pps(
-                        priv.encoder->get_sps_pps_ptr(sps_pps_buf),
-                        priv.encoder->get_sps_pps_size(sps_pps_buf)
-                    );
-                    while (0 != priv.ffmpeg_packer->open() && !app::need_exit()) {
-                        time::sleep_ms(500);
-                        log::info("Can't open ffmpeg, retry again...");
-                    }
-
-                    if (priv.audio_recorder) {
-                        priv.audio_recorder->reset();
-                    }
-
-                    total_audio_samples_sent = 0;
-
-                    priv.video_pts = 0;
-                    priv.audio_pts = 0;
-                    priv.last_read_cam_ms = 0;
-                    priv.last_read_pcm_ms = 0;
-                }
-
-                // PTS 计算
-                if (priv.last_read_cam_ms == 0) {
-                    priv.video_pts = 0;
-                    priv.last_read_cam_ms = time::ticks_ms();
-                } else {
-                    priv.video_pts += priv.ffmpeg_packer->video_us_to_pts((time::ticks_ms() - priv.last_read_cam_ms) * 1000);
-                    priv.last_read_cam_ms = time::ticks_ms();
-                }
-
-                if (err::ERR_NONE != priv.ffmpeg_packer->push(data, data_size, priv.video_pts)) {
-                    log::error("ffmpeg push failed!");
-                } else {
-                    // log::info("ffmpeg push success");
-                }
-            }
-
-            // H264录制（音频）
-            if (data_size > 0 && !sps_pps_buf.empty() && priv.ffmpeg_packer->is_opened()) {
-                uint64_t _curr_ms = time::ticks_ms();
-                double elapsed_ms = (double)(_curr_ms - last_audio_ms);
-                last_audio_ms = _curr_ms;
-
-                // 理想采样数（包含误差修正）
-                double ideal_samples = (sample_rate * elapsed_ms / 1000.0) + sample_error_acc;
-                int samples_needed = (int)(ideal_samples + 0.5);
-                sample_error_acc = ideal_samples - samples_needed;
-
-                // 获取剩余可读取的帧数
-                auto remain_frame_count = priv.audio_recorder->get_remaining_frames();
-
-                // 限制实际读取的采样数不超过可用帧数
-                int samples_to_read = std::min(samples_needed, (int)remain_frame_count);
-
-                // 如果需要帧对齐，比如要求读取数是N的倍数，可以这样做：
-                // int frame_align = 4; // 假设设备要求每次读取4帧对齐
-                // samples_to_read = (samples_to_read / frame_align) * frame_align;
-
-                if (samples_to_read > 0) {
-                    int read_pcm_size = samples_to_read * bytes_per_sample;
-                    audio_pts += samples_to_read;
-                    // printf("@ pcm_read=%d, audio_pts=%d\n", read_pcm_size, audio_pts);
-
-                    Bytes *pcm_data = priv.audio_recorder->record_bytes(read_pcm_size);
-                    if (pcm_data) {
-                        // printf("@@ pcm_len=%d\n", pcm_data->data_len);
-
-                        if (err::ERR_NONE != priv.ffmpeg_packer->push(pcm_data->data, pcm_data->data_len, priv.audio_pts, true)) {
-                            log::error("ffmpeg push failed!");
-                            printf("ffmpeg push failed!\n"); // Debug ffmpeg push failure.
-                        }
-
-                        delete pcm_data;
-                    }
-                }
             }
 
             // TCP广播画面
@@ -471,12 +646,19 @@ int _main(int argc, char* argv[])
             // printf(": Not Sleep !\n");
         }
     }
+
+    svr.stop();
+
+    // 等待子线程退出
+    server_thread.join();
+    std::cout << "Program finished.\n";
+
     log::info("Program exit");
-    priv.ffmpeg_packer->close();
+    delete priv.encoder;
+
     priv.udp_server->stop();
     priv.tcp_server->stop();
 
-    delete priv.encoder;
     delete priv.tcp_server;
     delete priv.udp_server;
     delete priv.display;

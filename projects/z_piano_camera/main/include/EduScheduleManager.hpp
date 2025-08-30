@@ -159,6 +159,10 @@ namespace edu {
 
         void deleteStudent(const std::string &studentId);
 
+        std::vector<Student> getStudentsByTeacher(const std::string &deviceId, const std::string &teacherId);
+
+        std::string jsonGetStudentsByTeacher(const std::string &s);
+
         // Schedule（创建/修改时会进行冲突检测）
         void createSchedule(const Schedule &s);
 
@@ -191,6 +195,8 @@ namespace edu {
         };
 
         Nearest nearestAround(const TimePoint &now) const;
+
+        Nearest nearestByConditions(const TimePoint &now, const std::string &deviceId, const std::string &teacherId, const std::string &studentId) const;
 
         // ----------- JSON 版 API（输入/输出均为 JSON 字符串） -----------
         // 说明：统一返回 {"ok":true/false, "data":..., "error":"..."}
@@ -237,6 +243,22 @@ namespace edu {
         static std::string csvUnescape(const std::string &s);
 
         void printAllHierarchy(std::ostream &os = std::cout) const;
+
+        // 获取设备下所有课程
+        nlohmann::json getSchedulesByDevice(const std::string &deviceId) const;
+
+        // 获取教师下所有课程
+        nlohmann::json getSchedulesByTeacher(const std::string &deviceId, const std::string &teacherId) const;
+
+        // 获取学生下所有课程
+        nlohmann::json getSchedulesByStudent(const std::string &deviceId,
+                                                                 const std::string &teacherId,
+                                                                 const std::string &studentId) const;
+
+        void assignStudentToTeacher(const std::string &teacherId, const std::string &studentId);
+
+        // 获取课程例外情况
+        nlohmann::json getExceptionsBySchedule(const std::string &scheduleId) const;
 
         nlohmann::json toHierarchyJson() const;
 
