@@ -360,6 +360,7 @@ int _main(int argc, char* argv[])
     delete priv.display;
 
     log::info("Program exit");
+    delete priv.recordControl;
     delete priv.encoder;
 
     priv.udp_server->stop();
@@ -367,7 +368,6 @@ int _main(int argc, char* argv[])
 
     delete priv.tcp_server;
     delete priv.udp_server;
-    delete priv.recordControl;
 
     return 0;
 }

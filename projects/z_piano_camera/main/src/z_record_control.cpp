@@ -19,17 +19,27 @@ bool isKeyFrame(uint8_t* data, int size) {
 namespace z {
 
     RecordControl::RecordControl() {
+        printf("==== RecordControl ====\n");
+        m_running = true;
         m_state = State::WaitingSpsPps;
         m_pushThread = std::thread(&RecordControl::pushThreadLoop, this);
     }
 
     RecordControl::~RecordControl() {
+        printf("~~~~ RecordControl BEGIN ~~~~\n");
         m_running = false;
-        // printf("notify all!!!\n");
+
         m_cv.notify_all();
+        stop();
+
         if (m_pushThread.joinable()) {
             m_pushThread.join();
         }
+
+        if (priv.ffmpeg_packer && priv.ffmpeg_packer->is_opened()) {
+            priv.ffmpeg_packer->close();
+        }
+        printf("~~~~ RecordControl END ~~~~\n");
     }
 
 
@@ -66,7 +76,7 @@ namespace z {
 
         switch (m_state) {
             case State::Recording:
-                // maix::log::info("当前状态是正在录制中，状态设置为Stopping，并且notify_all");
+                maix::log::info("当前状态是正在录制中，状态设置为Stopping");
                 m_state = State::Stopping;
                 // 不再立刻调用 close，由 pushThreadLoop 负责安全关闭
                 // printf("notify all!!!\n");
@@ -270,12 +280,19 @@ void RecordControl::handleAudioFrame(int sample_rate,
     }
 
     void RecordControl::pushThreadLoop() {
-        while (!app::need_exit()) {
+        while (m_running && !app::need_exit()) {
 
             std::unique_lock<std::mutex> lock(m_mutex);
-            m_cv.wait(lock, [this] {
-                return !m_avQueue.empty() || m_state == State::Stopping;
+            m_cv.wait(lock, [this]{
+                return !m_avQueue.empty()
+                    || m_state == State::Stopping
+                    || !m_running
+                    || app::need_exit();
             });
+
+            // 先检查退出意图，避免再次睡回去
+            if (!m_running || app::need_exit()) break;
+
 
             while (!m_avQueue.empty()) {
                 std::unique_ptr<AVPacketData> pkt = std::move(m_avQueue.front());
@@ -314,6 +331,7 @@ void RecordControl::handleAudioFrame(int sample_rate,
             if (m_state == State::Stopping && m_avQueue.empty()) {
                 lock.unlock();
                 priv.ffmpeg_packer->close();
+                printf("packer close.\n");
                 m_stopTime = std::chrono::steady_clock::now();
                 m_state = State::Ready;
                 log::info("Recording stopped safely after queue flush");
