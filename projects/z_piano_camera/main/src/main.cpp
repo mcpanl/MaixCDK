@@ -12,6 +12,8 @@
 #include "z_encoder.hpp"
 #include "z_record_control.hpp"
 #include "z_http.hpp"
+#include "z_video_stream.hpp"
+#include "z_network.hpp"
 #include "../include/EduScheduleManager.hpp"
 #include "mmf_vi_helper.hpp"
 
@@ -28,6 +30,8 @@
 
 #include "httplib.h"
 #include "json.hpp"
+#include "../include/z_network.hpp"
+#include "../include/z_task_manager.hpp"
 
 using namespace maix;
 using namespace edu;
@@ -64,11 +68,11 @@ void handlerTcpMessage(int fd, const std::vector<char>& data)
 }
 
 image::Format cam_fmt = image::Format::FMT_YVU420SP;
-image::Format cam2_fmt = image::Format::FMT_RGB888;
+image::Format cam2_fmt = image::Format::FMT_YVU420SP;
 int cam_w = 1920;
 int cam_h = 1080;
 int cam2_w = 320;
-int cam2_h = 180;
+int cam2_h = 160;
 int cam_fps = 30;
 int cam_buffer_num = 5;
 int cam_bitrate = 9 * 1000 * 1000;
@@ -89,17 +93,17 @@ int _main(int argc, char* argv[])
 
     log::info("Program start at %d", t);
 
+    priv.display = new z::Display();
+    priv.display->showLogo();
+    priv.network = new z::Network();
 
     priv.manager = std::make_shared<EduScheduleManager>("/root/csv_data");
 
     priv.manager->loadAll();
 
-    priv.manager->createDevice(Device{"Device_1","设备1"});
+    priv.manager->createDevice(Device{priv.display->get_device_key(), priv.display->get_custom_name()});
 
     priv.http = std::make_shared<z::Http>();
-
-    priv.display = new z::Display();
-    priv.display->showLogo("assets/logo.png");
 
     priv.cam = new camera::Camera(cam_w, cam_h, cam_fmt, "", cam_fps, cam_buffer_num);
     priv.cam2 = priv.cam->add_channel(cam2_w, cam2_h, cam2_fmt, cam_fps, cam_buffer_num);
@@ -125,6 +129,9 @@ int _main(int argc, char* argv[])
     priv.audio_recorder = new audio::Recorder();
     err::check_null_raise(priv.audio_recorder, "audio recorder init failed!");
 
+    priv.video_stream = new z::VideoStream();
+    priv.video_stream->bind_camera(priv.cam2);
+    priv.video_stream->start();
 
     // priv._encoder = new video::Encoder("", cam_w, cam_h, image::Format::FMT_YVU420SP, video::VideoType::VIDEO_H264, 24, 50, priv.encoder->bitrate(), 1000, false, true, 1);
 
@@ -166,6 +173,8 @@ int _main(int argc, char* argv[])
 
     priv.recordControl = new z::RecordControl();
 
+    priv.task_manager = new z::TaskManager();
+
     bool a = false;
 
     uint64_t first_loop_time = time::ticks_ms();
@@ -179,6 +188,7 @@ int _main(int argc, char* argv[])
         auto loop_start = time::time_ms();  // 记录循环开始时间
 
 
+#if 0
         // 判断是否需要启动新录制
         if ((!priv.recordControl || priv.recordControl->state() == z::RecordControl::State::Ready) &&
             (now_ms - last_start_time >= start_interval_ms) && now_ms - first_loop_time > 2000) {
@@ -202,6 +212,7 @@ int _main(int argc, char* argv[])
                 log::info("录制结束，持续: %.2f 秒", elapsed);
             }
         }
+#endif
 
         bool found_venc_stream = false;
         void *frame = NULL;
@@ -259,7 +270,7 @@ int _main(int argc, char* argv[])
 
 
 
-#if 1
+#if 0
         if (isSuccess) {
             const auto& sps_pps_buf = priv.encoder->getSpsPps();
 
@@ -357,17 +368,22 @@ int _main(int argc, char* argv[])
     // 等待子线程退出
     // server_thread.join();
     std::cout << "Program finished.\n";
+    log::info("Program exit");
+
+    delete priv.video_stream;
+
     delete priv.display;
 
-    log::info("Program exit");
     delete priv.recordControl;
     delete priv.encoder;
 
-    priv.udp_server->stop();
-    priv.tcp_server->stop();
+    delete priv.udp_server;
 
     delete priv.tcp_server;
-    delete priv.udp_server;
+
+    delete priv.network;
+
+    std::cout << "Program exit.\n";
 
     return 0;
 }

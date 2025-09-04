@@ -11,6 +11,9 @@
 #include "z_encoder.hpp"
 #include "z_record_control.hpp"
 #include "z_http.hpp"
+#include "z_video_stream.hpp"
+#include "z_network.hpp"
+#include "z_task_manager.hpp"
 
 #include "EduScheduleManager.hpp"
 
@@ -21,6 +24,9 @@ struct Priv {
     z::Display *display;
     z::Encoder *encoder;
     z::RecordControl *recordControl;
+    z::VideoStream *video_stream;
+    z::Network *network;
+    z::TaskManager *task_manager;
 
     std::shared_ptr<z::Http> http;
 
