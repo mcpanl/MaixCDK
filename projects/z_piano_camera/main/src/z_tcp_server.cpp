@@ -10,9 +10,12 @@ using namespace maix;
 namespace z {
 
 // ================= TcpServer =================
-TcpServer::TcpServer() : server_fd(-1), running(false) {}
+TcpServer::TcpServer() : server_fd(-1), running(false) {
+    printf("==== TcpServer ====\n");
+}
 
 TcpServer::~TcpServer() {
+    printf("~~~~ TcpServer ~~~~\n");
     stop();
 }
 
@@ -22,7 +25,6 @@ void TcpServer::start() {
 }
 
 void TcpServer::stop() {
-    printf("**** SERVER STOP ****\n");
     running = false;
 
     if (server_fd != -1) {

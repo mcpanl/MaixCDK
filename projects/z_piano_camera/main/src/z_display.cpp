@@ -6,6 +6,13 @@
 #include <ctime>
 #include <iomanip>
 #include <sstream>
+
+#include <unistd.h>
+#include <limits.h>
+#include <iostream>
+#include <string>
+
+
 using namespace maix;
 using namespace maix::ext_dev;
 
@@ -18,6 +25,26 @@ std::string get_current_datetime() {
     ss << std::put_time(std::localtime(&in_time_t), "%H:%M:%S");
     return ss.str();
 }
+
+std::array<uint8_t, 8> hexStringToBytesArray(const std::string& str) {
+    if (str.size() != 16) {
+        throw std::invalid_argument("device_key must be 16 hex chars");
+    }
+    std::array<uint8_t, 8> out{};
+    for (int i = 0; i < 8; i++) {
+        auto hexCharToValue = [](char c) -> uint8_t {
+            if (c >= '0' && c <= '9') return c - '0';
+            if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+            if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+            throw std::invalid_argument("Invalid hex character");
+        };
+        uint8_t high = hexCharToValue(str[i * 2]);
+        uint8_t low  = hexCharToValue(str[i * 2 + 1]);
+        out[i] = (high << 4) | low;
+    }
+    return out;
+}
+
 
 
 namespace z {
@@ -92,6 +119,8 @@ namespace z {
         pmu = new pmu::PMU("axp2101");
         device_key = sys::device_key();
         printf("DEVICE KEY = %s\n", device_key.c_str());
+
+        device_key_binary = hexStringToBytesArray(device_key);
 
         std::map<std::string, unsigned long long> disk_usage = sys::disk_usage("/");
         if (disk_usage.find("total") != disk_usage.end()) {
@@ -213,8 +242,12 @@ namespace z {
     }
 #endif
 
-    void Display::showLogo(const std::string &path) {
+    void Display::showLogo() {
+        std::string path = "assets/logo.png";
+
         image::Image *dispImage = new image::Image(width, height, image::Format::FMT_RGBA8888);
+        // image::Image* dispImage2 = new image::Image(disp->width(), disp->height(), image::FMT_BGRA8888);
+
         image::Image *img = image::load(path.c_str(), image::Format::FMT_RGBA8888);
 
         if (!img) {

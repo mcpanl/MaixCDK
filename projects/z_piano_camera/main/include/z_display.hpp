@@ -11,6 +11,7 @@
 #include <cstdio>
 #include <sstream>
 #include <iomanip>
+#include <array>
 
 
 namespace z {
@@ -30,6 +31,9 @@ namespace z {
         bool is_vbus_in;
 
         std::string device_key;
+        std::array<uint8_t, 8> device_key_binary;
+        std::string custom_name;
+
         long disk_total;
         long disk_used;
 
@@ -98,6 +102,21 @@ namespace z {
         Display();
         ~Display();
 
+        std::string get_device_key() {
+            return device_key;
+        }
+
+        std::array<uint8_t, 8> get_device_key_binary() {
+            return device_key_binary;
+        }
+
+        std::string get_custom_name() {
+            if (!custom_name.empty()) {
+                return custom_name;
+            }
+            return device_key;
+        }
+
         std::string getFreeSpaceString();
 
         // 获取屏幕参数
@@ -110,6 +129,6 @@ namespace z {
         void setFps(double fps) { _fps = fps; }
 
         // 显示 logo
-        void showLogo(const std::string &path);
+        void showLogo();
     };
 }
