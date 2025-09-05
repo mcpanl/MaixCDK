@@ -101,6 +101,8 @@ namespace edu {
 
     struct Schedule {
         std::string id;
+        std::string name;
+        std::string remarks;
         std::string studentId;
         std::string teacherId;
         std::string deviceId;

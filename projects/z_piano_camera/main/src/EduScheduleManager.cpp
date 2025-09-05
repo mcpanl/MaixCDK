@@ -222,7 +222,7 @@ namespace edu {
             for (const auto &a: mine) {
                 for (const auto &b: theirs) {
                     if (overlap(a.start, a.end, b.start, b.end)) {
-                        throw std::runtime_error("冲突: 与现有课程重叠 (student or device)");
+                        throw std::runtime_error("冲突: 与现有课程时间重叠");
                     }
                 }
             }
@@ -660,6 +660,8 @@ namespace edu {
             auto j = json::parse(s);
             Schedule sc{};
             sc.id = j.at("id");
+            sc.name = j.at("name");
+            sc.remarks = j.at("remarks");
             sc.studentId = j.at("studentId");
             sc.teacherId = j.at("teacherId");
             sc.deviceId = j.at("deviceId");
@@ -680,6 +682,8 @@ namespace edu {
             auto j = json::parse(s);
             Schedule sc{};
             sc.id = j.at("id");
+            sc.name = j.at("name");
+            sc.remarks = j.at("remarks");
             sc.studentId = j.at("studentId");
             sc.teacherId = j.at("teacherId");
             sc.deviceId = j.at("deviceId");
@@ -832,7 +836,7 @@ namespace edu {
         {
             std::ofstream f(root + "/schedules.csv", std::ios::trunc);
             f <<
-                    "id,studentId,teacherId,deviceId,startDate,endDate,recur,weekDay,monthDay,startTime,endTime,exceptionIds\n";
+                    "id,name,remarks,studentId,teacherId,deviceId,startDate,endDate,recur,weekDay,monthDay,startTime,endTime,exceptionIds\n";
             for (const auto &[id,s]: schedules) {
                 std::string recur = (s.recur == RecurrenceType::Once
                                          ? "once"
@@ -846,7 +850,7 @@ namespace edu {
                     if (i) ex << ";";
                     ex << s.exceptionIds[i];
                 }
-                f << csvEscape(s.id) << "," << csvEscape(s.studentId) << "," << csvEscape(s.teacherId) << "," <<
+                f << csvEscape(s.id) << ","  << csvEscape(s.name) << ","  << csvEscape(s.remarks) << "," << csvEscape(s.studentId) << "," << csvEscape(s.teacherId) << "," <<
                         csvEscape(s.deviceId)
                         << "," << csvEscape(formatDate(s.startDate)) << "," << csvEscape(formatDate(s.endDate))
                         << "," << csvEscape(recur) << "," << s.weekDay << "," << s.monthDay
@@ -939,12 +943,14 @@ namespace edu {
             if (c.size() < 12) return;
             Schedule s{};
             s.id = c[0];
-            s.studentId = c[1];
-            s.teacherId = c[2];
-            s.deviceId = c[3];
-            s.startDate = parseDate(c[4]);
-            s.endDate = parseDate(c[5]);
-            std::string r = c[6];
+            s.name = c[1];
+            s.remarks = c[2];
+            s.studentId = c[3];
+            s.teacherId = c[4];
+            s.deviceId = c[5];
+            s.startDate = parseDate(c[6]);
+            s.endDate = parseDate(c[7]);
+            std::string r = c[8];
             s.recur = (r == "once"
                            ? RecurrenceType::Once
                            : r == "daily"
@@ -952,11 +958,11 @@ namespace edu {
                                  : r == "weekly"
                                        ? RecurrenceType::Weekly
                                        : RecurrenceType::Monthly);
-            s.weekDay = std::stoi(c[7]);
-            s.monthDay = std::stoi(c[8]);
-            s.startTime = parseTime(c[9]);
-            s.endTime = parseTime(c[10]);
-            std::stringstream ss(c[11]);
+            s.weekDay = std::stoi(c[9]);
+            s.monthDay = std::stoi(c[10]);
+            s.startTime = parseTime(c[11]);
+            s.endTime = parseTime(c[12]);
+            std::stringstream ss(c[13]);
             std::string x;
             while (std::getline(ss, x, ';')) if (!x.empty()) s.exceptionIds.push_back(x);
             schedules[s.id] = s;
@@ -1037,6 +1043,8 @@ namespace edu {
             if (sc.deviceId == deviceId) {
                 nlohmann::json j;
                 j["id"] = sc.id;
+                j["name"] = sc.name;
+                j["remarks"] = sc.remarks;
                 j["deviceId"] = sc.deviceId;
                 j["teacherId"] = sc.teacherId;
                 j["studentId"] = sc.studentId;
@@ -1066,6 +1074,8 @@ namespace edu {
             if (sc.deviceId == deviceId && sc.teacherId == teacherId) {
                 nlohmann::json j;
                 j["id"] = sc.id;
+                j["name"] = sc.name;
+                j["remarks"] = sc.remarks;
                 j["deviceId"] = sc.deviceId;
                 j["teacherId"] = sc.teacherId;
                 j["studentId"] = sc.studentId;
@@ -1097,6 +1107,8 @@ namespace edu {
             if (sc.deviceId == deviceId && sc.teacherId == teacherId && sc.studentId == studentId) {
                 nlohmann::json j;
                 j["id"] = sc.id;
+                j["name"] = sc.name;
+                j["remarks"] = sc.remarks;
                 j["deviceId"] = sc.deviceId;
                 j["teacherId"] = sc.teacherId;
                 j["studentId"] = sc.studentId;
