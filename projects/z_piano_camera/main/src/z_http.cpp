@@ -214,7 +214,9 @@ namespace z {
             try {
                 auto body = json::parse(req.body);
                 edu::Schedule s;
-                s.id = body.value("courseId", "");
+                s.id = body.value("id", "");
+                s.name = body.value("name", "");
+                s.remarks = body.value("remarks", "");
                 s.deviceId = body.value("deviceId", "");
                 s.teacherId = body.value("teacherId", "");
                 s.studentId = body.value("studentId", "");
