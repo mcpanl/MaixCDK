@@ -102,6 +102,10 @@ namespace z {
         Display();
         ~Display();
 
+        void open_backlight();
+        void close_backlight();
+        void toggle_backlight();
+
         std::string get_device_key() {
             return device_key;
         }

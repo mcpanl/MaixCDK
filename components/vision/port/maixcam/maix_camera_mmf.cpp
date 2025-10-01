@@ -124,6 +124,8 @@ namespace maix::camera
             _fps = 60;
         }
 
+        log::info("====== DEVICE = %s", _device);
+
         // open camera
         if (open) {
             e = this->open(_width, _height, _format, _fps, _buff_num);

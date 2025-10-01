@@ -72,6 +72,9 @@ namespace z {
     private:
         State m_state;
         std::string m_filename;
+        std::string m_sessionFilename;       // 本次录制使用的文件名
+        std::string m_pendingCloseFilename;  // stop 时固化，用于 close/rename
+
         std::chrono::steady_clock::time_point m_startTime;
         std::chrono::steady_clock::time_point m_stopTime;
         std::vector<uint8_t> cached_sps_pps;

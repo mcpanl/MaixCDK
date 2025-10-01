@@ -74,8 +74,8 @@ int cam_h = 1080;
 int cam2_w = 320;
 int cam2_h = 180;
 int cam_fps = 30;
-int cam_buffer_num = 5;
-int cam_bitrate = 9 * 1000 * 1000;
+int cam_buffer_num = 3;
+int cam_bitrate = 7 * 1000 * 1000;
 
 const int target_frame_interval_ms = 39 - 1;
 static std::vector<uint8_t> g_sps_pps_buf;
@@ -122,6 +122,8 @@ int _main(int argc, char* argv[])
     priv.tcp_server->start();
 
     priv.encoder = new z::Encoder(priv.cam);
+
+    priv.key = new z::Key();
 
     uint32_t i = 0;
 
@@ -369,6 +371,8 @@ int _main(int argc, char* argv[])
     // server_thread.join();
     std::cout << "Program finished.\n";
     log::info("Program exit");
+
+    delete priv.key;
 
     delete priv.video_stream;
 
