@@ -82,7 +82,7 @@ namespace z {
 
                     auto teacher = edu::Teacher{id, name, {}};
                     try {
-    #if 1
+    #if 0
                         // 逻辑A：存在则更新姓名
                         priv.manager->editTeacher(teacher);
     #else
@@ -315,6 +315,98 @@ namespace z {
                 result={ {"errCode",1001},{"errMsg",e.what()},{"data",nullptr} };
             }
             res.set_content(result.dump(),"application/json");
+        });
+
+        server->Get("/upload/all", [](const httplib::Request& req, httplib::Response& res) {
+            json result;
+            try {
+                std::ifstream ifs("/root/all.json");
+                if (!ifs.is_open()) {
+                    throw std::runtime_error("Failed to open /root/all.json");
+                }
+
+                json file_data;
+                ifs >> file_data;
+
+                result = {
+                    {"errCode", 0},
+                    {"errMsg", ""},
+                    {"data", file_data}
+                };
+            } catch (std::exception &e) {
+                result = {
+                    {"errCode", 1001},
+                    {"errMsg", e.what()},
+                    {"data", nullptr}
+                };
+            }
+
+            res.set_content(result.dump(), "application/json");
+        });
+
+        server->Get("/upload/success", [](const httplib::Request& req, httplib::Response& res) {
+            json result;
+            try {
+                std::ifstream ifs("/root/success.json");
+                if (!ifs.is_open()) {
+                    throw std::runtime_error("Failed to open /root/success.json");
+                }
+
+                json file_data;
+                ifs >> file_data;
+
+                result = {
+                    {"errCode", 0},
+                    {"errMsg", ""},
+                    {"data", file_data}
+                };
+            } catch (std::exception &e) {
+                result = {
+                    {"errCode", 1001},
+                    {"errMsg", e.what()},
+                    {"data", nullptr}
+                };
+            }
+
+            res.set_content(result.dump(), "application/json");
+        });
+
+        server->Post("/file/delete", [](const httplib::Request& req, httplib::Response& res) {
+            json result;
+            try {
+                auto body = json::parse(req.body);
+                std::string filename = body.value("filename", "");
+                if (filename.empty()) {
+                    result = { {"errCode",1002}, {"errMsg","filename is empty"}, {"data",nullptr} };
+                    res.set_content(result.dump(), "application/json");
+                    return;
+                }
+
+                std::vector<std::string> candidates = {
+                    "/root/record_task/@" + filename,
+                    "/root/record_task/#" + filename,
+                    "/root/record_task/." + filename,
+                    "/root/record_task/@" + filename + ".sha256",
+                    "/root/record_task/#" + filename + ".sha256",
+                    "/root/record_task/." + filename + ".sha256"
+                };
+
+                bool deleted = false;
+                for (const auto& path : candidates) {
+                    if (std::remove(path.c_str()) == 0) {
+                        deleted = true;
+                    }
+                }
+
+                if (deleted) {
+                    result = { {"errCode",0}, {"errMsg",""}, {"data",nullptr} };
+                } else {
+                    result = { {"errCode",1003}, {"errMsg","no file deleted"}, {"data",nullptr} };
+                }
+            } catch (std::exception& e) {
+                result = { {"errCode",1001}, {"errMsg",e.what()}, {"data",nullptr} };
+            }
+            res.set_content(result.dump(), "application/json");
         });
     }
 }

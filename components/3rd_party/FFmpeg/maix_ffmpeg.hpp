@@ -15,7 +15,9 @@ extern "C" {
 #include <string>
 #include <vector>
 
-
+#include <chrono>
+#include <iostream>
+#include <string>
 
 namespace maix::ffmpeg {
 using namespace std;
@@ -467,78 +469,78 @@ _free_format_context:
 #endif
 
 void close() {
-    printf("close: start\n");
+    // printf("close: start\n");
     
     if (!_open) {
-        printf("close: not open, return\n");
+        // printf("close: not open, return\n");
         return;
     }
 
     if (_pcm_list) {
-        printf("close: starting to free _pcm_list\n");
+        // printf("close: starting to free _pcm_list\n");
         for (auto it = _pcm_list->begin(); it != _pcm_list->end(); /* no increment here */) {
             auto &item = *it;
             Bytes *pcm = item.second;
-            printf("close: deleting pcm at %p\n", pcm);
+            // printf("close: deleting pcm at %p\n", pcm);
             delete pcm;
 
-            printf("close: erasing item from _pcm_list\n");
+            // printf("close: erasing item from _pcm_list\n");
             it = _pcm_list->erase(it);  // erase returns the next iterator, no need to ++it
         }
-        printf("close: deleting _pcm_list\n");
+        // printf("close: deleting _pcm_list\n");
         delete _pcm_list;
         _pcm_list = nullptr;
     }
 
 
    if (_has_audio) {
-        printf("close: audio was enabled, start freeing audio resources\n");
+        // printf("close: audio was enabled, start freeing audio resources\n");
 
         if (_audio_frame && ((uintptr_t)_audio_frame) > 0x1000) {
-            printf("close: freeing _audio_frame, ptr=%p\n", _audio_frame);
+            // printf("close: freeing _audio_frame, ptr=%p\n", _audio_frame);
             av_frame_free(&_audio_frame);
             _audio_frame = nullptr;
         } else {
-            printf("close: _audio_frame is invalid or already null, skip free. ptr=%p\n", _audio_frame);
+            // printf("close: _audio_frame is invalid or already null, skip free. ptr=%p\n", _audio_frame);
         }
 
         if (_audio_swr_ctx) {
-            printf("close: freeing _audio_swr_ctx\n");
+            // printf("close: freeing _audio_swr_ctx\n");
             swr_free(&_audio_swr_ctx);
             _audio_swr_ctx = nullptr;
         }
 
         if (_audio_codec_ctx) {
-            printf("close: freeing _audio_codec_ctx\n");
+            // printf("close: freeing _audio_codec_ctx\n");
             avcodec_free_context(&_audio_codec_ctx);
             _audio_codec_ctx = nullptr;
         }
     } else {
-        printf("close: audio not enabled, skipping audio resource free\n");
+        // printf("close: audio not enabled, skipping audio resource free\n");
     }
 
     if (_format_context) {
-        printf("close: _format_context exists\n");
+        // printf("close: _format_context exists\n");
         if (_path.length() > 0) {
-            printf("close: writing trailer\n");
+            // printf("close: writing trailer\n");
             av_write_trailer(_format_context);
         }
 
         if (_format_context && _format_context->pb) {
-            printf("close: closing avio\n");
+            // printf("close: closing avio\n");
             avio_closep(&_format_context->pb);
         }
 
-        printf("close: freeing _format_context\n");
+        // printf("close: freeing _format_context\n");
         avformat_free_context(_format_context);
         _format_context = NULL;
     }
 
-    printf("close: finalizing\n");
+    // printf("close: finalizing\n");
     _open = false;
     _video_last_pts = 0;
 
-    printf("close: done\n");
+    // printf("close: done\n");
 }
 
     std::vector<unsigned char> pack_pcm(uint8_t *frame, size_t frame_size) {
@@ -585,6 +587,211 @@ void close() {
         return output_data;
     }
 
+#if 0
+    int push(uint8_t *frame, size_t frame_size, uint64_t pts, bool is_audio = false)
+    {
+        if (!_open) {
+            return -1;
+        }
+
+        if (!is_audio) {
+            // ===== 视频部分保持不变 =====
+            if (_has_video) {
+                AVPacket *pkt = av_packet_alloc();
+                if (!pkt) {
+                    fprintf(stderr, "Can't malloc avpacket\r\n");
+                    return -1;
+                }
+                pkt->data = frame;
+                pkt->size = frame_size;
+                pkt->stream_index = _video_stream->index;
+                pkt->duration = pts - _video_last_pts;
+                _video_last_pts = pts;
+                pkt->pts = pkt->dts = pts;
+                pkt->flags |= AV_PKT_FLAG_KEY;
+
+                if (av_interleaved_write_frame(_format_context, pkt) < 0) {
+                    fprintf(stderr, "send frame failed!\r\n");
+                    av_packet_unref(pkt);
+                    av_packet_free(&pkt);
+                    return -1;
+                }
+
+                av_packet_unref(pkt);
+                av_packet_free(&pkt);
+            }
+        } else {
+            if (_has_audio) {
+                std::vector<long long> block_times;  // B1~B4
+                auto start_total = std::chrono::high_resolution_clock::now();
+
+                AVPacket *pkt = av_packet_alloc();
+                if (!pkt) {
+                    fprintf(stderr, "Can't malloc avpacket\r\n");
+                    return -1;
+                }
+
+                if (frame && frame_size > 0) {
+                    auto start_block = std::chrono::high_resolution_clock::now();
+
+                    auto pcm_list = _pcm_list;
+                    AVFrame *audio_frame = _audio_frame;
+                    AVStream *audio_stream = _audio_stream;
+                    AVCodecContext *audio_codec_ctx = _audio_codec_ctx;
+                    SwrContext *swr_ctx = _audio_swr_ctx;
+                    AVFormatContext *outputFormatContext = _format_context;
+                    AVPacket *audio_packet = pkt;
+                    size_t buffer_size = av_samples_get_buffer_size(NULL, _audio_channels, audio_frame->nb_samples, _audio_format, 1);
+                    size_t pcm_remain_len = frame_size;
+
+                    auto end_block = std::chrono::high_resolution_clock::now();
+                    block_times.push_back(std::chrono::duration_cast<std::chrono::microseconds>(end_block - start_block).count());
+
+                    // ===== B2: 填充 last pcm =====
+                    start_block = std::chrono::high_resolution_clock::now();
+                    size_t next_pts = pts;
+                    if (!pcm_list->empty()) {
+                        auto last_item = pcm_list->back();
+                        Bytes *last_pcm = last_item.second;
+                        if (last_pcm && last_pcm->data_len < buffer_size) {
+                            int temp_size = pcm_remain_len + last_pcm->data_len >= buffer_size ? buffer_size : pcm_remain_len + last_pcm->data_len;
+                            uint8_t *temp = (uint8_t *)malloc(temp_size);
+                            if (!temp) {
+                                fprintf(stderr, "malloc failed!\r\n");
+                                return -1;
+                            }
+                            memcpy(temp, last_pcm->data, last_pcm->data_len);
+                            if (pcm_remain_len + last_pcm->data_len < buffer_size) {
+                                memcpy(temp + last_pcm->data_len, frame, pcm_remain_len);
+                                pcm_remain_len = 0;
+                            } else {
+                                memcpy(temp + last_pcm->data_len, frame, buffer_size - last_pcm->data_len);
+                                pcm_remain_len -= (buffer_size - last_pcm->data_len);
+                            }
+
+                            Bytes *new_pcm = new Bytes(temp, temp_size, true, false);
+                            pcm_list->pop_back();
+                            delete last_pcm;
+
+                            size_t new_pts = last_item.first;
+                            next_pts = new_pts + get_audio_pts_from_pcm_size(new_pcm->data_len);
+                            pcm_list->push_back(std::make_pair(new_pts, new_pcm));
+                        }
+                    }
+                    end_block = std::chrono::high_resolution_clock::now();
+                    block_times.push_back(std::chrono::duration_cast<std::chrono::microseconds>(end_block - start_block).count());
+
+                    // ===== B3: 填充其他 pcm =====
+                    start_block = std::chrono::high_resolution_clock::now();
+                    while (pcm_remain_len > 0) {
+                        int temp_size = pcm_remain_len >= buffer_size ? buffer_size : pcm_remain_len;
+                        uint8_t *temp = (uint8_t *)malloc(temp_size);
+                        if (!temp) {
+                            fprintf(stderr, "malloc failed!\r\n");
+                            return -1;
+                        }
+                        memcpy(temp, frame + frame_size - pcm_remain_len, temp_size);
+                        pcm_remain_len -= temp_size;
+
+                        Bytes *new_pcm = new Bytes(temp, temp_size, true, false);
+                        pcm_list->push_back(std::make_pair(next_pts, new_pcm));
+                        next_pts += get_audio_pts_from_pcm_size(temp_size);
+                    }
+                    end_block = std::chrono::high_resolution_clock::now();
+                    block_times.push_back(std::chrono::duration_cast<std::chrono::microseconds>(end_block - start_block).count());
+
+                    // ===== B4: 音频处理 (细分 swr / send / receive / write) =====
+                    start_block = std::chrono::high_resolution_clock::now();
+                    long long t_swr = 0, t_send = 0, t_receive = 0, t_write = 0;
+
+                    while (pcm_list->size() > 0) {
+                        auto item = pcm_list->front();
+                        auto next_pts = item.first;
+                        Bytes *pcm = item.second;
+                        if (pcm) {
+                            if (pcm->data_len == buffer_size) {
+                                // --- B4.1 swr_convert ---
+                                auto t0 = std::chrono::high_resolution_clock::now();
+                                const uint8_t *in[] = {pcm->data};
+                                uint8_t *out[] = {audio_frame->data[0]};
+                                swr_convert(swr_ctx, out, audio_codec_ctx->frame_size, in, audio_codec_ctx->frame_size);
+                                auto t1 = std::chrono::high_resolution_clock::now();
+                                t_swr += std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
+
+                                audio_frame->pts = next_pts;
+
+                                // --- B4.2 send_frame ---
+                                t0 = std::chrono::high_resolution_clock::now();
+                                if (avcodec_send_frame(audio_codec_ctx, audio_frame) < 0) {
+                                    printf("Error sending audio_frame to encoder.\n");
+                                    break;
+                                }
+                                t1 = std::chrono::high_resolution_clock::now();
+                                t_send += std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
+
+                                // --- B4.3 receive_packet + B4.4 write ---
+                                while (true) {
+                                    t0 = std::chrono::high_resolution_clock::now();
+                                    int ret = avcodec_receive_packet(audio_codec_ctx, audio_packet);
+                                    t1 = std::chrono::high_resolution_clock::now();
+                                    t_receive += std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
+
+                                    if (ret == 0) {
+                                        audio_packet->stream_index = audio_stream->index;
+                                        audio_packet->pts = audio_packet->dts = next_pts;
+                                        audio_packet->duration = get_audio_pts_from_pcm_size(pcm->data_len);
+
+                                        t0 = std::chrono::high_resolution_clock::now();
+                                        av_interleaved_write_frame(outputFormatContext, audio_packet);
+                                        t1 = std::chrono::high_resolution_clock::now();
+                                        t_write += std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
+
+                                        av_packet_unref(audio_packet);
+                                    } else {
+                                        break;
+                                    }
+                                }
+
+                                pcm_list->pop_front();
+                                delete pcm;
+                            } else {
+                                break;
+                            }
+                        } else {
+                            fprintf(stderr, "pcm data is nullptr..\r\n");
+                        }
+                    }
+                    auto end_block_b4 = std::chrono::high_resolution_clock::now();
+                    long long t_b4 = std::chrono::duration_cast<std::chrono::microseconds>(end_block_b4 - start_block).count();
+                    block_times.push_back(t_b4);
+
+                    // 输出更详细的B4拆分
+                    std::cout << "[Audio Push Timing(us)] "
+                              << "B1=" << block_times[0] << " "
+                              << "B2=" << block_times[1] << " "
+                              << "B3=" << block_times[2] << " "
+                              << "B4=" << block_times[3]
+                              << " {swr=" << t_swr
+                              << ", send=" << t_send
+                              << ", recv=" << t_receive
+                              << ", write=" << t_write << "} ";
+                }
+
+                av_packet_unref(pkt);
+                av_packet_free(&pkt);
+
+                auto end_total = std::chrono::high_resolution_clock::now();
+                long long total_time = std::chrono::duration_cast<std::chrono::microseconds>(end_total - start_total).count();
+
+                std::cout << "Total=" << total_time << std::endl;
+            }
+        }
+
+        return 0;
+    }
+#endif
+
+#if 1
     int push(uint8_t *frame, size_t frame_size, uint64_t pts, bool is_audio = false)
     {
         if (!_open) {
@@ -731,6 +938,7 @@ void close() {
 
         return 0;
     }
+#endif
 
     void add_adts_header(uint8_t *adts_header, int aac_frame_length, int profile, int sample_rate_index, int channel_config) {
         // ADTS 固定头部的前 5 字节

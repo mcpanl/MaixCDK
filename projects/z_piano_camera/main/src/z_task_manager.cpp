@@ -10,6 +10,27 @@ using namespace maix;
 using namespace std::chrono;
 
 namespace z {
+    std::string nowToYMDTHISZ(TimePoint time) {
+        // 转为 time_t
+        std::time_t t = Clock::to_time_t(time);
+
+        // 转为 UTC 时间
+        std::tm tm{};
+#if defined(_WIN32) || defined(_WIN64)
+        gmtime_s(&tm, &t);   // Windows 安全版本
+#else
+        gmtime_r(&t, &tm);   // Linux/Unix 安全版本
+#endif
+
+        std::ostringstream oss;
+        oss << std::put_time(&tm, "%Y%m%dT%H%M%SZ");
+        return oss.str();
+    }
+
+    std::string makeFileName(std::string studentId, std::string deviceId, TimePoint time) {
+        return studentId + "_" + nowToYMDTHISZ(time) + "_" + deviceId;
+    }
+
     // 确保目录存在
     static void ensure_dir(const std::string& path) {
         struct stat st;
@@ -102,8 +123,8 @@ namespace z {
             if (status.busy &&
                 (!priv.recordControl || priv.recordControl->state() == RecordControl::State::Ready)) {
 
-                ensure_dir("/root/record");
-                std::string filename = "/root/record/" + timestamp_str() + ".mp4";
+                ensure_dir("/root/record_task");
+                std::string filename = "/root/record_task/." + makeFileName(status.current->studentId, status.current->deviceId, now) + ".mp4";
                 priv.recordControl->setFileName(filename);
                 priv.recordControl->start();
 
@@ -129,8 +150,8 @@ namespace z {
                         priv.recordControl->stop();
 
                         // 开启新课录制
-                        ensure_dir("/root/record");
-                        std::string filename = "/root/record/" + timestamp_str() + ".mp4";
+                        ensure_dir("/root/record_task");
+                        std::string filename = "/root/record_task/." + makeFileName(status.current->studentId, status.current->deviceId, now) + ".mp4";
                         priv.recordControl->setFileName(filename);
                         priv.recordControl->start();
 

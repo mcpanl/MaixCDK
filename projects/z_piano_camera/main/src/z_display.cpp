@@ -85,6 +85,22 @@ namespace z {
         releaseGlyphCache();
     }
 
+    void Display::open_backlight() {
+        disp->set_backlight(50);
+    }
+
+    void Display::close_backlight() {
+        disp->set_backlight(0);
+    }
+
+    void Display::toggle_backlight() {
+        if (disp->get_backlight() == 0) {
+            open_backlight();
+        } else {
+            close_backlight();
+        }
+    }
+
     std::string Display::getFreeSpaceString() {
         long free_bytes = disk_total - disk_used;
         double size = static_cast<double>(free_bytes);
@@ -174,6 +190,41 @@ namespace z {
     }
     void Display::runFrame() {
         image::Image* dispImage2 = new image::Image(disp->width(), disp->height(), image::FMT_BGRA8888);
+
+        if (priv.key) {
+            z::KeyStage stage = priv.key->get_stage();
+            if (stage == z::LONG_PRESSING) {
+                dispImage2->draw_string(220, 110, "Exit APP", image::COLOR_RED, 3, 3);
+                int elapsed = priv.key->get_long_press_ms();
+
+                int section = 3200 / 8;
+                int active_count = std::min(8, (elapsed + section - 1) / section);
+
+                int w = disp->width();
+                int h = disp->height();
+                int rect_h = h / 4;   // 画在整个高度（你也可以改小）
+                int rect_w = w / 8;
+                int rect_y = (h - rect_h) / 2;
+
+                for (int i = 0; i < 8; i++) {
+                    int rect_x = i * rect_w;
+                    image::Color c = (i < active_count)
+                                     ? image::Color::from_rgb(255, 0, 0)   // 已点亮：红色
+                                     : image::Color::from_rgb(50, 50, 50); // 未点亮：灰色
+                    dispImage2->draw_rect(rect_x, rect_y, rect_w, rect_h, c, -1);
+                }
+
+                if (elapsed >= 3200) {
+                    printf(">>> 触发成功！\n");
+                    app::set_exit_flag(1);
+                }
+
+                disp2->show(*dispImage2, image::FIT_COVER);
+                delete dispImage2;
+                return;
+            }
+        }
+
         if (priv.recordControl) {
             if (priv.recordControl->state() == RecordControl::State::Recording) {
                 int totalSec = static_cast<int>(priv.recordControl->duration());

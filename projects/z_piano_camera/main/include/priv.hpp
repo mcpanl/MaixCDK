@@ -16,6 +16,7 @@
 #include "z_task_manager.hpp"
 
 #include "EduScheduleManager.hpp"
+#include "z_key.hpp"
 
 
 struct Priv {
@@ -27,6 +28,7 @@ struct Priv {
     z::VideoStream *video_stream;
     z::Network *network;
     z::TaskManager *task_manager;
+    z::Key *key;
 
     std::shared_ptr<z::Http> http;
 
