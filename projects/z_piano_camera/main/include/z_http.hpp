@@ -18,5 +18,11 @@ namespace z {
         void stop();
         void register_route();
 
+        void network_monitor();   // 检测网络线程
+
+        std::thread network_monitor_thread;
+        std::atomic<bool> server_running {false};
+        std::atomic<bool> stop_flag {false};
+        std::mutex server_mutex;
     };
 }

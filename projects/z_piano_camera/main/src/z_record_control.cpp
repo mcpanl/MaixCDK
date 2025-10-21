@@ -190,7 +190,12 @@ namespace z {
                 // 等到关键帧才真正开始
                 if (isKeyFrame(data, size)) {
                     if (priv.ffmpeg_packer->open() == 0) {
-                        if (priv.audio_recorder) priv.audio_recorder->reset();
+                        if (priv.audio_recorder) {
+                            delete priv.audio_recorder;
+                            priv.audio_recorder = new audio::Recorder();
+                            err::check_null_raise(priv.audio_recorder, "audio recorder init failed!");
+                            priv.audio_recorder->reset();
+                        }
                         priv.video_pts = 0;
                         priv.audio_pts = 0;
                         priv.last_read_cam_ms = now_ms;

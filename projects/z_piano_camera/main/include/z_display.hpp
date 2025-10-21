@@ -37,6 +37,8 @@ namespace z {
         long disk_total;
         long disk_used;
 
+        bool micOff;
+
         double _fps;
         std::thread _thread;
         std::atomic<bool> _running;
@@ -47,6 +49,11 @@ namespace z {
         maix::image::Image* fpsImg;        // 动态
         maix::image::Image* batImg;        // 动态
         maix::image::Image* freeImg;       // 动态
+
+        maix::image::Image* wifiOffImg;
+        maix::image::Image* networkOffImg;
+        maix::image::Image* micOffImg;
+
 
         std::unordered_map<char, maix::image::Image*> glyph_white;
         std::unordered_map<char, maix::image::Image*> glyph_green;

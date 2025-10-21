@@ -139,10 +139,6 @@ namespace z {
     // 生产者：采集 → 编码 → 入队
     // =====================================================
     void VideoStream::run() {
-        log::info("VideoStream wait udp 5s...\n");
-        std::this_thread::sleep_for(std::chrono::milliseconds(5000)); // 控制采集速率
-        log::info("VideoStream wait udp 5s done!\n");
-
         while (!app::need_exit() && !stop_flag_) {
             void *frame = nullptr;
             mmf_frame_info_t f;

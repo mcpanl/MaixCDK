@@ -14,29 +14,43 @@
 namespace z {
 
 UdpServer::UdpServer(const std::string& ip, int port)
-    : udp_ip(ip), udp_port(port), running(false),
+    : udp_ip(ip), udp_port(port), running(false), stop_flag(false),
       send_queue(128) // 环形队列容量
 {
     printf("==== UdpServer ====\n");
 
+    network_monitor_thread = std::thread([this]() { network_monitor(); });
 }
 
 UdpServer::~UdpServer() {
     printf("~~~~ UdpServer ~~~~\n");
 
+    stop_flag = true;
+    if (network_monitor_thread.joinable()) {
+        network_monitor_thread.join();
+    }
+
     stop();
 }
 
 void UdpServer::start() {
+    std::lock_guard<std::mutex> lock(server_mutex);
+    if (running) return;
+
     running = true;
     udp_thread = std::thread([this]() { run(); });
+    std::cout << "[UDP] Server started on " << udp_ip << ":" << udp_port << "\n";
 }
 
 void UdpServer::stop() {
+    std::lock_guard<std::mutex> lock(server_mutex);
+    if (!running) return;
+
     running = false;
     if (udp_thread.joinable()) {
         udp_thread.join();
     }
+    std::cout << "[UDP] Server stopped.\n";
 }
 
 // ✅ 无锁广播，不会阻塞
@@ -151,6 +165,34 @@ void UdpServer::run() {
     }
 
     close(sock);
+}
+
+void UdpServer::network_monitor() {
+    LanState last_state = LanState::DISCONNECTED;
+    int stable_count = 0;
+
+    while (!stop_flag) {
+        if (priv.network) {
+            LanState state = priv.network->get_lan_state();
+
+            if (state == LanState::CONNECTED) {
+                stable_count++;
+                if (!running && stable_count >= 1) {  // 连续 1 次(约0.5秒)才启动
+                    std::cout << "[NET][UDP] Network stable, starting UDP server...\n";
+                    start();
+                }
+            } else {
+                if (last_state == LanState::CONNECTED && running) {
+                    std::cout << "[NET][UDP] Network lost, stopping UDP server...\n";
+                    stop();
+                }
+                stable_count = 0;
+            }
+
+            last_state = state;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    }
 }
 
 } // namespace z
