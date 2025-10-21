@@ -3,6 +3,7 @@
 #include <vector>
 #include <thread>
 #include <atomic>
+#include <mutex>
 #include <string>
 
 namespace z {
@@ -69,6 +70,12 @@ namespace z {
         LockFreeQueue send_queue;  // ✅ 替换掉 std::deque + mutex
 
         void run();
+
+        void network_monitor();   // 检测网络线程
+
+        std::thread network_monitor_thread;
+        std::atomic<bool> stop_flag {false};
+        std::mutex server_mutex;
     };
 
 } // namespace z

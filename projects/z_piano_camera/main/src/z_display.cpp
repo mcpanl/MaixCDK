@@ -16,6 +16,45 @@
 using namespace maix;
 using namespace maix::ext_dev;
 
+bool find_max_record_device_(int &card, int &device) {
+    log::info("Find other record device");
+    std::ifstream pcm_file("/proc/asound/pcm");
+    if (!pcm_file.is_open()) {
+        std::cerr << "Failed to open /proc/asound/pcm" << std::endl;
+        return false;
+    }
+
+    std::string line;
+    std::regex regex_line(R"((\d+)-(\d+):.*capture)");
+    // Example match: "02-00: USB Audio : ... : capture 1"
+
+    int max_card = -1, max_device = -1;
+
+    while (std::getline(pcm_file, line)) {
+        std::smatch match;
+        if (std::regex_search(line, match, regex_line)) {
+            int c = std::stoi(match[1].str());
+            int d = std::stoi(match[2].str());
+
+            if (c > max_card || (c == max_card && d > max_device)) {
+                max_card = c;
+                max_device = d;
+            }
+        }
+    }
+
+    pcm_file.close();
+
+    if (max_card >= 0) {
+        card = max_card;
+        device = max_device;
+        return true;
+    } else {
+        std::cerr << "No capture devices found in /proc/asound/pcm" << std::endl;
+        return false;
+    }
+}
+
 // 获取当前日期时间字符串，格式为 YYYY-MM-DD HH:MM:SS
 std::string get_current_datetime() {
     auto now = std::chrono::system_clock::now();
@@ -157,6 +196,9 @@ namespace z {
         fpsImg       = new image::Image(120, 40, image::FMT_BGRA8888);
         batImg       = new image::Image(120, 40, image::FMT_BGRA8888);
         freeImg      = new image::Image(200, 40, image::FMT_BGRA8888);
+        wifiOffImg   = image::load("assets/wifi_off.png", image::Format::FMT_RGBA8888)->resize(55, 55);
+        networkOffImg   = image::load("assets/network_off.png", image::Format::FMT_RGBA8888)->resize(55, 55);
+        micOffImg   = image::load("assets/mic_off.png", image::Format::FMT_RGBA8888)->resize(55, 55);
 
         // 渲染固定 device_key，一次即可
         deviceKeyImg->clear();
@@ -165,11 +207,12 @@ namespace z {
 
         while (_running && !app::need_exit()) {
             curr_ms = time::ticks_ms();
-            if (curr_ms - last_pmu_ms > 10000) {
+            if (curr_ms - last_pmu_ms > 5000) {
                 if (pmu) {
                     bat_percent = pmu->get_bat_percent();
                     is_charging = pmu->is_charging();
                     is_vbus_in = pmu->is_vbus_in();
+                    pmu->set_bat_charging_cur(200);
                 }
 
                 std::map<std::string, unsigned long long> disk_usage = sys::disk_usage("/");
@@ -181,6 +224,16 @@ namespace z {
                     disk_used = disk_usage["used"];
                 }
 
+                int selected_card = 0, selected_device = 0;
+
+                find_max_record_device_(selected_card, selected_device);
+
+                if (selected_card == 0) {
+                    micOff = true;
+                } else {
+                    micOff = false;
+                }
+
                 last_pmu_ms = curr_ms;
             }
 
@@ -189,6 +242,12 @@ namespace z {
         }
     }
     void Display::runFrame() {
+        static uint8_t counter = 0;
+        counter++;
+        if (counter > 8) {
+            counter = 0;
+        }
+
         image::Image* dispImage2 = new image::Image(disp->width(), disp->height(), image::FMT_BGRA8888);
 
         if (priv.key) {
@@ -259,9 +318,25 @@ namespace z {
         // FPS
         std::string str2 = std::to_string((int)_fps) + "FPS";
 
-        draw_text_cached(dispImage2, 510, 82, str2, false);
+        draw_text_cached(dispImage2, 510, 72, str2, false);
 
-        draw_text_cached(dispImage2, 20, 82, device_key, false);
+        draw_text_cached(dispImage2, 20, 72, device_key, false);
+
+        if (counter > 1) {
+            if (priv.network) {
+                if (priv.network->get_lan_state() == LanState::DISCONNECTED) {
+                    dispImage2->draw_image(580, 112, *wifiOffImg);
+                }
+
+                if (priv.network->get_wan_state() == WanState::DISCONNECTED) {
+                    dispImage2->draw_image(580, 178, *networkOffImg);
+                }
+            }
+
+            if (micOff) {
+                dispImage2->draw_image(580, 242, *micOffImg);
+            }
+        }
 
         disp2->show(*dispImage2, image::FIT_COVER);
 

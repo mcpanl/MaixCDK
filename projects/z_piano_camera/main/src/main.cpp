@@ -95,6 +95,19 @@ int _main(int argc, char* argv[])
 
     priv.display = new z::Display();
     priv.display->showLogo();
+
+    while (true) {
+        std::vector<std::string> wifi_ifaces = network::wifi::list_devices();
+
+        printf("Wifi Device count = %lu", wifi_ifaces.size());
+
+        if (!wifi_ifaces.empty()) {
+            break;
+        }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+    }
+
     priv.network = new z::Network();
 
     priv.manager = std::make_shared<EduScheduleManager>("/root/csv_data");
