@@ -41,8 +41,11 @@ namespace z {
 
     Http::~Http() {
         printf("~~~~ HTTP ~~~~\n");
+        stop_flag = true;
+        if (network_monitor_thread.joinable())
+            network_monitor_thread.join();
+
         stop();
-        delete server;
     }
 
     void Http::start() {
@@ -97,6 +100,7 @@ namespace z {
 
         server_running = false;
         delete server;
+        server = nullptr;
     }
 
     void Http::network_monitor() {

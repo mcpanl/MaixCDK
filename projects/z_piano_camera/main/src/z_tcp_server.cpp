@@ -41,7 +41,7 @@ void TcpServer::stop() {
         clients.clear();
     }
     // 如果需要阻塞等待server_thread结束，可以启用
-    // if (server_thread.joinable()) server_thread.join();
+    if (server_thread.joinable()) server_thread.join();
 }
 
 void TcpServer::setMessageCallback(std::function<void(int, const std::vector<char>&)> callback) {

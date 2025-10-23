@@ -159,7 +159,7 @@ namespace z {
     }
 
     bool Network::ping(const std::string& addr) {
-        std::string cmd = "ping -c 1 -W 1 " + addr + " 2>&1";
+        std::string cmd = "ping -c 1 -W 3 " + addr + " 2>&1";
         FILE* pipe = popen(cmd.c_str(), "r");
         if (!pipe) return false;
 

@@ -128,12 +128,14 @@ int _main(int argc, char* argv[])
 
     priv.udp_server->start();
 
+    /*
     priv.tcp_server = new z::TcpServer();
     priv.tcp_server->setMessageCallback([](int fd, const std::vector<char>& data) {
         handlerTcpMessage(fd, data);
     });
 
     priv.tcp_server->start();
+    */
 
     priv.encoder = new z::Encoder(priv.cam);
 
@@ -363,20 +365,45 @@ int _main(int argc, char* argv[])
     std::cout << "Program finished.\n";
     log::info("Program exit");
 
-    delete priv.key;
+    if (priv.key) {
+        delete priv.key;
+        priv.key = nullptr;
+    }
 
-    delete priv.video_stream;
+    if (priv.video_stream) {
+        delete priv.video_stream;
+        priv.video_stream = nullptr;
+    }
 
-    delete priv.display;
+    if (priv.display) {
+        delete priv.display;
+        priv.display = nullptr;
+    }
 
-    delete priv.recordControl;
-    delete priv.encoder;
+    if (priv.recordControl) {
+        delete priv.recordControl;
+        priv.recordControl = nullptr;
+    }
 
-    delete priv.udp_server;
+    if (priv.encoder) {
+        delete priv.encoder;
+        priv.encoder = nullptr;
+    }
 
-    delete priv.tcp_server;
+    if (priv.udp_server) {
+        delete priv.udp_server;
+        priv.udp_server = nullptr;
+    }
 
-    delete priv.network;
+    if (priv.tcp_server) {
+        delete priv.tcp_server;
+        priv.tcp_server = nullptr;
+    }
+
+    if (priv.network) {
+        delete priv.network;
+        priv.network = nullptr;
+    }
 
     std::cout << "Program exit.\n";
 

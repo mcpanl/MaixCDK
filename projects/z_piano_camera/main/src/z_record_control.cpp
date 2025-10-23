@@ -52,6 +52,8 @@ namespace z {
 
     RecordControl::RecordControl() {
         printf("==== RecordControl ====\n");
+        printf("RecordControl constructed this=%p\n", this);
+
         m_running = true;
         m_state = State::WaitingSpsPps;
         m_pushThread = std::thread(&RecordControl::pushThreadLoop, this);
@@ -59,21 +61,23 @@ namespace z {
 
     RecordControl::~RecordControl() {
         printf("~~~~ RecordControl BEGIN ~~~~\n");
-        m_running = false;
 
-        m_cv.notify_all();
-        stop();
+        // 让线程有机会 flush queue 并安全关闭 packer
+        stop();                 // 如果正在 Recording：设置 Stopping 并 notify
+        m_cv.notify_all();      // 再次 notify 防止 race
 
+        // 等线程退出（线程会在处理完 queue 或检查 m_state 后退出）
         if (m_pushThread.joinable()) {
             m_pushThread.join();
         }
 
+        // 现在线程不会再访问 this / priv.ffmpeg_packer
+        m_running = false;      // 最后设置终止标志
         if (priv.ffmpeg_packer && priv.ffmpeg_packer->is_opened()) {
             priv.ffmpeg_packer->close();
         }
         printf("~~~~ RecordControl END ~~~~\n");
     }
-
 
     void RecordControl::setFileName(const std::string& filename) {
         m_filename = filename;
