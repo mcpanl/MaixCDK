@@ -17,7 +17,7 @@ using namespace maix;
 using namespace maix::ext_dev;
 
 bool find_max_record_device_(int &card, int &device) {
-    log::info("Find other record device");
+    // log::info("Find other record device");
     std::ifstream pcm_file("/proc/asound/pcm");
     if (!pcm_file.is_open()) {
         std::cerr << "Failed to open /proc/asound/pcm" << std::endl;
@@ -233,6 +233,8 @@ namespace z {
                 } else {
                     micOff = false;
                 }
+
+                printf("*** pushed video = %lu, pushed audio = %lu, total_record_ms = %lu\n", priv.video_push_count, priv.audio_push_count, priv.total_record_ms);
 
                 last_pmu_ms = curr_ms;
             }
