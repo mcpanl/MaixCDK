@@ -77,7 +77,7 @@ namespace z {
     void Network::update_network_info() {
         auto wifi_ifaces = wifi::list_devices();
         if (!wifi_ifaces.empty()) {
-            log::info("wifi iface: %s", wifi_ifaces[0].c_str());
+            // log::info("wifi iface: %s", wifi_ifaces[0].c_str());
             wifi_ = new wifi::Wifi(wifi_ifaces[0]);
 
             std::string netmask = guess_netmask(wifi_->get_ip());
@@ -141,11 +141,11 @@ namespace z {
 
                 // 访问外网
                 if (ping("8.8.8.8")) {
-                    printf(">>> network ok\n");
+                    // printf(">>> network ok\n");
                     lan_state_ = LanState::CONNECTED;
                     wan_state_ = WanState::CONNECTED;
                 } else {
-                    printf(">>> network ng\n");
+                    // printf(">>> network ng\n");
                     lan_state_ = LanState::DISCONNECTED;
                     wan_state_ = WanState::DISCONNECTED;
                 }

@@ -190,20 +190,33 @@ namespace z {
                 // 等到关键帧才真正开始
                 if (isKeyFrame(data, size)) {
                     if (priv.ffmpeg_packer->open() == 0) {
+                        auto _t1 = std::chrono::steady_clock::now();
                         if (priv.audio_recorder) {
                             delete priv.audio_recorder;
                             priv.audio_recorder = new audio::Recorder();
                             err::check_null_raise(priv.audio_recorder, "audio recorder init failed!");
                             priv.audio_recorder->reset();
                         }
+                        auto _t2 = std::chrono::steady_clock::now();
+
+                        uint64_t _t = std::chrono::duration_cast<std::chrono::milliseconds>(_t2 - _t1).count();
+                        // uint64_t _t = 0;
+
                         priv.video_pts = 0;
                         priv.audio_pts = 0;
-                        priv.last_read_cam_ms = now_ms;
-                        priv.last_read_pcm_ms = now_ms;
+                        priv.start_record_ms = now_ms + _t;
+                        priv.last_read_cam_ms = now_ms + _t;
+                        priv.last_read_pcm_ms = now_ms + _t;
+                        priv.video_push_count = 0;
+                        priv.audio_push_count = 0;
+                        priv.total_record_ms = 0;
                         resetTimer();
                         m_state = State::Recording;
                         log::info("Recording started with keyframe");
 
+                        printf("+++ start_record_ms = %lu\n", now_ms + _t);
+
+                        priv.video_push_count++;
                         enqueueFrame(data, size, priv.video_pts, false);
 
                         // 推送这帧（关键帧作为第一帧）
@@ -224,12 +237,18 @@ namespace z {
                     priv.video_pts = 0;
                     priv.last_read_cam_ms = now_ms;
                 } else {
+                    priv.video_pts = priv.ffmpeg_packer->video_us_to_pts(
+                        (now_ms - priv.start_record_ms) * 1000
+                    );
+                    /*
                     priv.video_pts += priv.ffmpeg_packer->video_us_to_pts(
                         (now_ms - priv.last_read_cam_ms) * 1000
                     );
+                    */
                     priv.last_read_cam_ms = now_ms;
                 }
 
+                priv.video_push_count++;
                 enqueueFrame(data, size, priv.video_pts, false);
 
                 // if (err::ERR_NONE != priv.ffmpeg_packer->push(data, size, priv.video_pts)) {
@@ -246,6 +265,73 @@ namespace z {
         }
     }
 
+    void RecordControl::handleAudioFrame(int sample_rate,
+                                     int bytes_per_sample,
+                                     uint64_t now_ms,
+                                     uint64_t& last_audio_ms,
+                                     double& sample_error_acc) {
+        if (m_state != State::Recording || !priv.ffmpeg_packer->is_opened()) return;
+
+        // 理论已录制时长
+        uint64_t audio_time_ms = now_ms - priv.start_record_ms;
+
+        // 计算本次需要录制的音频时长
+        uint64_t need_record_ms = now_ms - priv.last_read_pcm_ms;
+
+        // 计算本次需要录制的字节数量
+        double samples_per_ms = (double)sample_rate / 1000.0;
+        uint64_t need_samples = (uint64_t)llround(samples_per_ms * need_record_ms);
+        uint64_t need_record_bytes = need_samples * bytes_per_sample;
+
+        int remain_frame_count = priv.audio_recorder->get_remaining_frames();
+        int bytes_to_read = std::min((int)need_record_bytes, remain_frame_count);
+        // 使用位运算向下取整到16的倍数
+        bytes_to_read = bytes_to_read & ~0xF;
+
+        // printf("[%lu] audio_time_ms=%lu, need_record_ms=%lu, need_record_bytes=%lu, remain=%d, bytes_to_read=%d\n", now_ms, audio_time_ms, need_record_ms, need_record_bytes, remain_frame_count, bytes_to_read);
+
+        if (bytes_to_read > 0) {
+            priv.audio_pts = priv.ffmpeg_packer->audio_us_to_pts(audio_time_ms * 1000);
+
+            Bytes* pcm_data = priv.audio_recorder->record_bytes(bytes_to_read);
+            if (pcm_data) {
+
+                double gain_db = 18.0;
+                double gain = pow(10.0, gain_db / 20.0);
+
+                if (bytes_per_sample == 2) { // int16_t PCM
+                    int16_t* samples = reinterpret_cast<int16_t*>(pcm_data->data);
+                    int sample_count = pcm_data->data_len / sizeof(int16_t);
+
+                    for (int i = 0; i < sample_count; i++) {
+                        int32_t temp = static_cast<int32_t>(samples[i] * gain);
+                        // 饱和裁剪 [-32768, 32767]
+                        temp = std::max(-32768, std::min(32767, temp));
+                        samples[i] = static_cast<int16_t>(temp);
+                    }
+                } else if (bytes_per_sample == 4) { // float PCM
+                    float* samples = reinterpret_cast<float*>(pcm_data->data);
+                    int sample_count = pcm_data->data_len / sizeof(float);
+
+                    for (int i = 0; i < sample_count; i++) {
+                        samples[i] = static_cast<float>(samples[i] * gain);
+                    }
+                } else {
+                    printf(" !!! Unsupported bytes_per_sample=%d\n", bytes_per_sample);
+                }
+
+                priv.audio_push_count += bytes_to_read / bytes_per_sample;
+
+                enqueueFrame(pcm_data->data, pcm_data->data_len, priv.audio_pts, true);
+                delete pcm_data;
+            }
+        }
+
+
+        priv.last_read_pcm_ms = now_ms;
+    }
+
+#if 0
 void RecordControl::handleAudioFrame(int sample_rate,
                                      int bytes_per_sample,
                                      uint64_t now_ms,
@@ -315,59 +401,8 @@ void RecordControl::handleAudioFrame(int sample_rate,
         printf(" !!! No samples_to_read, skipping enqueueFrame\n");
     }
 }
-
-#if 0
-void RecordControl::handleAudioFrame(int sample_rate,
-                                     int bytes_per_sample,
-                                     uint64_t now_ms,
-                                     uint64_t& last_audio_ms,
-                                     double& sample_error_acc)
-{
-    if (m_state != State::Recording || !priv.ffmpeg_packer->is_opened()) return;
-
-    double elapsed_ms = (double)(now_ms - last_audio_ms);
-    last_audio_ms = now_ms;
-
-    double ideal_samples = (sample_rate * elapsed_ms / 1000.0) + sample_error_acc;
-    int samples_needed = (int)(ideal_samples + 0.5);
-    sample_error_acc = ideal_samples - samples_needed;
-
-    auto remain_frame_count = priv.audio_recorder->get_remaining_frames();
-    int samples_to_read = std::min(samples_needed, (int)remain_frame_count);
-
-    // 🔍 详细调试日志
-    // printf("[DEBUG][AudioFrame]\n");
-    //     printf(" now_ms=%llu, last_audio_ms=%llu, elapsed_ms=%.3f ms\n",
-    //            (unsigned long long)now_ms,
-    //            (unsigned long long)last_audio_ms,
-    //            elapsed_ms);
-    // printf(" ideal_samples=%.3f, samples_needed=%d, sample_error_acc=%.6f\n",
-    //        ideal_samples, samples_needed, sample_error_acc);
-    // printf(" remain_frame_count=%d, samples_to_read=%d\n",
-    //        (int)remain_frame_count, samples_to_read);
-    // printf(" bytes_per_sample=%d, read_pcm_size=%d\n",
-    //        bytes_per_sample, samples_to_read * bytes_per_sample);
-    // printf(" priv.audio_pts=%llu\n",
-    //        (unsigned long long)priv.audio_pts);
-
-    if (samples_to_read > 0) {
-        int read_pcm_size = samples_to_read * bytes_per_sample;
-        priv.audio_pts += samples_to_read;
-
-        Bytes* pcm_data = priv.audio_recorder->record_bytes(read_pcm_size);
-        if (pcm_data) {
-            // printf(" --> enqueueFrame: data_len=%d, pts=%llu\n",
-            //        pcm_data->data_len, (unsigned long long)priv.audio_pts);
-            enqueueFrame(pcm_data->data, pcm_data->data_len, priv.audio_pts, true);
-            delete pcm_data;
-        } else {
-            printf(" !!! Warning: record_bytes returned null\n");
-        }
-    } else {
-        printf(" !!! No samples_to_read, skipping enqueueFrame\n");
-    }
-}
 #endif
+
 
     void RecordControl::enqueueFrame(const uint8_t* data, int size, uint64_t pts, bool is_audio) {
         if (size <= 0) return;

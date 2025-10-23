@@ -74,10 +74,11 @@ int cam_h = 1080;
 int cam2_w = 320;
 int cam2_h = 180;
 int cam_fps = 30;
-int cam_buffer_num = 3;
+int cam_buffer_num = 2;
 int cam_bitrate = 7 * 1000 * 1000;
+int record_fps = 25;
 
-const int target_frame_interval_ms = 39 - 1;
+const int target_frame_interval_ms = 40 - 1;
 static std::vector<uint8_t> g_sps_pps_buf;
 
 
@@ -121,7 +122,7 @@ int _main(int argc, char* argv[])
     priv.cam = new camera::Camera(cam_w, cam_h, cam_fmt, "", cam_fps, cam_buffer_num);
     priv.cam2 = priv.cam->add_channel(cam2_w, cam2_h, cam2_fmt, cam_fps, cam_buffer_num);
 
-    priv.cam -> skip_frames(30);
+    priv.cam -> skip_frames(25);
 
     priv.udp_server = new z::UdpServer();
 
@@ -157,7 +158,7 @@ int _main(int argc, char* argv[])
     err::check_bool_raise(!priv.ffmpeg_packer->config("video_width", cam_w), "ffmpeg packer config failed!");
     err::check_bool_raise(!priv.ffmpeg_packer->config("video_height", cam_h), "ffmpeg packer config failed!");
     err::check_bool_raise(!priv.ffmpeg_packer->config("video_bitrate", priv.encoder->bitrate()), "ffmpeg packer config failed!");
-    err::check_bool_raise(!priv.ffmpeg_packer->config("video_fps", cam_fps), "ffmpeg packer config failed!");
+    err::check_bool_raise(!priv.ffmpeg_packer->config("video_fps", record_fps), "ffmpeg packer config failed!");
     err::check_bool_raise(!priv.ffmpeg_packer->config("video_pixel_format", AV_PIX_FMT_NV21), "ffmpeg packer config failed!");
 
     err::check_bool_raise(!priv.ffmpeg_packer->config("has_audio", true), "ffmpeg packer config failed!");
@@ -202,47 +203,24 @@ int _main(int argc, char* argv[])
         uint64_t now_ms = time::ticks_ms();
         auto loop_start = time::time_ms();  // 记录循环开始时间
 
-
-#if 0
-        // 判断是否需要启动新录制
-        if ((!priv.recordControl || priv.recordControl->state() == z::RecordControl::State::Ready) &&
-            (now_ms - last_start_time >= start_interval_ms) && now_ms - first_loop_time > 2000) {
-
-            ensure_dir("/root/record");
-            std::string filename = "/root/record/" + timestamp_str() + ".mp4";
-
-            priv.recordControl->setFileName(filename);
-            priv.recordControl->start();
-            last_start_time = now_ms;
-
-            log::info("开始录制: %s", filename.c_str());
-        }
-
-        // 判断是否需要停止录制
-        if (priv.recordControl && priv.recordControl->state() == z::RecordControl::State::Recording) {
-            double elapsed = priv.recordControl->duration();
-            if (elapsed >= record_duration_ms / 1000.0) {
-                log::info("准备录制结束，持续: %.2f 秒", elapsed);
-                priv.recordControl->stop();
-                log::info("录制结束，持续: %.2f 秒", elapsed);
-            }
-        }
-#endif
-
         bool found_venc_stream = false;
         void *frame = NULL;
         mmf_frame_info_t f;
 
         int ch = priv.cam->get_channel();
 
-        int res = _mmf_vi_frame_pop(ch, &frame, &f, 10);
+        int res = _mmf_vi_frame_pop(ch, &frame, &f, 30);
 
         auto capture_tp = std::chrono::steady_clock::now();
         uint64_t capture_ms = std::chrono::duration_cast<std::chrono::milliseconds>(capture_tp - start_time).count();
 
+        priv.total_record_ms = capture_ms - priv.start_record_ms;
+
+        // printf("+++ capture_ms = %lu\n", capture_ms);
+
         if (res != 0 || frame == nullptr) {
             printf("Failed to get frame, skipping...\n");
-            time::sleep_ms(5);
+            time::sleep_ms(2);
             continue;
         }
 

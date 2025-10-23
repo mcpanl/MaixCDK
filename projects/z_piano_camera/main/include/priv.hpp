@@ -40,10 +40,15 @@ struct Priv {
     maix::ffmpeg::FFmpegPacker *ffmpeg_packer;
     maix::audio::Recorder *audio_recorder;
 
+    uint64_t start_record_ms;
     uint64_t last_read_pcm_ms;
     uint64_t last_read_cam_ms;
     uint64_t audio_pts;
     uint64_t video_pts;
+
+    uint64_t video_push_count;
+    uint64_t audio_push_count;
+    uint64_t total_record_ms;
 
     bool isRecording;
 };
