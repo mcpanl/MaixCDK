@@ -158,7 +158,9 @@ namespace z {
                     std::vector<uint8_t> data;
                     data.assign(jpg_data, jpg_data + jpg_size);
 
-                    priv.udp_server->broadcast(data);
+                    if (priv.udp_server) {
+                        priv.udp_server->broadcast(data);
+                    }
 
                     mmf_enc_jpg_free(encode_ch_);
                 }

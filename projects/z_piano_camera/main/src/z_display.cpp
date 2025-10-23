@@ -234,7 +234,7 @@ namespace z {
                     micOff = false;
                 }
 
-                printf("*** pushed video = %lu, pushed audio = %lu, total_record_ms = %lu\n", priv.video_push_count, priv.audio_push_count, priv.total_record_ms);
+                // printf("*** pushed video = %lu, pushed audio = %lu, total_record_ms = %lu\n", priv.video_push_count, priv.audio_push_count, priv.total_record_ms);
 
                 last_pmu_ms = curr_ms;
             }
