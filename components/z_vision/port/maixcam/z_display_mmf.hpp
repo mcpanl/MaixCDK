@@ -23,6 +23,7 @@
 #include "maix_fs.hpp"
 #include <iostream>
 #include <string>
+#include "z_lib.hpp"
 
 using namespace std;
 
@@ -96,6 +97,8 @@ namespace z::display
     public:
         DisplayCviMmf(const string &device, int width, int height, image::Format format)
         {
+            printf("=== DisplayCviMmf init\n");
+
             err::check_bool_raise(!_get_vo_max_size(&_max_width, &_max_height, 1), "get vo max size failed");
             width = width <= 0 ? _max_width : width;
             height = height <= 0 ? _max_height : height;
@@ -122,6 +125,9 @@ namespace z::display
                 this->_invert_mirror = mirror;
             }
 
+            z::z_lib_init();
+
+
 //            if (0 != mmf_init_v2(true)) {
 //                err::check_raise(err::ERR_RUNTIME, "mmf init failed");
 //            }
@@ -146,6 +152,8 @@ namespace z::display
                                         // layer 1 means osd layer
             err::check_bool_raise(_format == image::FMT_BGRA8888, "Format not support");
 
+            z::z_lib_init();
+
 //            if (0 != mmf_init_v2(true)) {
 //                err::check_raise(err::ERR_RUNTIME, "mmf init failed");
 //            }
@@ -155,6 +163,8 @@ namespace z::display
 
         ~DisplayCviMmf()
         {
+            z::z_lib_deinit();
+
 //            mmf_del_vo_channel(this->_layer, this->_ch);
 //            mmf_deinit_v2(false);
 //            if(_bl_pwm && this->_layer == 0)    // _layer = 0, means video layer
@@ -276,6 +286,17 @@ namespace z::display
             }
 
             // TODO: push vo frame
+            VIDEO_FRAME_INFO_S outFrame;
+            Z_SIMPLE_VPSS_ConvertRGB888(
+                    img.to_bytes(false)->data,
+                    img.width(),
+                    img.height(),
+                    &outFrame
+            );
+            z::z_lib_vo_push_frame(&outFrame);
+            Z_SIMPLE_VPSS_FreeConvertedFrame(&outFrame);
+
+//            delete img;
 
 //            if (this->_layer == 0) {
 //                switch (format)

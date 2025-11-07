@@ -30,7 +30,7 @@ endif()
 # SET_SOURCE_FILES_PROPERTIES(${ADD_ASM_SRCS} PROPERTIES COMPILE_FLAGS "-x assembler-with-cpp -D BBBBB")
 ###############################################
 
-list(APPEND ADD_REQUIREMENTS basic opencv opencv_freetype)
+list(APPEND ADD_REQUIREMENTS z_lib basic opencv opencv_freetype)
 ###### Add required/dependent components ######
 #if(PLATFORM_LINUX)
 #    list(APPEND ADD_REQUIREMENTS nn)

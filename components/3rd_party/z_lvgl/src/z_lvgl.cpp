@@ -1,5 +1,5 @@
 
-#include "maix_lvgl.hpp"
+#include "z_lvgl.hpp"
 #include "monitor.h"
 #include "mouse.h"
 #include "keyboard.h"
@@ -16,11 +16,13 @@
 LV_IMAGE_DECLARE(cursor_96);
 LV_IMAGE_DECLARE(cursor_48);
 
-namespace maix
+using namespace maix;
+
+namespace z
 {
-    display::Display *maix_display = nullptr;
-    image::Image *maix_image = nullptr;
-    touchscreen::TouchScreen *maix_touchscreen = nullptr;
+    display::Display *z_display = nullptr;
+    image::Image *z_image = nullptr;
+    touchscreen::TouchScreen *z_touchscreen = nullptr;
     static thread::Thread *tick_th = nullptr;
     static volatile bool tick_th_exit = false;
     static volatile bool tick_th_exit_done = false;
@@ -36,16 +38,16 @@ namespace maix
 
     void lvgl_init(display::Display *display, touchscreen::TouchScreen *touchscreen)
     {
-        assert(LV_COLOR_DEPTH == 32);
+        assert(LV_COLOR_DEPTH == 24);
 
         if (!display)
         {
             throw std::runtime_error("lvgl_init display is null");
         }
-        // if (!touchscreen)
-        // {
-        //     throw std::runtime_error("lvgl_init touchscreen is null");
-        // }
+         if (!touchscreen)
+         {
+             throw std::runtime_error("lvgl_init touchscreen is null");
+         }
 
         int buf_size_byte = display->width() * 100 * 4;
         if (buf1_1)
@@ -64,11 +66,11 @@ namespace maix
             buf1_1 = nullptr;
             throw std::runtime_error("lvgl_init malloc failed");
         }
-        maix_image = new maix::image::Image(display->width(), display->height(), image::FMT_BGRA8888);
-        maix_display = display;
-        maix_touchscreen = touchscreen;
+        z_image = new z::image::Image(display->width(), display->height(), image::FMT_RGB888);
+        z_display = display;
+        z_touchscreen = touchscreen;
 #ifdef PLATFORM_LINUX
-        assert(maix::image::fmt_size[maix_display->format()] == LV_COLOR_DEPTH / 8);
+//        assert(maix::image::fmt_size[maix_display->format()] == LV_COLOR_DEPTH / 8);
 #endif
         // LVGL global init
         lv_init();
@@ -119,8 +121,8 @@ namespace maix
 
     void lvgl_destroy()
     {
-        if (maix_image)
-            delete maix_image;
+        if (z_image)
+            delete z_image;
         if (tick_th)
         {
             tick_th_exit_done = true;
@@ -132,9 +134,9 @@ namespace maix
             delete tick_th;
             tick_th = nullptr;
         }
-        maix_image = nullptr;
-        maix_display = nullptr;
-        maix_touchscreen = nullptr;
+        z_image = nullptr;
+        z_display = nullptr;
+        z_touchscreen = nullptr;
         lv_deinit();
         if (buf1_1)
         {

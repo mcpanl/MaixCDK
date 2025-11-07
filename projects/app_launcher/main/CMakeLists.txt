@@ -1,9 +1,7 @@
 ############### Add include ###################
 list(APPEND ADD_INCLUDE "include"
-                        "ui/screens"
-                        "ui/components"
-                        "ui/fonts"
-                        "ui"
+                        "gui_port/linux"
+                        "gui/include"
     )
 list(APPEND ADD_PRIVATE_INCLUDE "")
 ###############################################
@@ -14,15 +12,13 @@ list(APPEND ADD_PRIVATE_INCLUDE "")
 #     )
 # aux_source_directory(src ADD_SRCS)  # collect all source file in src dir, will set var ADD_SRCS
 append_srcs_dir(ADD_SRCS "src")       # append source file in src dir to var ADD_SRCS
-append_srcs_dir(ADD_SRCS "ui")
-append_srcs_dir(ADD_SRCS "ui/screens")
-append_srcs_dir(ADD_SRCS "ui/components")
-append_srcs_dir(ADD_SRCS "ui/fonts")
+append_srcs_dir(ADD_SRCS "gui_port/linux")
+append_srcs_dir(ADD_SRCS "gui/src")
 # list(REMOVE_ITEM COMPONENT_SRCS "src/test2.c")
 ###############################################
 
 ###### Add required/dependent components ######
-list(APPEND ADD_REQUIREMENTS basic z_lvgl)
+list(APPEND ADD_REQUIREMENTS basic z_lvgl rlottie ini network cpp-httplib comm ext_dev peripheral)
 ###############################################
 
 ###### Add link search path for requirements/libs ######
@@ -41,7 +37,7 @@ list(APPEND ADD_REQUIREMENTS basic z_lvgl)
 # list(APPEND ADD_DEFINITIONS_PRIVATE -DAAAAA=1)
 
 #### Add compile option for this component
-#### and components depend on this component
+#### and components denpend on this component
 # list(APPEND ADD_DEFINITIONS -DAAAAA222=1
 #                             -DAAAAA333=1)
 ###############################################
@@ -51,7 +47,15 @@ list(APPEND ADD_REQUIREMENTS basic z_lvgl)
 # set(CMAKE_C_LINK_FLAGS "${CMAKE_C_LINK_FLAGS} -Wl,--start-group libmaix/libtest.a -ltest2 -Wl,--end-group" PARENT_SCOPE)
 ###############################################
 
+set(daemon_path ${CMAKE_BINARY_DIR}/${PROJECT_ID}_daemon)
+list(APPEND ADD_FILE_DEPENDS ${daemon_path})
 
+file(REMOVE ${daemon_path})
+
+add_custom_command(OUTPUT ${daemon_path}
+            COMMAND cp ${CMAKE_CURRENT_SOURCE_DIR}/launcher_daemon/launcher_daemon ${daemon_path}
+            COMMENT "Copying ${PROJECT_ID}_daemon ..."
+        )
 
 register_component()
 

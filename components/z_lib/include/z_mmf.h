@@ -26,6 +26,13 @@ CVI_S32 Z_VI_RELEASE_FRAME(Z_VI_CTX_S *pstViCtx, VIDEO_FRAME_INFO_S *pstFrameInf
 CVI_S32 Z_VO_PUSH_FRAME(Z_VI_CTX_S *pstViCtx, VIDEO_FRAME_INFO_S *pstFrameInfo);
 CVI_S32 Z_VPSS_TAKE_FRAME(Z_VI_CTX_S *pstViCtx, VIDEO_FRAME_INFO_S *pstFrameInfo, CVI_S32 s32MilliSec);
 CVI_S32 Z_VPSS_RELEASE_FRAME(Z_VI_CTX_S *pstViCtx, VIDEO_FRAME_INFO_S *pstFrameInfo);
+CVI_S32 Z_SIMPLE_VPSS_ConvertRGB888(
+        const CVI_U8 *pRGB,
+        CVI_U32 inW, CVI_U32 inH,
+        VIDEO_FRAME_INFO_S *pstOutFrame
+);
+//CVI_S32 Z_SIMPLE_VPSS_ReleaseFrame(VIDEO_FRAME_INFO_S *pstOutFrame);
+CVI_S32 Z_SIMPLE_VPSS_FreeConvertedFrame(VIDEO_FRAME_INFO_S *pFrame);
 CVI_S32 Z_VI_DEINIT(Z_VI_CTX_S *pstViCtx);
 
 #ifdef __cplusplus

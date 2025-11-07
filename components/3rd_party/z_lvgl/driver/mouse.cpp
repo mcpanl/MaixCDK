@@ -7,7 +7,7 @@
  *      INCLUDES
  *********************/
 #include "mouse.h"
-#include "maix_lvgl.hpp"
+#include "z_lvgl.hpp"
 #include "maix_basic.hpp"
 
 #include <fcntl.h>
