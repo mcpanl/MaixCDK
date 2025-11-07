@@ -5,6 +5,11 @@ namespace z {
 
     Z_VI_CTX_S g_stViCtx;
 
+    void z_lib_ping()
+    {
+        printf("[z_lib] z_lib ping\n");
+    }
+
     void z_lib_init()
     {
         printf("[z_lib] z_lib init\n");

@@ -14,6 +14,45 @@
 
 #include "z_mmf.h"
 
+#ifndef ALIGN_UP
+#define ALIGN_UP(x, a)    (((x) + ((a) - 1)) & ~((a) - 1))
+#endif
+
+#ifndef ALIGN
+#define ALIGN(x, a)  (((x) + ((a) - 1)) & ~((a) - 1))
+#endif
+
+#ifndef LOGE
+#define LOGE(fmt, ...)  SAMPLE_PRT("[ERR] " fmt, ##__VA_ARGS__)
+#endif
+#ifndef LOGI
+#define LOGI(fmt, ...)  SAMPLE_PRT("[INF] " fmt, ##__VA_ARGS__)
+#endif
+#ifndef LOGW
+#define LOGW(fmt, ...)  SAMPLE_PRT("[WRN] " fmt, ##__VA_ARGS__)
+#endif
+
+typedef struct {
+    CVI_U64 phyAddr;
+    CVI_VOID *virAddr;
+    CVI_U32 frameSize;
+} Z_RGB_FRAME_PRIV;
+
+static void dump_rgb_edge(const CVI_U8 *p, CVI_U32 w, CVI_U32 h) {
+    // 打印前后 4 像素，避免刷屏
+    printf("[DBG] RGB head/tail dump (w=%u,h=%u):\n", w, h);
+    for (int i = 0; i < 4; ++i) {
+        int idx = i * 3;
+        printf("  head px[%d]: R=%u G=%u B=%u\n", i, p[idx], p[idx+1], p[idx+2]);
+    }
+    CVI_U32 totalPx = w * h;
+    for (int i = (int)totalPx - 4; i < (int)totalPx; ++i) {
+        int idx = i * 3;
+        printf("  tail px[%d]: R=%u G=%u B=%u\n", i, p[idx], p[idx+1], p[idx+2]);
+    }
+}
+
+
 CVI_S32 Z_VI_INIT(Z_VI_CTX_S *pstViCtx)
 {
     CVI_S32 s32Ret = CVI_SUCCESS;
@@ -104,9 +143,15 @@ CVI_S32 Z_VI_INIT(Z_VI_CTX_S *pstViCtx)
     s32Ret = SAMPLE_COMM_VI_StartViChn(&pstViCtx->stViConfig);
     if (s32Ret != CVI_SUCCESS) return s32Ret;
 
+//    CVI_SYS_SetVPSSMode(VPSS_MODE_SINGLE);
+
+//    VI_VPSS_MODE_S stViVpssMode;
+//    stViVpssMode.aenMode[0] = VI_OFFLINE_VPSS_OFFLINE;
+
+//    CVI_SYS_SetVIVPSSMode(&stViVpssMode);
 
     /************************************************
-     * step5:  Init VPSS
+     * step5.1:  Init VPSS 0
      ************************************************/
     VPSS_GRP	   VpssGrp	  = 0;
     VPSS_GRP_ATTR_S    stVpssGrpAttr;
@@ -155,6 +200,54 @@ CVI_S32 Z_VI_INIT(Z_VI_CTX_S *pstViCtx)
         return s32Ret;
     }
 
+
+    /************************************************
+     * step5.2:  Init VPSS 1
+     ************************************************/
+    VPSS_GRP	   VpssGrp1	  = 1;
+    VPSS_GRP_ATTR_S    stVpssGrpAttr1;
+    VPSS_CHN           VpssChn1        = VPSS_CHN0;
+    CVI_BOOL           abChnEnable1[VPSS_MAX_PHY_CHN_NUM] = {0};
+    VPSS_CHN_ATTR_S    astVpssChnAttr1[VPSS_MAX_PHY_CHN_NUM] = {0};
+    memset(&stVpssGrpAttr1, 0, sizeof(stVpssGrpAttr1));
+
+
+    stVpssGrpAttr1.stFrameRate.s32SrcFrameRate    = -1;
+    stVpssGrpAttr1.stFrameRate.s32DstFrameRate    = -1;
+    stVpssGrpAttr1.enPixelFormat                  = PIXEL_FORMAT_RGB_888;
+    stVpssGrpAttr1.u32MaxW                        = 552;
+    stVpssGrpAttr1.u32MaxH                        = 368;
+    stVpssGrpAttr1.u8VpssDev                      = 0;
+
+
+    astVpssChnAttr1[VpssChn1].u32Width                    = 552;
+    astVpssChnAttr1[VpssChn1].u32Height                   = 368;
+    astVpssChnAttr1[VpssChn1].enVideoFormat               = VIDEO_FORMAT_LINEAR;
+    astVpssChnAttr1[VpssChn1].enPixelFormat               = PIXEL_FORMAT_NV21;
+    astVpssChnAttr1[VpssChn1].stFrameRate.s32SrcFrameRate = 30;
+    astVpssChnAttr1[VpssChn1].stFrameRate.s32DstFrameRate = 30;
+    astVpssChnAttr1[VpssChn1].u32Depth                    = 1;
+    astVpssChnAttr1[VpssChn1].bMirror                     = CVI_FALSE;
+    astVpssChnAttr1[VpssChn1].bFlip                       = CVI_FALSE;
+    astVpssChnAttr1[VpssChn1].stAspectRatio.enMode        = ASPECT_RATIO_AUTO;
+    astVpssChnAttr1[VpssChn1].stAspectRatio.bEnableBgColor = CVI_TRUE;
+    astVpssChnAttr1[VpssChn1].stAspectRatio.u32BgColor    = COLOR_RGB_BLACK;
+    astVpssChnAttr1[VpssChn1].stNormalize.bEnable         = CVI_FALSE;
+
+    /*start vpss*/
+    abChnEnable1[0] = CVI_TRUE;
+    s32Ret = SAMPLE_COMM_VPSS_Init(VpssGrp1, abChnEnable1, &stVpssGrpAttr1, astVpssChnAttr1);
+    if (s32Ret != CVI_SUCCESS) {
+        SAMPLE_PRT("init vpss group 1 failed. s32Ret: 0x%x !\n", s32Ret);
+        return s32Ret;
+    }
+
+    s32Ret = SAMPLE_COMM_VPSS_Start(VpssGrp1, abChnEnable1, &stVpssGrpAttr1, astVpssChnAttr1);
+    if (s32Ret != CVI_SUCCESS) {
+        SAMPLE_PRT("start vpss group 1 failed. s32Ret: 0x%x !\n", s32Ret);
+        return s32Ret;
+    }
+
     /************************************************
      * step6:  Init VO
      ************************************************/
@@ -183,7 +276,7 @@ CVI_S32 Z_VI_INIT(Z_VI_CTX_S *pstViCtx)
         return s32Ret;
     }
 
-    CVI_VO_SetChnRotation(VoChn, VoChn, ROTATION_90);
+    CVI_VO_SetChnRotation(VoChn, VoChn, ROTATION_270);
 
     CVI_VO_EnableChn(VoChn, VoChn);
     CVI_VO_ShowChn(VoChn, VoChn);
@@ -261,6 +354,100 @@ CVI_S32 Z_VO_PUSH_FRAME(Z_VI_CTX_S *pstViCtx, VIDEO_FRAME_INFO_S *pstFrameInfo)
     return s32Ret;
 }
 
+CVI_S32 Z_SIMPLE_VPSS_ConvertRGB888(
+        const CVI_U8 *pRGB,
+        CVI_U32 inW, CVI_U32 inH,
+        VIDEO_FRAME_INFO_S *pstOutFrame
+) {
+    if (!pRGB || !pstOutFrame) {
+        printf("[ERR] invalid input\n");
+        return CVI_FAILURE;
+    }
+
+    const CVI_S32 vpssGrp = 1;
+    const CVI_S32 vpssChn = VPSS_CHN0;
+
+    CVI_U32 stride    = ALIGN(inW * 3, 64);
+    CVI_U32 frameSize = stride * inH;
+    CVI_U32 dataSize  = inW * inH * 3;
+
+    CVI_U64 phyAddr = 0;
+    CVI_VOID *pVirAddr = NULL;
+
+    CVI_S32 ret = CVI_SYS_IonAlloc_Cached(&phyAddr, &pVirAddr, "RGB_Frame", frameSize);
+    if (ret != CVI_SUCCESS) {
+        printf("[ERR] ION alloc failed\n");
+        return ret;
+    }
+
+    memset(pVirAddr, 0, frameSize);
+    for (CVI_U32 y = 0; y < inH; y++) {
+        memcpy((CVI_U8*)pVirAddr + y * stride ,
+               pRGB + y * inW * 3,
+               inW * 3);
+    }
+    CVI_SYS_IonFlushCache(phyAddr, pVirAddr, frameSize);
+
+    VIDEO_FRAME_INFO_S stFrameInfo;
+    memset(&stFrameInfo, 0, sizeof(stFrameInfo));
+    VIDEO_FRAME_S *vf = &stFrameInfo.stVFrame;
+
+    vf->u32Width      = inW;
+    vf->u32Height     = inH;
+    vf->enPixelFormat = PIXEL_FORMAT_RGB_888;
+    vf->u32Stride[0]  = stride;
+    vf->u32Length[0]  = frameSize;
+
+    vf->u64PhyAddr[0] = phyAddr;
+    vf->pu8VirAddr[0] = (CVI_U8*)pVirAddr;
+
+    ret = CVI_VPSS_SendFrame(vpssGrp, &stFrameInfo, -1);
+    if (ret != CVI_SUCCESS) {
+        printf("[ERR] SendFrame failed\n");
+        CVI_SYS_IonFree(phyAddr, pVirAddr);
+        return ret;
+    }
+
+    // 获取输出
+    ret = CVI_VPSS_GetChnFrame(vpssGrp, vpssChn, pstOutFrame, 2000);
+    if (ret != CVI_SUCCESS) {
+        printf("[ERR] GetChnFrame failed\n");
+        CVI_SYS_IonFree(phyAddr, pVirAddr);
+        return ret;
+    }
+
+    // 记录输入ION块，由调用者释放
+    Z_RGB_FRAME_PRIV* priv = malloc(sizeof(Z_RGB_FRAME_PRIV));
+    priv->phyAddr = phyAddr;
+    priv->virAddr = pVirAddr;
+    priv->frameSize = frameSize;
+    pstOutFrame->stVFrame.pPrivateData = priv;
+
+    return CVI_SUCCESS;
+}
+
+
+// 释放输出帧
+CVI_S32 Z_SIMPLE_VPSS_FreeConvertedFrame(VIDEO_FRAME_INFO_S *pFrame) {
+    if (!pFrame) return CVI_FAILURE;
+
+    const CVI_S32 vpssGrp = 1;
+    const CVI_S32 vpssChn = VPSS_CHN0;
+
+    // 释放 VPSS 输出缓存
+    CVI_VPSS_ReleaseChnFrame(vpssGrp, vpssChn, pFrame);
+
+    // 释放输入 ION
+    Z_RGB_FRAME_PRIV* priv = (Z_RGB_FRAME_PRIV*)pFrame->stVFrame.pPrivateData;
+    if (priv) {
+        CVI_SYS_IonFree(priv->phyAddr, priv->virAddr);
+        free(priv);
+    }
+
+    return CVI_SUCCESS;
+}
+
+
 
 CVI_S32 Z_VI_DEINIT(Z_VI_CTX_S *pstViCtx)
 {
@@ -269,7 +456,9 @@ CVI_S32 Z_VI_DEINIT(Z_VI_CTX_S *pstViCtx)
 
     VO_CHN VoChn = 0;
     VPSS_GRP	   VpssGrp	  = 0;
+    VPSS_GRP	   VpssGrp1	  = 1;
     CVI_BOOL           abChnEnable[VPSS_MAX_PHY_CHN_NUM] = {0};
+    CVI_BOOL           abChnEnable1[VPSS_MAX_PHY_CHN_NUM] = {0};
 
     CVI_VO_HideChn(VoChn, VoChn);
     CVI_VO_DisableChn(VoChn, VoChn);
@@ -277,6 +466,7 @@ CVI_S32 Z_VI_DEINIT(Z_VI_CTX_S *pstViCtx)
 
     SAMPLE_COMM_VI_UnBind_VPSS(pstViCtx->ViPipe, pstViCtx->ViChn, VpssGrp);
     SAMPLE_COMM_VPSS_Stop(VpssGrp, abChnEnable);
+    SAMPLE_COMM_VPSS_Stop(VpssGrp1, abChnEnable1);
 
     SAMPLE_COMM_SYS_Exit();
     SAMPLE_PRT("[Z_VI_DEINIT] done\n");

@@ -7,8 +7,9 @@
  *      INCLUDES
  *********************/
 #include "maix_basic.hpp"
-#include "maix_display.hpp"
-#include "maix_lvgl.hpp"
+#include "z_display.hpp"
+#include "z_touchscreen.hpp"
+#include "z_lvgl.hpp"
 #include "lvgl.h"
 #include "ui.h"
 
@@ -19,13 +20,13 @@ int _main(int argc, char* argv[])
 {
 
     // init display
-    display::Display screen = display::Display();
+    z::display::Display screen = z::display::Display();
 
     // touch screen
-    touchscreen::TouchScreen touchscreen = touchscreen::TouchScreen();
+    z::touchscreen::TouchScreen touchscreen = z::touchscreen::TouchScreen();
 
     // init lvgl
-    lvgl_init(&screen, &touchscreen);
+    z::lvgl_init(&screen, &touchscreen);
 
     // init lvgl ui
     ui_init();
@@ -44,7 +45,7 @@ int _main(int argc, char* argv[])
         }
     }
 
-    lvgl_destroy();
+    z::lvgl_destroy();
 
     return 0;
 }
