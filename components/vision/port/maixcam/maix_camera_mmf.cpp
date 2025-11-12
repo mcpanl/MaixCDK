@@ -177,7 +177,7 @@ namespace maix::camera
         char path[64];
         int mclk_id = 0;
 
-        err::check_bool_raise(_get_board_config_path(path, sizeof(path)), "Can't find board config file");
+        err::check_bool_raise(_get_board_config_path(path, sizeof(path)), "Can't find board config file 2");
 
         std::string mclk_id_str;
         auto device_configs = sys::device_configs();
@@ -235,7 +235,7 @@ namespace maix::camera
         bool flip = 0, mirror = 0;
         bool flip_is_found = false, mirror_is_found = false;
 
-        err::check_bool_raise(_get_board_config_path(path, sizeof(path)), "Can't find board config file");
+        err::check_bool_raise(_get_board_config_path(path, sizeof(path)), "Can't find board config file 2");
 
         std::string flip_str;
         std::string mirror_str;

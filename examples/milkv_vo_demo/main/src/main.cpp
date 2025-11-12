@@ -6,6 +6,7 @@
 #include <time.h>
 #include <unistd.h>
 #include "z_display.hpp"
+#include "z_camera.hpp"
 #include "z_image.hpp"
 
 using namespace maix;
@@ -32,8 +33,21 @@ int _main(int argc, char* argv[])
 
     disp->show(*img);
 
-    delete img;
-    sleep(3);
+    sleep(2);
+
+    z::camera::Camera *cam = new z::camera::Camera(552, 368);
+
+    z::image::Image *cam_img = cam->read();
+
+    printf("cam_img_w = %d, cam_img_h = %d\n", img->width(), img->height());
+
+    disp->show(*cam_img);
+
+    sleep(2);
+
+    if(img) {
+        delete img;
+    }
 
     delete disp;
 
