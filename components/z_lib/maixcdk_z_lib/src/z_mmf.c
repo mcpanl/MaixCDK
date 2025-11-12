@@ -276,7 +276,7 @@ CVI_S32 Z_VI_INIT(Z_VI_CTX_S *pstViCtx)
         return s32Ret;
     }
 
-    CVI_VO_SetChnRotation(VoChn, VoChn, ROTATION_270);
+    CVI_VO_SetChnRotation(VoChn, VoChn, ROTATION_90);
 
     CVI_VO_EnableChn(VoChn, VoChn);
     CVI_VO_ShowChn(VoChn, VoChn);

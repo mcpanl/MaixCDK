@@ -2,5 +2,6 @@
 <project version="4">
   <component name="VcsDirectoryMappings">
     <mapping directory="" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/dl/extracted/media_server/media_server-1.0.2" vcs="Git" />
   </component>
 </project>

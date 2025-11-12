@@ -112,8 +112,8 @@ namespace z::touchscreen
             err::Err e = _read(false);
             if(e != err::ERR_NONE)
                 return e;
-            x = _x;
-            y = _y;
+            x = 552 - _x;
+            y = 368 - _y;
             pressed = _pressed;
             return err::ERR_NONE;
         }
