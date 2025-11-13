@@ -8,6 +8,8 @@
 #include "z_display.hpp"
 #include "z_camera.hpp"
 #include "z_image.hpp"
+#include <chrono>
+#include <iostream>
 
 using namespace maix;
 
@@ -27,31 +29,83 @@ int _main(int argc, char* argv[])
     z::display::Display *disp = new z::display::Display(552, 368);
     printf("disp = %p\n", disp);
 
-    z::image::Image* img = new z::image::Image(552, 368);
+    z::image::Image* img = nullptr;
+    img = new z::image::Image(552, 368);
     printf("img = %p\n", img);
     img->draw_string(28, 28, "Hello, world!", z::image::COLOR_RED, 3, 2);
-
     disp->show(*img);
 
-    sleep(2);
-
-    z::camera::Camera *cam = new z::camera::Camera(552, 368);
-
-    z::image::Image *cam_img = cam->read();
-
-    printf("cam_img_w = %d, cam_img_h = %d\n", img->width(), img->height());
-
-    disp->show(*cam_img);
-
-    sleep(2);
+    sleep(1);
 
     if(img) {
         delete img;
+        img = nullptr;
     }
 
-    delete disp;
+    z::camera::Camera *cam = new z::camera::Camera(552, 368);
+
+
+
+    while(!app::need_exit()) {
+        // 记录 read 开始时间
+        auto t1 = std::chrono::high_resolution_clock::now();
+        z::image::Image *cam_img = cam->read();
+        // 记录 read 结束时间
+        auto t2 = std::chrono::high_resolution_clock::now();
+
+        // 计算 read 耗时
+        auto read_ms = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count();
+
+        long long show_ms = 0;
+        if(cam_img) {
+            auto s1 = std::chrono::high_resolution_clock::now();
+            disp->show(*cam_img);
+            auto s2 = std::chrono::high_resolution_clock::now();
+            show_ms = std::chrono::duration_cast<std::chrono::milliseconds>(s2 - s1).count();
+        }
+
+        delete cam_img;
+
+//        std::cout << "read耗时: " << read_ms << " ms, show耗时: " << show_ms << " ms" << std::endl;
+
+        time::sleep_ms(5);
+    }
+
+
+//    while(!app::need_exit()) {
+//        z::image::Image *cam_img = cam->read();
+//
+//        if(cam_img) {
+//            disp->show(*cam_img);
+//        }
+//
+//
+//        delete cam_img;
+//
+//        time::sleep_ms(33);
+//    }
+
+
+//    z::image::Image *cam_img = cam->read();
+//
+//    printf("cam_img_w = %d, cam_img_h = %d\n", img->width(), img->height());
+//
+//    disp->show(*cam_img);
+
+    sleep(1);
+
+//    if(img) {
+        delete img;
+//    }
+
+//    delete disp;
+
+    log::info("loop end\n");
+
+    z::z_lib_deinit();
 
     log::info("Program end\n");
+    return 0;
 }
 
 int _main2(int argc, char* argv[])
@@ -71,7 +125,35 @@ int _main2(int argc, char* argv[])
     int height = 368;
     int bufSize = width * height * 3;
 
-    z::image::Image* img = new z::image::Image(552, 368);
+    z::image::Image* img = nullptr;
+
+
+    while(!app::need_exit()) {
+
+        img = new z::image::Image(552, 368);
+        img->draw_string(28, 28, "Hello, world!" + to_string(time::ticks_ms()), z::image::COLOR_RED, 3, 2);
+        Bytes *img_bytes = img->to_bytes();
+
+        printf("Image bytes: %d\n", img_bytes->data_len);
+
+        VIDEO_FRAME_INFO_S outFrame1;
+        Z_SIMPLE_VPSS_ConvertRGB888(
+                img_bytes->data,
+                width,
+                height,
+                &outFrame1
+        );
+        z::z_lib_vo_push_frame(&outFrame1);
+
+        // 释放 VPSS 输出 frame（不释放输入 buffers）
+        Z_SIMPLE_VPSS_FreeConvertedFrame(&outFrame1);
+
+        if(img) {
+            delete img;
+        }
+        time::sleep_ms(200);
+    }
+    img = new z::image::Image(552, 368);
     img->draw_string(28, 28, "Hello, world!", z::image::COLOR_RED, 3, 2);
     Bytes *img_bytes = img->to_bytes();
 
