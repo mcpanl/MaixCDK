@@ -285,16 +285,20 @@ namespace z::display
                 default: mmf_fit = 0; break;
             }
 
-            // TODO: push vo frame
             VIDEO_FRAME_INFO_S outFrame;
-            Z_SIMPLE_VPSS_ConvertRGB888(
-                    img.to_bytes(false)->data,
-                    img.width(),
-                    img.height(),
-                    &outFrame
-            );
-            z::z_lib_vo_push_frame(&outFrame);
-            Z_SIMPLE_VPSS_FreeConvertedFrame(&outFrame);
+
+            Z_VO_PUSH_FRAME_WITH_RGB888(nullptr, img.to_bytes(false)->data, img.width(), img.height(), &outFrame);
+
+            // TODO: push vo frame
+//            VIDEO_FRAME_INFO_S outFrame;
+//            Z_SIMPLE_VPSS_ConvertRGB888(
+//                    img.to_bytes(false)->data,
+//                    img.width(),
+//                    img.height(),
+//                    &outFrame
+//            );
+//            z::z_lib_vo_push_frame(&outFrame);
+//            Z_SIMPLE_VPSS_FreeConvertedFrame(&outFrame);
 
 //            delete img;
 

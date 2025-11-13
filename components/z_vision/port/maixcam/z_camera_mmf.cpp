@@ -11,15 +11,14 @@
 #include "maix_i2c.hpp"
 #include <dirent.h>
 //#include "sophgo_middleware.hpp"
+#include "z_lib.hpp"
 
 #define MMF_SENSOR_NAME "MMF_SENSOR_NAME"                           // Setting the sensor name will be used to select which driver to use
 #define MAIX_SENSOR_FPS "MAIX_SENSOR_FPS"                           // Set the frame rate, whether it takes effect or not is determined by the driver
 #define MMF_INIT_DO_NOT_RELOAD_KMOD "MMF_INIT_DO_NOT_RELOAD_KMOD"   // Disable reloading of kmod on mmf_init
 
 struct mmf_frame_info_t {};
-struct BAYER_FORMAT_E {};
-struct ISP_BAYER_FORMAT_E {};
-struct SAMPLE_SNS_TYPE_E {};
+
 using namespace maix;
 
 namespace z::camera
@@ -1090,10 +1089,30 @@ namespace z::camera
             err::check_raise(e, "open camera failed");
         }
 
-        image::Image *img = new image::Image(_width, _height);
-        generate_colorbar(*img);
-        err::check_null_raise(img, "camera read failed");
-        return img;
+//        printf("=========================\n");
+        uint8_t* rgb = nullptr;
+        uint32_t w=0, h=0, stride=0, frameSize=0;
+        uint64_t phy=0;
+        void* vir=nullptr;
+
+        if (Z_VI_TAKE_FRAME_AS_RGB888(&rgb, &w, &h, &stride, &phy, &vir, &frameSize) == 0) {
+//            printf("~~~ Got RGB888 frame: %ux%u stride=%u, size=%u\n", w, h, stride, frameSize);
+
+            image::Image *img = new image::Image(w, h, image::FMT_RGB888, rgb, w*h*3, true);
+
+
+            Z_VPSS_FreeRGB888(phy, vir);
+
+            return img;
+        }
+
+//        printf("=========================\n");
+
+        return nullptr;
+//        image::Image *img = new image::Image(_width, _height);
+//        generate_colorbar(*img);
+//        err::check_null_raise(img, "camera read failed");
+//        return img;
 
 //        if (_show_colorbar) {
 //            image::Image *img = new image::Image(_width, _height);
