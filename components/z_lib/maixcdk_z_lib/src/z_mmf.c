@@ -68,6 +68,8 @@ static void dump_rgb_edge(const CVI_U8 *p, CVI_U32 w, CVI_U32 h) {
 
 CVI_S32 Z_VI_INIT(Z_VI_CTX_S *pstViCtx)
 {
+    SAMPLE_COMM_SYS_Exit();
+
     CVI_S32 s32Ret = CVI_SUCCESS;
     COMPRESS_MODE_E enCompressMode = COMPRESS_MODE_NONE;
     PIC_SIZE_E enPicSize;
@@ -114,8 +116,16 @@ CVI_S32 Z_VI_INIT(Z_VI_CTX_S *pstViCtx)
     pstViCtx->stVbConf.astCommPool[0].u32BlkSize = u32BlkSize;
     pstViCtx->stVbConf.astCommPool[0].u32BlkCnt  = 8;
 
+    // pstViCtx->stVbConf.astCommPool[1].u32BlkSize = u32BlkSize;
+    // pstViCtx->stVbConf.astCommPool[1].u32BlkCnt  = 8;
+
+    printf("<<< init system\n");
+
+
     s32Ret = SAMPLE_COMM_SYS_Init(&pstViCtx->stVbConf);
     if (s32Ret != CVI_SUCCESS) return s32Ret;
+
+    printf("<<< start vi\n");
 
     /* 4. 启动 VI */
     s32Ret = SAMPLE_COMM_VI_StartSensor(&pstViCtx->stViConfig);
@@ -164,6 +174,7 @@ CVI_S32 Z_VI_INIT(Z_VI_CTX_S *pstViCtx)
 
     CVI_SYS_SetVIVPSSMode(&stViVpssMode);
 
+    printf("<<< init vpss group 1\n");
 
     /************************************************
      * step5.1:  Init VPSS 1
@@ -171,8 +182,9 @@ CVI_S32 Z_VI_INIT(Z_VI_CTX_S *pstViCtx)
     VPSS_GRP	   VpssGrp	  = 1;
     VPSS_GRP_ATTR_S    stVpssGrpAttr;
     VPSS_CHN           VpssChn        = VPSS_CHN0;
-    CVI_BOOL           abChnEnable[VPSS_MAX_PHY_CHN_NUM] = {0};
-    VPSS_CHN_ATTR_S    astVpssChnAttr[VPSS_MAX_PHY_CHN_NUM] = {0};
+    VPSS_CHN           VpssChn_1        = VPSS_CHN1;
+    CVI_BOOL           abChnEnable[VPSS_MAX_PHY_CHN_NUM] = {0, 0};
+    VPSS_CHN_ATTR_S    astVpssChnAttr[VPSS_MAX_PHY_CHN_NUM] = {0, 0};
 
     stVpssGrpAttr.stFrameRate.s32SrcFrameRate    = -1;
     stVpssGrpAttr.stFrameRate.s32DstFrameRate    = -1;
@@ -181,6 +193,7 @@ CVI_S32 Z_VI_INIT(Z_VI_CTX_S *pstViCtx)
     stVpssGrpAttr.u32MaxH                        = pstViCtx->stSize.u32Height;
     stVpssGrpAttr.u8VpssDev                      = 1;
 
+    // 通道0提供给Camera模块read使用
     astVpssChnAttr[VpssChn].u32Width                    = 552;
     astVpssChnAttr[VpssChn].u32Height                   = 368;
     astVpssChnAttr[VpssChn].enVideoFormat               = VIDEO_FORMAT_LINEAR;
@@ -192,16 +205,34 @@ CVI_S32 Z_VI_INIT(Z_VI_CTX_S *pstViCtx)
     astVpssChnAttr[VpssChn].bFlip                       = CVI_FALSE;
     astVpssChnAttr[VpssChn].stAspectRatio.enMode        = ASPECT_RATIO_AUTO;
     astVpssChnAttr[VpssChn].stAspectRatio.bEnableBgColor = CVI_TRUE;
-    astVpssChnAttr[VpssChn].stAspectRatio.u32BgColor    = COLOR_RGB_BLACK;
+    astVpssChnAttr[VpssChn].stAspectRatio.u32BgColor    = COLOR_RGB_YELLOW;
     astVpssChnAttr[VpssChn].stNormalize.bEnable         = CVI_FALSE;
+
+    // 通道1提供给NN模块作为输入
+    astVpssChnAttr[VpssChn_1].u32Width                    = 552;
+    astVpssChnAttr[VpssChn_1].u32Height                   = 368;
+    astVpssChnAttr[VpssChn_1].enVideoFormat               = VIDEO_FORMAT_LINEAR;
+    astVpssChnAttr[VpssChn_1].enPixelFormat               = SAMPLE_PIXEL_FORMAT;
+    astVpssChnAttr[VpssChn_1].stFrameRate.s32SrcFrameRate = 30;
+    astVpssChnAttr[VpssChn_1].stFrameRate.s32DstFrameRate = 30;
+    astVpssChnAttr[VpssChn_1].u32Depth                    = 0;
+    astVpssChnAttr[VpssChn_1].bMirror                     = CVI_FALSE;
+    astVpssChnAttr[VpssChn_1].bFlip                       = CVI_FALSE;
+    astVpssChnAttr[VpssChn_1].stAspectRatio.enMode        = ASPECT_RATIO_AUTO;
+    astVpssChnAttr[VpssChn_1].stAspectRatio.bEnableBgColor = CVI_TRUE;
+    astVpssChnAttr[VpssChn_1].stAspectRatio.u32BgColor    = COLOR_RGB_BLACK;
+    astVpssChnAttr[VpssChn_1].stNormalize.bEnable         = CVI_FALSE;
 
     /*start vpss*/
     abChnEnable[0] = CVI_TRUE;
+    abChnEnable[1] = CVI_TRUE;
     s32Ret = SAMPLE_COMM_VPSS_Init(VpssGrp, abChnEnable, &stVpssGrpAttr, astVpssChnAttr);
     if (s32Ret != CVI_SUCCESS) {
         SAMPLE_PRT("init vpss group failed. s32Ret: 0x%x !\n", s32Ret);
         return s32Ret;
     }
+
+    printf("<<< start vpss group 1\n");
 
     s32Ret = SAMPLE_COMM_VPSS_Start(VpssGrp, abChnEnable, &stVpssGrpAttr, astVpssChnAttr);
     if (s32Ret != CVI_SUCCESS) {
@@ -209,11 +240,15 @@ CVI_S32 Z_VI_INIT(Z_VI_CTX_S *pstViCtx)
         return s32Ret;
     }
 
+    printf("<<< vi bind vpss group 1\n");
+
     s32Ret = SAMPLE_COMM_VI_Bind_VPSS(pstViCtx->ViPipe, pstViCtx->ViChn, VpssGrp);
     if (s32Ret != CVI_SUCCESS) {
         SAMPLE_PRT("vi bind vpss failed. s32Ret: 0x%x !\n", s32Ret);
         return s32Ret;
     }
+
+    printf("<<< init vpss group 0\n");
 
 
     /************************************************
@@ -242,7 +277,7 @@ CVI_S32 Z_VI_INIT(Z_VI_CTX_S *pstViCtx)
     astVpssChnAttr1[VpssChn1].stFrameRate.s32SrcFrameRate = 30;
     astVpssChnAttr1[VpssChn1].stFrameRate.s32DstFrameRate = 30;
     astVpssChnAttr1[VpssChn1].u32Depth                    = 1;
-    astVpssChnAttr1[VpssChn1].bMirror                     = CVI_TRUE;
+    astVpssChnAttr1[VpssChn1].bMirror                     = CVI_FALSE;
     astVpssChnAttr1[VpssChn1].bFlip                       = CVI_FALSE;
     astVpssChnAttr1[VpssChn1].stAspectRatio.enMode        = ASPECT_RATIO_AUTO;
     astVpssChnAttr1[VpssChn1].stAspectRatio.bEnableBgColor = CVI_TRUE;
@@ -257,11 +292,15 @@ CVI_S32 Z_VI_INIT(Z_VI_CTX_S *pstViCtx)
         return s32Ret;
     }
 
+    printf("<<< start vpss group 0\n");
+
     s32Ret = SAMPLE_COMM_VPSS_Start(VpssGrp1, abChnEnable1, &stVpssGrpAttr1, astVpssChnAttr1);
     if (s32Ret != CVI_SUCCESS) {
         SAMPLE_PRT("start vpss group 1 failed. s32Ret: 0x%x !\n", s32Ret);
         return s32Ret;
     }
+
+    printf("<<< init vo\n");
 
     /************************************************
      * step6:  Init VO
@@ -355,6 +394,69 @@ CVI_S32 Z_VPSS_RELEASE_FRAME(Z_VI_CTX_S *pstViCtx, VIDEO_FRAME_INFO_S *pstFrameI
 
     return s32Ret;
 }
+
+CVI_S32 Z_VPSS_TAKE_FRAME1(Z_VI_CTX_S *pstViCtx, VIDEO_FRAME_INFO_S *pstFrameInfo, CVI_S32 s32MilliSec)
+{
+    CVI_S32 s32GetRet = CVI_SUCCESS;
+    VPSS_GRP VpssGrp = 1;      /* 与上面创建的保持一致 */
+    VPSS_CHN VpssChn = VPSS_CHN0;
+
+    s32GetRet = CVI_VPSS_GetChnFrame(VpssGrp, VpssChn, pstFrameInfo, s32MilliSec);
+    if (s32GetRet != CVI_SUCCESS) {
+        /* 超时或失败：打印并继续（可根据需要做重试/断开处理） */
+        SAMPLE_PRT("CVI_VPSS_GetChnFrame failed: 0x%x\n", s32GetRet);
+        return s32GetRet;
+    }
+
+    return s32GetRet;
+}
+
+CVI_S32 Z_VPSS_RELEASE_FRAME1(Z_VI_CTX_S *pstViCtx, VIDEO_FRAME_INFO_S *pstFrameInfo)
+{
+    CVI_S32 s32Ret = CVI_SUCCESS;
+
+    VPSS_GRP VpssGrp = 1;      /* 与上面创建的保持一致 */
+    VPSS_CHN VpssChn = VPSS_CHN0;
+
+    s32Ret = CVI_VPSS_ReleaseChnFrame(VpssGrp, VpssChn, pstFrameInfo);
+    if (s32Ret != CVI_SUCCESS) {
+        SAMPLE_PRT("CVI_VPSS_ReleaseChnFrame failed: 0x%x\n", s32Ret);
+    }
+
+    return s32Ret;
+}
+
+CVI_S32 Z_VPSS_TAKE_FRAME1_1(Z_VI_CTX_S *pstViCtx, VIDEO_FRAME_INFO_S *pstFrameInfo, CVI_S32 s32MilliSec)
+{
+    CVI_S32 s32GetRet = CVI_SUCCESS;
+    VPSS_GRP VpssGrp = 1;      /* 与上面创建的保持一致 */
+    VPSS_CHN VpssChn = VPSS_CHN1;
+
+    s32GetRet = CVI_VPSS_GetChnFrame(VpssGrp, VpssChn, pstFrameInfo, s32MilliSec);
+    if (s32GetRet != CVI_SUCCESS) {
+        /* 超时或失败：打印并继续（可根据需要做重试/断开处理） */
+        SAMPLE_PRT("CVI_VPSS_GetChnFrame failed: 0x%x\n", s32GetRet);
+        return s32GetRet;
+    }
+
+    return s32GetRet;
+}
+
+CVI_S32 Z_VPSS_RELEASE_FRAME1_1(Z_VI_CTX_S *pstViCtx, VIDEO_FRAME_INFO_S *pstFrameInfo)
+{
+    CVI_S32 s32Ret = CVI_SUCCESS;
+
+    VPSS_GRP VpssGrp = 1;      /* 与上面创建的保持一致 */
+    VPSS_CHN VpssChn = VPSS_CHN1;
+
+    s32Ret = CVI_VPSS_ReleaseChnFrame(VpssGrp, VpssChn, pstFrameInfo);
+    if (s32Ret != CVI_SUCCESS) {
+        SAMPLE_PRT("CVI_VPSS_ReleaseChnFrame failed: 0x%x\n", s32Ret);
+    }
+
+    return s32Ret;
+}
+
 
 CVI_S32 Z_VO_PUSH_FRAME(Z_VI_CTX_S *pstViCtx, VIDEO_FRAME_INFO_S *pstFrameInfo)
 {
@@ -568,14 +670,6 @@ CVI_S32 Z_VI_TAKE_FRAME_AS_RGB888(
 ) {
     //    printf("==== Z_VI_TAKE_FRAME_AS_RGB888: begin ====\n");
 
-    struct timespec t_start, t_end;
-    clock_gettime(CLOCK_MONOTONIC, &t_start);
-
-    struct timespec t1, t2, t3, t4, t5, t6, t7, t8, t9, t10;
-    double dt1, dt2, dt3, dt4, dt5, dt6, dt7, dt8, dt9, dt10;
-
-    // 1) 参数校验
-    clock_gettime(CLOCK_MONOTONIC, &t1);
     if (!ppRGB || !pWidth || !pHeight || !pStride || !pPhyAddr || !pVirAddr || !pFrameSize) {
         printf("[ERR] invalid output pointers\n");
         return -1;
@@ -584,14 +678,12 @@ CVI_S32 Z_VI_TAKE_FRAME_AS_RGB888(
     VIDEO_FRAME_INFO_S stFrm;
     memset(&stFrm, 0, sizeof(stFrm));
 
-    // NOTE: 如需指定 grp/chn，可扩展参数；此处假设 0/0
     int vpssGrp = 1, vpssChn = 0;
     CVI_S32 ret = CVI_VPSS_GetChnFrame(vpssGrp, vpssChn, &stFrm, 2000);
     if (ret != CVI_SUCCESS) {
         printf("[ERR] CVI_VPSS_GetChnFrame fail ret=0x%x\n", ret);
         return ret;
     }
-    clock_gettime(CLOCK_MONOTONIC, &t2);
 
     VIDEO_FRAME_S* vf = &stFrm.stVFrame;
 
@@ -601,7 +693,6 @@ CVI_S32 Z_VI_TAKE_FRAME_AS_RGB888(
         return -2;
     }
 
-    // 2) 基本字段校验
     if (vf->u32Width == 0 || vf->u32Height == 0) {
         printf("[ERR] invalid size: %ux%u\n", vf->u32Width, vf->u32Height);
         CVI_VPSS_ReleaseChnFrame(vpssGrp, vpssChn, &stFrm);
@@ -618,9 +709,7 @@ CVI_S32 Z_VI_TAKE_FRAME_AS_RGB888(
         CVI_VPSS_ReleaseChnFrame(vpssGrp, vpssChn, &stFrm);
         return -5;
     }
-    clock_gettime(CLOCK_MONOTONIC, &t3);
 
-    // 3) 源虚拟地址：有些平台 VirAddr 可能为 NULL，此时必须 mmap 物理地址
     uint8_t* srcVir = vf->pu8VirAddr[0];
     CVI_BOOL need_unmap = CVI_FALSE;
 
@@ -635,16 +724,12 @@ CVI_S32 Z_VI_TAKE_FRAME_AS_RGB888(
         srcVir = (uint8_t*)tmp_vir;
         need_unmap = CVI_TRUE;
     }
-    clock_gettime(CLOCK_MONOTONIC, &t4);
 
-    // 4) cache：硬件->CPU 读前 Invalidate
     ret = CVI_SYS_IonInvalidateCache(vf->u64PhyAddr[0], srcVir, vf->u32Length[0]);
     if (ret != CVI_SUCCESS) {
         printf("[WARN] InvalidateCache fail ret=0x%x (continue)\n", ret);
     }
-    clock_gettime(CLOCK_MONOTONIC, &t5);
 
-    // 5) 计算目标 stride/size
     const uint32_t srcW = vf->u32Width;
     const uint32_t srcH = vf->u32Height;
     const uint32_t srcStride = vf->u32Stride[0];
@@ -652,9 +737,7 @@ CVI_S32 Z_VI_TAKE_FRAME_AS_RGB888(
     const size_t dstSize   = dstStride * (size_t)srcH;
     const size_t srcMax = (size_t)vf->u32Length[0];
     const size_t idealCopy = (size_t)srcH * (size_t)srcW * 3;
-    clock_gettime(CLOCK_MONOTONIC, &t6);
 
-    // 6) 目标 ION 分配
     CVI_U64 dstPhy = 0;
     CVI_VOID* dstVir = NULL;
     ret = CVI_SYS_IonAlloc_Cached(&dstPhy, &dstVir, "RGB888_Out", (CVI_U32)dstSize);
@@ -664,9 +747,7 @@ CVI_S32 Z_VI_TAKE_FRAME_AS_RGB888(
         CVI_VPSS_ReleaseChnFrame(vpssGrp, vpssChn, &stFrm);
         return -7;
     }
-    clock_gettime(CLOCK_MONOTONIC, &t7);
 
-    // 7) 行拷贝前的边界检查
     {
         size_t last_line_off = (size_t)(srcH - 1) * (size_t)srcStride;
         if (last_line_off >= srcMax) {
@@ -687,11 +768,8 @@ CVI_S32 Z_VI_TAKE_FRAME_AS_RGB888(
             return -9;
         }
     }
-    clock_gettime(CLOCK_MONOTONIC, &t8);
 
-    // 8) 行拷贝
     if (srcStride == srcW * 3) {
-        // ✅ 连续内存：使用普通 TDMA 拷贝
         CVI_SYS_IonFlushCache(vf->u64PhyAddr[0], srcVir, vf->u32Length[0]);
         CVI_S32 ret_dma = CVI_SYS_TDMACopy(dstPhy, vf->u64PhyAddr[0], (CVI_U32)dstSize);
         if (ret_dma != CVI_SUCCESS) {
@@ -699,10 +777,8 @@ CVI_S32 Z_VI_TAKE_FRAME_AS_RGB888(
             memcpy(dstVir, srcVir, dstSize);
         } else {
             CVI_SYS_IonInvalidateCache(dstPhy, dstVir, (CVI_U32)dstSize);
-//            printf("[INFO] CVI_SYS_TDMACopy success, %zu bytes copied via TPU\n", dstSize);
         }
     } else {
-        // ✅ stride 不连续：使用 2D TDMA 拷贝
         CVI_TDMA_2D_S tdma2d;
         memset(&tdma2d, 0, sizeof(tdma2d));
 
@@ -724,32 +800,14 @@ CVI_S32 Z_VI_TAKE_FRAME_AS_RGB888(
             }
         } else {
             CVI_SYS_IonInvalidateCache(dstPhy, dstVir, (CVI_U32)dstSize);
-//            printf("[INFO] CVI_SYS_TDMACopy2D success: %u×%u (srcStride=%u dstStride=%u)\n",
-//                   srcW, srcH, srcStride, (uint32_t)(srcW * 3));
         }
     }
-//    for (uint32_t y = 0; y < srcH; ++y) {
-//        const uint8_t* s = srcVir + (size_t)y * (size_t)srcStride;
-//        uint8_t*       d = (uint8_t*)dstVir + (size_t)y * (size_t)dstStride;
-//        size_t remain = srcMax - ((size_t)y * (size_t)srcStride);
-//        size_t need   = (size_t)srcW * 3;
-//        if (remain < need) {
-//            printf("[ERR] line %u: remain=%zu < need=%zu\n", y, remain, need);
-//            CVI_SYS_IonFree(dstPhy, dstVir);
-//            if (need_unmap) CVI_SYS_Munmap(srcVir, vf->u32Length[0]);
-//            CVI_VPSS_ReleaseChnFrame(vpssGrp, vpssChn, &stFrm);
-//            return -10;
-//        }
-//        memcpy(d, s, need);
-//    }
-    clock_gettime(CLOCK_MONOTONIC, &t9);
 
     // 9) 释放 VPSS 帧 + 取消 mmap
     CVI_VPSS_ReleaseChnFrame(vpssGrp, vpssChn, &stFrm);
     if (need_unmap) {
         CVI_SYS_Munmap(srcVir, vf->u32Length[0]);
     }
-    clock_gettime(CLOCK_MONOTONIC, &t10);
 
     // 10) 输出
     *ppRGB     = (uint8_t*)dstVir;
@@ -759,33 +817,6 @@ CVI_S32 Z_VI_TAKE_FRAME_AS_RGB888(
     *pPhyAddr  = dstPhy;
     *pVirAddr  = dstVir;
     *pFrameSize= (uint32_t)dstSize;
-
-    // 打印耗时统计
-    dt1 = (t2.tv_sec - t1.tv_sec) * 1000.0 + (t2.tv_nsec - t1.tv_nsec) / 1e6;
-    dt2 = (t3.tv_sec - t2.tv_sec) * 1000.0 + (t3.tv_nsec - t2.tv_nsec) / 1e6;
-    dt3 = (t4.tv_sec - t3.tv_sec) * 1000.0 + (t4.tv_nsec - t3.tv_nsec) / 1e6;
-    dt4 = (t5.tv_sec - t4.tv_sec) * 1000.0 + (t5.tv_nsec - t4.tv_nsec) / 1e6;
-    dt5 = (t6.tv_sec - t5.tv_sec) * 1000.0 + (t6.tv_nsec - t5.tv_nsec) / 1e6;
-    dt6 = (t7.tv_sec - t6.tv_sec) * 1000.0 + (t7.tv_nsec - t6.tv_nsec) / 1e6;
-    dt7 = (t8.tv_sec - t7.tv_sec) * 1000.0 + (t8.tv_nsec - t7.tv_nsec) / 1e6;
-    dt8 = (t9.tv_sec - t8.tv_sec) * 1000.0 + (t9.tv_nsec - t8.tv_nsec) / 1e6;
-    dt9 = (t10.tv_sec - t9.tv_sec) * 1000.0 + (t10.tv_nsec - t9.tv_nsec) / 1e6;
-
-    clock_gettime(CLOCK_MONOTONIC, &t_end);
-    double total = (t_end.tv_sec - t_start.tv_sec) * 1000.0 + (t_end.tv_nsec - t_start.tv_nsec) / 1e6;
-
-//    printf("==== Step Timing (ms) ====\n");
-//    printf("1) CVI_VPSS_GetChnFrame:   %.3f ms\n", dt1);
-//    printf("2) Field check:            %.3f ms\n", dt2);
-//    printf("3) Mmap handling:          %.3f ms\n", dt3);
-//    printf("4) Cache invalidate:       %.3f ms\n", dt4);
-//    printf("5) Stride/size compute:    %.3f ms\n", dt5);
-//    printf("6) ION alloc:              %.3f ms\n", dt6);
-//    printf("7) Boundary check:         %.3f ms\n", dt7);
-//    printf("8) Memcpy loop:            %.3f ms\n", dt8);
-//    printf("9) Release/unmap:          %.3f ms\n", dt9);
-//    printf("Total time:                %.3f ms\n", total);
-//    printf("==========================\n");
 
     //    printf("==== Z_VI_TAKE_FRAME_AS_RGB888: end ====\n");
     return 0;
@@ -800,7 +831,12 @@ void Z_VPSS_FreeRGB888(uint64_t phyAddr, void* virAddr)
 }
 
 
-CVI_S32 Z_VO_PUSH_FRAME_WITH_RGB888(Z_VI_CTX_S *pstViCtx, const CVI_U8 *pRGB, CVI_U32 inW, CVI_U32 inH, VIDEO_FRAME_INFO_S *pstOutFrame)
+CVI_S32 Z_VO_PUSH_FRAME_WITH_RGB888(
+    Z_VI_CTX_S *pstViCtx,
+    const CVI_U8 *pRGB,
+    CVI_U32 inW, CVI_U32 inH,
+    VIDEO_FRAME_INFO_S *pstOutFrame
+)
 {
     if (!pRGB) {
         printf("[ERR] invalid input\n");
@@ -977,23 +1013,28 @@ CVI_S32 Z_SIMPLE_VPSS_FreeConvertedFrame(VIDEO_FRAME_INFO_S *pFrame) {
 
 CVI_S32 Z_VI_DEINIT(Z_VI_CTX_S *pstViCtx)
 {
-    SAMPLE_COMM_VI_DestroyIsp(&pstViCtx->stViConfig);
-    SAMPLE_COMM_VI_DestroyVi(&pstViCtx->stViConfig);
-
     VO_CHN VoChn = 0;
     VPSS_GRP	   VpssGrp	  = 1;
     VPSS_GRP	   VpssGrp1	  = 0;
-    CVI_BOOL           abChnEnable[VPSS_MAX_PHY_CHN_NUM] = {0};
-    CVI_BOOL           abChnEnable1[VPSS_MAX_PHY_CHN_NUM] = {0};
-
-    CVI_VO_HideChn(VoChn, VoChn);
-    CVI_VO_DisableChn(VoChn, VoChn);
-//    SAMPLE_COMM_VO_StopVO(&stVoConfig);
+    VPSS_GRP	   VpssGrp3	  = 3;
+    CVI_BOOL           abChnEnable[VPSS_MAX_PHY_CHN_NUM] = {1, 1};
+    CVI_BOOL           abChnEnable1[VPSS_MAX_PHY_CHN_NUM] = {1};
+    CVI_BOOL           abChnEnable3[VPSS_MAX_PHY_CHN_NUM] = {1};
 
     SAMPLE_COMM_VPSS_UnBind_VO(0, 0, 0, VoChn);
     SAMPLE_COMM_VI_UnBind_VPSS(pstViCtx->ViPipe, pstViCtx->ViChn, VpssGrp);
     SAMPLE_COMM_VPSS_Stop(VpssGrp, abChnEnable);
     SAMPLE_COMM_VPSS_Stop(VpssGrp1, abChnEnable1);
+    SAMPLE_COMM_VPSS_Stop(VpssGrp3, abChnEnable3);
+
+    SAMPLE_COMM_VI_DestroyIsp(&pstViCtx->stViConfig);
+    SAMPLE_COMM_VI_DestroyVi(&pstViCtx->stViConfig);
+
+
+    CVI_VO_HideChn(VoChn, VoChn);
+    CVI_VO_DisableChn(VoChn, VoChn);
+
+//    SAMPLE_COMM_VO_StopVO(&stVoConfig);
 
     SAMPLE_COMM_SYS_Exit();
     SAMPLE_PRT("[Z_VI_DEINIT] done\n");
