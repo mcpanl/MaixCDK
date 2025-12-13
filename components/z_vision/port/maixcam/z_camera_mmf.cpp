@@ -1089,14 +1089,12 @@ namespace z::camera
             err::check_raise(e, "open camera failed");
         }
 
-//        printf("=========================\n");
         uint8_t* rgb = nullptr;
         uint32_t w=0, h=0, stride=0, frameSize=0;
         uint64_t phy=0;
         void* vir=nullptr;
 
         if (Z_VI_TAKE_FRAME_AS_RGB888(&rgb, &w, &h, &stride, &phy, &vir, &frameSize) == 0) {
-//            printf("~~~ Got RGB888 frame: %ux%u stride=%u, size=%u\n", w, h, stride, frameSize);
 
             image::Image *img = new image::Image(w, h, image::FMT_RGB888, rgb, w*h*3, true);
 
@@ -1106,31 +1104,7 @@ namespace z::camera
             return img;
         }
 
-//        printf("=========================\n");
-
         return nullptr;
-//        image::Image *img = new image::Image(_width, _height);
-//        generate_colorbar(*img);
-//        err::check_null_raise(img, "camera read failed");
-//        return img;
-
-//        if (_show_colorbar) {
-//            image::Image *img = new image::Image(_width, _height);
-//            generate_colorbar(*img);
-//            err::check_null_raise(img, "camera read failed");
-//            return img;
-//        } else {
-//            int read_block_ms = block_ms < 0 ? (1000.0 / _fps * 3) : block_ms;
-//            image::Image *img = _mmf_read(_ch, _width, _height, _format, buff, buff_size, read_block_ms);
-//            err::check_null_raise(img, "camera read failed");
-//            // FIXME: delete me and fix driver bug
-//            uint64_t wait_us = 1000000 / _fps;
-//            while (time::ticks_us() - _last_read_us < wait_us) {
-//                time::sleep_us(50);
-//            }
-//            _last_read_us = time::ticks_us();
-//            return img;
-//        }
     }
 
     static image::Format _get_raw_format_with_size(int w, int h, int total_size, BAYER_FORMAT_E bayer_format) {
