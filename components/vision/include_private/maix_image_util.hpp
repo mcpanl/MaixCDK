@@ -1,6 +1,6 @@
 #pragma once
 
-#include "maix_image.hpp"
+#include "z_image.hpp"
 #include "omv.hpp"
 
 namespace maix::image

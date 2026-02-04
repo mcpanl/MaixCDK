@@ -10,7 +10,6 @@
 #include <assert.h>
 using namespace std;
 using namespace maix;
-using namespace z;
 
 // enumerate event, MAIX_GUI_EVENT_RETURN
 typedef enum {

@@ -274,7 +274,7 @@ namespace pointing_private {
             int x = 0;
             int y = 0;
             bool pressed = false;
-            if(z::z_touchscreen->read0(x, y, pressed) == maix::err::ERR_NOT_READY) {
+            if(z_touchscreen->read0(x, y, pressed) == maix::err::ERR_NOT_READY) {
                 PointingData data2;
                 data2.x = -1;
                 data2.y = -1;
@@ -282,7 +282,7 @@ namespace pointing_private {
                 data2.continue_reading = false;
                 return data2;
             }
-            this->_data.continue_reading = z::z_touchscreen->available();
+            this->_data.continue_reading = z_touchscreen->available();
 
             this->_data.x = x;
             this->_data.y = y;

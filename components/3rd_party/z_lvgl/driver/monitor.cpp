@@ -59,7 +59,7 @@ void monitor_flush(lv_display_t *disp_drv, const lv_area_t * area, uint8_t *px_m
     // swap R and B
     for(int32_t y = area->y1; y <= area->y2 && y < vres; y++) {
 
-        uint8_t * dest = (uint8_t*)z::z_image->data() + (y * hres + area->x1) * 3;
+        uint8_t * dest = (uint8_t*)z_image->data() + (y * hres + area->x1) * 3;
         uint8_t * src = color_p;
 
         uint32_t x = 0;
@@ -113,7 +113,7 @@ void monitor_flush(lv_display_t *disp_drv, const lv_area_t * area, uint8_t *px_m
 //    }
 
     if(lv_disp_flush_is_last(disp_drv)) {
-        z::z_display->show(*z::z_image);  // ✅ 直接输出 RGB888
+        z_display->show(*z_image);  // ✅ 直接输出 RGB888
     }
 
     lv_disp_flush_ready(disp_drv);

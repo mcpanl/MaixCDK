@@ -202,10 +202,10 @@ int _main(int argc, char **argv)
     // }
 
     // init display
-    z::display::Display *screen = nullptr;
+    display::Display *screen = nullptr;
     try
     {
-        screen = new z::display::Display();
+        screen = new display::Display();
     }
     catch (...)
     {
@@ -221,7 +221,7 @@ int _main(int argc, char **argv)
         screen->set_backlight(value_float);
 
         // touch screen
-        z::touchscreen::TouchScreen touchscreen_ = z::touchscreen::TouchScreen();
+        touchscreen::TouchScreen touchscreen_ = touchscreen::TouchScreen();
 
         Maix_GUI<MAIX_GUI_OBJ_T> gui(false);
         ret = gui.init(screen, &touchscreen_);

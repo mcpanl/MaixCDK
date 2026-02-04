@@ -1,7 +1,7 @@
 #include "z_lib.hpp"
 #include <stdio.h>
 
-namespace z {
+namespace maix {
 
     Z_VI_CTX_S g_stViCtx;
 
@@ -61,7 +61,7 @@ namespace z {
     {
         if(Z_VPSS_TAKE_FRAME(&g_stViCtx, stFrameInfo, s32MilliSec) == CVI_SUCCESS)
         {
-            printf("z_vpss_take_frame success\n");
+            // printf("z_vpss_take_frame success\n");
         } else {
             printf("z_vpss_take_frame fail\n");
         }
@@ -71,7 +71,7 @@ namespace z {
     {
         if(Z_VPSS_TAKE_FRAME1(&g_stViCtx, stFrameInfo, s32MilliSec) == CVI_SUCCESS)
         {
-            printf("z_vpss_take_frame success\n");
+            // printf("z_vpss_take_frame success\n");
         } else {
             printf("z_vpss_take_frame fail\n");
         }
@@ -81,7 +81,7 @@ namespace z {
     {
         if(Z_VPSS_TAKE_FRAME1_1(&g_stViCtx, stFrameInfo, s32MilliSec) == CVI_SUCCESS)
         {
-            printf("z_vpss_take_frame success\n");
+            // printf("z_vpss_take_frame success\n");
         } else {
             printf("z_vpss_take_frame fail\n");
         }

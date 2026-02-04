@@ -1,17 +1,11 @@
 # Config enable component2 or not in Kconfig
 ################# Add include #################
-list(APPEND ADD_INCLUDE "include"
-                        "include/base"
+list(APPEND ADD_INCLUDE "include" "include/base"
 )
 if(PLATFORM_LINUX)
     list(APPEND ADD_PRIVATE_INCLUDE "port/linux")
-    list(APPEND ADD_PRIVATE_INCLUDE "port/linux_common")
 elseif(PLATFORM_MAIXCAM)
     list(APPEND ADD_PRIVATE_INCLUDE "port/maixcam")
-    list(APPEND ADD_PRIVATE_INCLUDE "port/linux_common")
-elseif(PLATFORM_MAIXCAM2)
-    list(APPEND ADD_PRIVATE_INCLUDE "port/maixcam2")
-    list(APPEND ADD_PRIVATE_INCLUDE "port/linux_common")
 endif()
 list(APPEND ADD_PRIVATE_INCLUDE "include_private")
 ###############################################
@@ -24,16 +18,10 @@ list(APPEND ADD_PRIVATE_INCLUDE "include_private")
 # list(APPEND ADD_SRCS  ${EXTRA_SRC})
 # aux_source_directory(src ADD_SRCS)  # collect all source file in src dir, will set var ADD_SRCS
 append_srcs_dir(ADD_SRCS "src")     # append source file in src dir to var ADD_SRCS
-append_srcs_dir(ADD_SRCS "src/ByteTrack")
 if(PLATFORM_LINUX)
     append_srcs_dir(ADD_SRCS "port/linux")
-    append_srcs_dir(ADD_SRCS "port/linux_common")
 elseif(PLATFORM_MAIXCAM)
     append_srcs_dir(ADD_SRCS "port/maixcam")
-    append_srcs_dir(ADD_SRCS "port/linux_common")
-elseif(PLATFORM_MAIXCAM2)
-    append_srcs_dir(ADD_SRCS "port/maixcam2")
-    append_srcs_dir(ADD_SRCS "port/linux_common")
 endif()
 # list(REMOVE_ITEM COMPONENT_SRCS "src/test.c")
 # set(ADD_ASM_SRCS "src/asm.S")
@@ -42,33 +30,8 @@ endif()
 # SET_SOURCE_FILES_PROPERTIES(${ADD_ASM_SRCS} PROPERTIES COMPILE_FLAGS "-x assembler-with-cpp -D BBBBB")
 ###############################################
 
-
+list(APPEND ADD_REQUIREMENTS z_lib basic opencv opencv_freetype peripheral omv zbar)
 ###### Add required/dependent components ######
-list(APPEND ADD_REQUIREMENTS basic opencv opencv_freetype websocket peripheral)
-list(APPEND ADD_REQUIREMENTS zbar omv)
-if(PLATFORM_LINUX)
-    list(APPEND ADD_REQUIREMENTS sdl)
-elseif(PLATFORM_MAIXCAM)
-    list(APPEND ADD_REQUIREMENTS FFmpeg maixcam_lib RtspServer)
-    # Only link libvision if this component is in dependency chain
-    if(TARGET vision)
-        if(NOT CONFIG_MAIXCAM_LIB_COMPILE_FROM_SOURCE)
-            set(CMAKE_C_LINK_FLAGS "${CMAKE_C_LINK_FLAGS} -Wl,--start-group vision/libvision.a -lmaixcam_lib -Wl,--end-group" PARENT_SCOPE)
-            set(CMAKE_CXX_LINK_FLAGS "${CMAKE_CXX_LINK_FLAGS} -Wl,--start-group vision/libvision.a -lmaixcam_lib -Wl,--end-group" PARENT_SCOPE)
-        endif()
-    endif()
-#    if(NOT CONFIG_MAIXCAM_LIB_COMPILE_FROM_SOURCE)
-#        set(CMAKE_C_LINK_FLAGS "${CMAKE_C_LINK_FLAGS} -Wl,--start-group vision/libvision.a -lmaixcam_lib -Wl,--end-group" PARENT_SCOPE)
-#        set(CMAKE_CXX_LINK_FLAGS "${CMAKE_CXX_LINK_FLAGS} -Wl,--start-group vision/libvision.a -lmaixcam_lib -Wl,--end-group" PARENT_SCOPE)
-#    endif()
-elseif(PLATFORM_MAIXCAM2)
-list(APPEND ADD_REQUIREMENTS FFmpeg maixcam_lib RtspServer)
-if(NOT CONFIG_MAIXCAM_LIB_COMPILE_FROM_SOURCE)
-# set(CMAKE_C_LINK_FLAGS "${CMAKE_C_LINK_FLAGS} -Wl,--start-group vision/libvision.a -lmaixcam_lib -Wl,--end-group" PARENT_SCOPE)
-# set(CMAKE_CXX_LINK_FLAGS "${CMAKE_CXX_LINK_FLAGS} -Wl,--start-group vision/libvision.a -lmaixcam_lib -Wl,--end-group" PARENT_SCOPE)
-endif()
-endif()
-list(APPEND ADD_REQUIREMENTS eigen voice)
 ###############################################
 
 ###### Add link search path for requirements/libs ######

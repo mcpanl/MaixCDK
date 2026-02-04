@@ -6,7 +6,7 @@
 #include <memory>
 
 #include "maix_cmap.hpp"
-#include "maix_image.hpp"
+#include "z_image.hpp"
 
 namespace maix::ext_dev::tof100 {
 

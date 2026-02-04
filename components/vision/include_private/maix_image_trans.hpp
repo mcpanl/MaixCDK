@@ -1,7 +1,7 @@
 #pragma once
 
 #include "maix_basic.hpp"
-#include "maix_image.hpp"
+#include "z_image.hpp"
 
 namespace maix
 {

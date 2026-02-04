@@ -82,3 +82,13 @@ examples/*/dist/
 projects/*/dist/
 examples/*/data/
 projects/*/data/
+
+
+!components/3rd_party/cvi-tdl-sdk/tdl_sdk/lib/
+!components/3rd_party/cvi-middleware/cvi_mpi/
+
+!components/3rd_party/cvi-tdl-sdk/tdl_sdk/lib/*.a
+!components/3rd_party/cvi-tdl-sdk/tdl_sdk/lib/*.so
+
+!components/3rd_party/cvi-middleware/cvi_mpi/**/*.a
+!components/3rd_party/cvi-middleware/cvi_mpi/**/*.so
