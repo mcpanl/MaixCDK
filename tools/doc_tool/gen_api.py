@@ -594,6 +594,7 @@ def parse_api(code, apis, sdks = ["maixpy", "maixcdk"], header_name = None, modu
         names = api.split(".")
         # to limit only have maix module
         if names[0] != module_name:
+            return None, "API name must start with {}, api: {} ".format(module_name, api), False, []
             pass
             # return None, "API name must start with {}, api: {} ".format(module_name, api), False, []
         for i in range(len(names)):

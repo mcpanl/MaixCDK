@@ -1,7 +1,7 @@
 #pragma once
 #include <z_mmf.h>
 
-namespace z {
+namespace maix {
     void z_lib_ping();
 
     void z_lib_init();

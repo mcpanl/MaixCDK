@@ -1,0 +1,10 @@
+id: z_vio_demo
+name: Z_VIO_Demo
+name[zh]:
+version: 1.0.0
+icon: assets/logo.png
+author: 
+desc: 
+desc[zh]:
+files:
+   assets: assets

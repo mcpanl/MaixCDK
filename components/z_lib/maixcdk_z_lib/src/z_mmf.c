@@ -205,7 +205,7 @@ CVI_S32 Z_VI_INIT(Z_VI_CTX_S *pstViCtx)
     astVpssChnAttr[VpssChn].bFlip                       = CVI_FALSE;
     astVpssChnAttr[VpssChn].stAspectRatio.enMode        = ASPECT_RATIO_AUTO;
     astVpssChnAttr[VpssChn].stAspectRatio.bEnableBgColor = CVI_TRUE;
-    astVpssChnAttr[VpssChn].stAspectRatio.u32BgColor    = COLOR_RGB_YELLOW;
+    astVpssChnAttr[VpssChn].stAspectRatio.u32BgColor    = COLOR_RGB_BLACK;
     astVpssChnAttr[VpssChn].stNormalize.bEnable         = CVI_FALSE;
 
     // 通道1提供给NN模块作为输入

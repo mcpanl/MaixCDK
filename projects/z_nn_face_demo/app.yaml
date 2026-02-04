@@ -1,0 +1,11 @@
+id: z_nn_face_demo
+name: NN_FACE_DEMO
+name[zh]:
+version: 1.0.0
+icon: assets/hello.png
+author: 
+desc: 
+desc[zh]:
+files:
+   app.yaml: app.yaml
+   assets: assets

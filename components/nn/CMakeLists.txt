@@ -1,16 +1,19 @@
 
 list(APPEND ADD_INCLUDE "include")
 list(APPEND ADD_PRIVATE_INCLUDE "include_private")
+
+
+
 append_srcs_dir(ADD_SRCS "src")
-list(APPEND ADD_REQUIREMENTS basic ini vision clipper2)
+list(APPEND ADD_REQUIREMENTS basic ini clipper2 vision cvi-tdl-sdk)
 
 if(PLATFORM_MAIXCAM)
     append_srcs_dir(ADD_SRCS "port/maixcam")
-    list(APPEND ADD_REQUIREMENTS maixcam_lib alsa_lib)
-    list(APPEND ADD_DYNAMIC_LIB "lib/libms_asr_sg2002.so")
-    list(APPEND ADD_DEFINITIONS -DDR_WAV_IMPLEMENTATION)
+#    list(APPEND ADD_REQUIREMENTS maixcam_lib alsa_lib)
+#    list(APPEND ADD_DYNAMIC_LIB "lib/libms_asr_sg2002.so")
+#    list(APPEND ADD_DEFINITIONS -DDR_WAV_IMPLEMENTATION)
 else()
-    append_srcs_dir(ADD_SRCS "port/linux")
+#    append_srcs_dir(ADD_SRCS "port/linux")
 endif()
 
 register_component()
@@ -75,6 +78,8 @@ register_component()
 #### Update parent's variables like CMAKE_C_LINK_FLAGS
 # set(CMAKE_C_LINK_FLAGS "${CMAKE_C_LINK_FLAGS} -Wl,--start-group libmaix/libtest.a -ltest2 -Wl,--end-group" PARENT_SCOPE)
 ###############################################
+
+
 
 # register component, DYNAMIC or SHARED flags will make component compiled to dynamic(shared) lib
 # register_component()

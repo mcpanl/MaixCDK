@@ -18,7 +18,7 @@ LV_IMAGE_DECLARE(cursor_48);
 
 using namespace maix;
 
-namespace z
+namespace maix
 {
     display::Display *z_display = nullptr;
     image::Image *z_image = nullptr;
@@ -66,7 +66,7 @@ namespace z
             buf1_1 = nullptr;
             throw std::runtime_error("lvgl_init malloc failed");
         }
-        z_image = new z::image::Image(display->width(), display->height(), image::FMT_RGB888);
+        z_image = new image::Image(display->width(), display->height(), image::FMT_RGB888);
         z_display = display;
         z_touchscreen = touchscreen;
 #ifdef PLATFORM_LINUX

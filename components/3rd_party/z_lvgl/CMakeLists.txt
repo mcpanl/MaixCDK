@@ -45,7 +45,7 @@ append_srcs_dir(ADD_SRCS "src")
 
 # set_property(SOURCE ${src_path} PROPERTY GENERATED 1)
 
-list(APPEND ADD_REQUIREMENTS basic z_vision)
+list(APPEND ADD_REQUIREMENTS basic vision)
 
 
 # list(REMOVE_ITEM COMPONENT_SRCS "src/test.c")

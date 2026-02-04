@@ -23,7 +23,7 @@ append_srcs_dir(ADD_SRCS "src")       # append source file in src dir to var ADD
 ###############################################
 
 ###### Add required/dependent components ######
-list(APPEND ADD_REQUIREMENTS basic z_lib z_vision z_nn)
+list(APPEND ADD_REQUIREMENTS basic peripheral z_lib z_vision z_nn)
 ###############################################
 
 ###### Add link search path for requirements/libs ######

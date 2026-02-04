@@ -5,7 +5,7 @@
  * @update 2023.9.8: Add framework, create this file.
  */
 
-#include "maix_image.hpp"
+#include "z_image.hpp"
 #include "maix_image_util.hpp"
 
 namespace maix::image

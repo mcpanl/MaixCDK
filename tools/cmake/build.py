@@ -85,42 +85,52 @@ def get_component_requirements(component_name, component_dir, find_dirs):
     return requires
 
 def find_valid_components(components, find_dirs):
-    '''
-        get project depends(not accurately, just exclude some obvious not depend components)
-        return valid components name
-    '''
-    # get components quire
     depends = {}
+
+    # 1. 构建依赖图
     for name, dir in components.items():
         component_py = os.path.join(dir, "component.py")
         found = False
         if os.path.exists(component_py):
-            found, depends_component = execute_component_py_func(component_py, "add_requirements", find_dirs)
+            found, depends_component = execute_component_py_func(
+                component_py, "add_requirements", find_dirs
+            )
         if not found:
             cmakelist = os.path.join(dir, "CMakeLists.txt")
             with open(cmakelist, "r", encoding="utf-8") as f:
                 content = f.read()
-                match = re.findall(r'list\(APPEND ADD_REQUIREMENTS(.*?)\)', content, re.DOTALL|re.MULTILINE)
+                match = re.findall(
+                    r'list\(APPEND ADD_REQUIREMENTS(.*?)\)',
+                    content,
+                    re.DOTALL | re.MULTILINE
+                )
                 depends_component = list(set(" ".join(match).split()))
-        depends[name] = []
-        for r in depends_component:
-            if r in components:
-                if name == r:
-                    continue
-                depends[name].append(r)
-    # find main depends
-    def get_depend_recursive(name, seen={}):
-        if name in seen:
-            return seen[name]
-        d = depends[name].copy()
-        for r in depends[name]:
-            d.extend(get_depend_recursive(r, seen))
-        d = list(set(d))
-        seen[name] = d
-        return d
-    valid = ["main"]
-    valid.extend(get_depend_recursive("main"))
-    return valid
+
+        depends[name] = [r for r in depends_component if r in components and r != name]
+
+    # 2. DFS + 循环检测
+    visited = set()
+    stack = set()
+    result = set()
+
+    def dfs(name):
+        if name in stack:
+            raise RuntimeError(f"检测到循环依赖: {' -> '.join(stack)} -> {name}")
+        if name in visited:
+            return
+
+        stack.add(name)
+        for dep in depends.get(name, []):
+            dfs(dep)
+        stack.remove(name)
+
+        visited.add(name)
+        result.add(name)
+
+    # 3. 从 main 开始
+    dfs("main")
+    return list(result)
+
 
 def get_components_find_dirs(configs):
     final = []

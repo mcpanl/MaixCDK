@@ -2,7 +2,7 @@
 #include "z_display.hpp"
 #include "z_touchscreen.hpp"
 
-namespace z
+namespace maix
 {
     extern display::Display *z_display;
     extern image::Image     *z_image;

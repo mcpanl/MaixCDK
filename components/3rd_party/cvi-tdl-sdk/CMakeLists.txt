@@ -9,7 +9,7 @@ list(APPEND ADD_INCLUDE
         ${MPI_SDK_ROOT}/include/linux
 )
 
-list(APPEND ADD_REQUIREMENTS basic z_vision)
+list(APPEND ADD_REQUIREMENTS basic opencv)
 
 list(APPEND ADD_SRCS
         ${CMAKE_CURRENT_SOURCE_DIR}/dummy.cpp
