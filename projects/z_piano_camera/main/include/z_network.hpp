@@ -54,6 +54,8 @@ namespace z {
         std::atomic<LanState> lan_state_{LanState::DISCONNECTED};
         std::atomic<WanState> wan_state_{WanState::DISCONNECTED};
 
+        int ping_fail_count_{0};
+
         std::mutex mutex_;
         std::thread monitor_thread_;
     };

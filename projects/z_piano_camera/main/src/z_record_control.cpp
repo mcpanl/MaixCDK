@@ -94,14 +94,7 @@ namespace z {
                 m_state = State::Starting;
                 // 绑定当前 session 的文件名
                 m_sessionFilename = m_filename;
-                // if (priv.ffmpeg_packer->open() == 0) {
-                //     if (priv.audio_recorder) {
-                //         priv.audio_recorder->reset();
-                //     }
-                //     resetTimer();
-                //     // m_state = State::Recording;
-                // }
-                // resetTimer();
+
                 log::info("RecordControl: waiting for first keyframe...");
                 break;
             default:

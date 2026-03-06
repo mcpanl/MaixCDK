@@ -72,38 +72,6 @@ namespace z {
     }
 
 
-    // void VideoStream::run() {
-    //     while (!app::need_exit()) {
-    //         log::info("    VideoStream!");
-    //
-    //         void *frame = nullptr;
-    //         mmf_frame_info_t f;
-    //
-    //         int res = _mmf_vi_frame_pop(camera_ch_, &frame, &f, 10);
-    //         if (res != 0 || frame == nullptr) {
-    //             printf("[thread_cam] Failed to get frame, skipping...\n");
-    //             time::sleep_ms(5);
-    //             continue;
-    //         }
-    //
-    //         if (mmf_enc_jpg_push(encode_ch_, (uint8_t*)f.data, f.w, f.h, f.fmt) == 0) {
-    //             uint8_t *jpg_data = nullptr;
-    //             int jpg_size = 0;
-    //             if (mmf_enc_jpg_pop(encode_ch_, &jpg_data, &jpg_size) == 0) {
-    //                 printf("[thread_cam] JPEG size = %d bytes\n", jpg_size);
-    //                 broadcast_jpeg(jpg_data, jpg_size);
-    //                 mmf_enc_jpg_free(encode_ch_);
-    //             }
-    //         } else {
-    //             printf("[thread_cam] mmf_enc_jpg_push failed\n");
-    //         }
-    //
-    //         _mmf_vi_frame_free(camera_ch_, &frame);
-    //
-    //         std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-    //     }
-    // }
-
     // =====================================================
     // 打包成多个 UDP 包（不直接发）
     // =====================================================

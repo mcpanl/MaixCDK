@@ -142,24 +142,28 @@ namespace z {
                 // 访问外网
                 if (ping("8.8.8.8")) {
                     // printf(">>> network ok\n");
+                    ping_fail_count_ = 0;
                     lan_state_ = LanState::CONNECTED;
                     wan_state_ = WanState::CONNECTED;
                 } else {
                     // printf(">>> network ng\n");
-                    lan_state_ = LanState::DISCONNECTED;
-                    wan_state_ = WanState::DISCONNECTED;
+                    ping_fail_count_++;
+                    if (ping_fail_count_ >= 3) {
+                        lan_state_ = LanState::DISCONNECTED;
+                        wan_state_ = WanState::DISCONNECTED;
+                    }
                 }
             } else {
                 lan_state_ = LanState::DISCONNECTED;
                 wan_state_ = WanState::DISCONNECTED;
             }
 
-            std::this_thread::sleep_for(std::chrono::seconds(5));
+            std::this_thread::sleep_for(std::chrono::seconds(2));
         }
     }
 
     bool Network::ping(const std::string& addr) {
-        std::string cmd = "ping -c 1 -W 3 " + addr + " 2>&1";
+        std::string cmd = "ping -c 1 -W 2 " + addr + " 2>&1";
         FILE* pipe = popen(cmd.c_str(), "r");
         if (!pipe) return false;
 
