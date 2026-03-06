@@ -40,7 +40,7 @@ void TcpServer::stop() {
         }
         clients.clear();
     }
-    // 如果需要阻塞等待server_thread结束，可以启用
+    
     if (server_thread.joinable()) server_thread.join();
 }
 
@@ -132,7 +132,7 @@ TcpServer::ClientHandler::ClientHandler(
     : fd(client_fd),
       active(true),
       onMessage(std::move(messageCallback)),
-      onDisconnect(std::move(disconnectCallback))  // 👈 新增的断开回调
+      onDisconnect(std::move(disconnectCallback))
 {}
 
 void TcpServer::ClientHandler::start() {

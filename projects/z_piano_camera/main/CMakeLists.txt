@@ -9,6 +9,16 @@ list(APPEND ADD_PRIVATE_INCLUDE "")
 #                       "src/test.c"
 #     )
 append_srcs_dir(ADD_SRCS "src")       # append source file in src dir to var ADD_SRCS
+# z_udp_server.cpp 已迁移至 components/z_udp_server/ 组件，由该组件统一管理编译
+# 无论源码是否存在，这里都强制排除，避免与组件中的版本重复编译
+list(REMOVE_ITEM ADD_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/src/z_udp_server.cpp"
+                          "src/z_udp_server.cpp")
+# z_video_stream.cpp 已迁移至 components/z_video_stream/ 组件，由该组件统一管理编译
+list(REMOVE_ITEM ADD_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/src/z_video_stream.cpp"
+                          "src/z_video_stream.cpp")
+# z_record_control.cpp 已迁移至 components/z_record_control/ 组件，由该组件统一管理编译
+list(REMOVE_ITEM ADD_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/src/z_record_control.cpp"
+                          "src/z_record_control.cpp")
 # list(REMOVE_ITEM COMPONENT_SRCS "src/test2.c")
 # FILE(GLOB_RECURSE EXTRA_SRC  "src/*.c")
 # FILE(GLOB EXTRA_SRC  "src/*.c")
@@ -23,7 +33,7 @@ append_srcs_dir(ADD_SRCS "src")       # append source file in src dir to var ADD
 ###############################################
 
 ###### Add required/dependent components ######
-list(APPEND ADD_REQUIREMENTS basic vision FFmpeg ext_dev network)
+list(APPEND ADD_REQUIREMENTS basic vision FFmpeg ext_dev network z_udp_server z_video_stream z_record_control)
 ###############################################
 
 ###### Add link search path for requirements/libs ######

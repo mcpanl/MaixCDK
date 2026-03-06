@@ -5,6 +5,8 @@
 #include <atomic>
 #include <mutex>
 #include <string>
+#include <functional>
+#include <netinet/in.h>
 
 namespace z {
 
@@ -45,11 +47,31 @@ namespace z {
         std::atomic<size_t> tail_;
     };
 
+    // ======== 依赖注入上下文（解耦 priv/project 私有头文件）========
+    //
+    // 调用方（main.cpp）在创建 UdpServer 后，通过 set_context() 注入：
+    //   - is_connected  : 网络是否已连通
+    //   - get_ip        : 本机 IP 二进制（in_addr_t）
+    //   - get_device_key: 8 字节设备 Key
+    //
+    // 这样 z_udp_server.cpp 不再依赖 priv.hpp，可单独编译为独立 .so。
+    struct UdpContext {
+        // 返回 true 表示 LAN 已连通（替代 priv.network->get_lan_state()）
+        std::function<bool()>                   is_connected;
+        // 返回本机 IP（替代 priv.network->get_ip_addr_binary()）
+        std::function<in_addr_t()>              get_ip;
+        // 返回 8 字节设备 Key（替代 priv.display->get_device_key_binary()）
+        std::function<std::vector<uint8_t>()>   get_device_key;
+    };
+
     // ======== UDP Server ========
     class UdpServer {
     public:
         UdpServer(const std::string& ip = "239.255.0.2", int port = 5006);
         ~UdpServer();
+
+        // 注入运行时依赖（建议在 start() 之前调用，线程安全）
+        void set_context(const UdpContext& ctx);
 
         // 启动 UDP 广播线程
         void start();
@@ -67,7 +89,10 @@ namespace z {
         std::atomic<bool> running;
         std::thread udp_thread;
 
-        LockFreeQueue send_queue;  // ✅ 替换掉 std::deque + mutex
+        LockFreeQueue send_queue;
+
+        UdpContext ctx_;        // 注入的依赖
+        std::mutex ctx_mutex_;  // 保护 ctx_ 的读写
 
         void run();
 

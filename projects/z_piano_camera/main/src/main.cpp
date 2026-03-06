@@ -126,6 +126,32 @@ int _main(int argc, char* argv[])
 
     priv.udp_server = new z::UdpServer();
 
+    // 注入运行时依赖（通过回调解耦 priv，使 z_udp_server 可独立编译为 .so）
+    {
+        z::UdpContext udp_ctx;
+
+        // 是否已连接到局域网
+        udp_ctx.is_connected = [&]() -> bool {
+            return priv.network &&
+                   priv.network->get_lan_state() == z::LanState::CONNECTED;
+        };
+
+        // 本机 IP（二进制形式）
+        udp_ctx.get_ip = [&]() -> in_addr_t {
+            return priv.network ? priv.network->get_ip_addr_binary()
+                                : static_cast<in_addr_t>(INADDR_ANY);
+        };
+
+        // 设备 8 字节 Key
+        udp_ctx.get_device_key = [&]() -> std::vector<uint8_t> {
+            if (!priv.display) return {};
+            auto arr = priv.display->get_device_key_binary();
+            return std::vector<uint8_t>(arr.begin(), arr.end());
+        };
+
+        priv.udp_server->set_context(udp_ctx);
+    }
+
     priv.udp_server->start();
 
     /*
@@ -148,6 +174,21 @@ int _main(int argc, char* argv[])
     err::check_null_raise(priv.audio_recorder, "audio recorder init failed!");
 
     priv.video_stream = new z::VideoStream();
+ 
+    // 注入运行时依赖（通过回调解耦 priv，使 z_video_stream 可独立编译为 .so）
+    {
+        z::VideoStreamContext vs_ctx;
+
+        // 将 JPEG 分片转发给 UdpServer 广播
+        vs_ctx.broadcast = [](const std::vector<uint8_t>& pkt) {
+            if (priv.udp_server) {
+                priv.udp_server->broadcast(pkt);
+            }
+        };
+
+        priv.video_stream->set_context(vs_ctx);
+    }
+
     priv.video_stream->bind_camera(priv.cam2);
     priv.video_stream->start();
 

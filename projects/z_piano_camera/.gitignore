@@ -5,3 +5,10 @@ dist
 data
 /CMakeLists.txt
 __pycache__
+# z_udp_server 闭源：预编译库（与平台强绑定，不纳入公开仓库）
+components/z_udp_server/prebuilt/*.so
+# z_video_stream 闭源：预编译库
+components/z_video_stream/prebuilt/*.so
+# 闭源源码（分发时取消注释）
+# components/z_udp_server/src/z_udp_server.cpp
+# components/z_video_stream/src/z_video_stream.cpp
