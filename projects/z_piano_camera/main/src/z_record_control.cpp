@@ -300,7 +300,7 @@ namespace z {
             Bytes* pcm_data = priv.audio_recorder->record_bytes(bytes_to_read);
             if (pcm_data) {
 
-                double gain_db = 18.0;
+                double gain_db = 8.0;
                 double gain = pow(10.0, gain_db / 20.0);
 
                 if (bytes_per_sample == 2) { // int16_t PCM
