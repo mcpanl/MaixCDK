@@ -41,8 +41,8 @@ namespace maix::display
 
     __attribute__((unused)) static int _get_vo_max_size(int *width, int *height, int rotate)
     {
-        int w = 368;
-        int h = 552;
+        int w = Z_HEIGHT;
+        int h = Z_WIDTH;
 
         if (rotate) {
             *width = h;
@@ -275,19 +275,17 @@ namespace maix::display
         err::Err show(image::Image &img, image::Fit fit)
         {
             err::check_bool_raise((img.width() % 2 == 0 && img.height() % 2 == 0), "Image width and height must be a multiple of 2.");
-            int format = img.format();
-
-            int mmf_fit = 0;
-            switch (fit) {
-                case image::Fit::FIT_FILL: mmf_fit = 0; break;
-                case image::Fit::FIT_CONTAIN: mmf_fit = 1; break;
-                case image::Fit::FIT_COVER: mmf_fit = 2; break;
-                default: mmf_fit = 0; break;
+            if (img.format() != image::FMT_RGB888) {
+                err::check_raise(err::ERR_ARGS, "Display::show currently only supports RGB888 in z_lib path");
             }
 
             VIDEO_FRAME_INFO_S outFrame;
 
-            Z_VO_PUSH_FRAME_WITH_RGB888(nullptr, img.to_bytes(false)->data, img.width(), img.height(), &outFrame);
+            CVI_S32 ret = Z_VO_PUSH_FRAME_WITH_RGB888(nullptr, (const CVI_U8 *)img.data(), img.width(), img.height(), &outFrame);
+            if (ret != CVI_SUCCESS) {
+                log::error("display show failed: 0x%x, size=%dx%d, format=%d\n", ret, img.width(), img.height(), img.format());
+                return err::ERR_RUNTIME;
+            }
 
             return err::ERR_NONE;
         }

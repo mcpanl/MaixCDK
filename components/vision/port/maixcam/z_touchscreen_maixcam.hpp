@@ -12,7 +12,10 @@
 #include "maix_basic.hpp"
 #include "z_touchscreen_base.hpp"
 #include <linux/input.h>
+#include <cerrno>
+#include <cstring>
 #include <fcntl.h>
+#include <sys/ioctl.h>
 #include <unistd.h>
 #include <sys/epoll.h>
 
@@ -24,11 +27,16 @@ namespace maix::touchscreen
     class TouchScreen_MaixCam final : public TouchScreen_Base
     {
     public:
-        TouchScreen_MaixCam(const std::string &device = "/dev/input/event1")
+        TouchScreen_MaixCam(const std::string &device = "/dev/input/event0")
         {
             _opened = false;
             _fd = -1;
-            _device = device;
+            _epoll_fd = -1;
+            _device = device.empty() ? _default_device() : device;
+            if(device.empty())
+            {
+                log::info("touchscreen device not specified, fallback to default: %s", _device.c_str());
+            }
         }
 
         err::Err open()
@@ -37,13 +45,15 @@ namespace maix::touchscreen
             {
                 return err::ERR_NONE;
             }
+            log::info("open touchscreen start: device=%s", _device.c_str());
             _opened = false;
             _fd = ::open(_device.c_str(), O_RDONLY);
             if(_fd < 0)
             {
-                log::error("open touch screen failed: %s", _device.c_str());
+                log::error("open touch screen failed: device=%s err=%s(%d)", _device.c_str(), strerror(errno), errno);
                 return err::ERR_IO;
             }
+            log::info("open touchscreen success: device=%s fd=%d", _device.c_str(), _fd);
 
             _x = 0;
             _y = 0;
@@ -51,27 +61,46 @@ namespace maix::touchscreen
 
             // set unblock read
             int non_blocking = 1;
-            ioctl(_fd, FIONBIO, &non_blocking);
+            if(ioctl(_fd, FIONBIO, &non_blocking) < 0)
+            {
+                log::error("set touchscreen non-blocking failed: fd=%d err=%s(%d)", _fd, strerror(errno), errno);
+            }
 
             // char * absval[6] = { "Value", "Min", "Max", "Fuzz", "Flat", "Resolution" };
             int absX[6] = {};
             int absY[6] = {};
 
-            ioctl(_fd, EVIOCGABS(ABS_MT_POSITION_X), absX);
-            ioctl(_fd, EVIOCGABS(ABS_MT_POSITION_Y), absY);
+            bool has_mt_x = _query_abs_info(ABS_MT_POSITION_X, absX, "ABS_MT_POSITION_X");
+            bool has_mt_y = _query_abs_info(ABS_MT_POSITION_Y, absY, "ABS_MT_POSITION_Y");
+            bool has_x = has_mt_x || _query_abs_info(ABS_X, absX, "ABS_X");
+            bool has_y = has_mt_y || _query_abs_info(ABS_Y, absY, "ABS_Y");
+            if(!has_x || !has_y)
+            {
+                log::error("get touchscreen abs range failed: fd=%d has_x=%d has_y=%d", _fd, has_x ? 1 : 0, has_y ? 1 : 0);
+            }
+            else
+            {
+                log::info("touchscreen abs source ready: mt_x=%d mt_y=%d x_max=%d y_max=%d", has_mt_x ? 1 : 0, has_mt_y ? 1 : 0, absX[2], absY[2]);
+            }
 
             _x_max = absX[2];
             _y_max = absY[2];
             if(_x_max <= 0 || _y_max <= 0)
             {
-                log::error("get touchscreen resolution failed");
-                _x_max = 368;
-                _y_max = 552;
+                log::error("get touchscreen resolution failed: x_max=%d y_max=%d, fallback to 640x480", _x_max, _y_max);
+                _x_max = 640;
+                _y_max = 480;
             }
+            log::info("touchscreen resolution ready: x_max=%d y_max=%d", _x_max, _y_max);
 
             _init_epoll(_fd);
+            if(_epoll_fd < 0)
+            {
+                log::error("touchscreen init failed: epoll not ready for device=%s fd=%d", _device.c_str(), _fd);
+            }
 
             _opened = true;
+            log::info("touchscreen open finished: device=%s x_max=%d y_max=%d", _device.c_str(), _x_max, _y_max);
             return err::ERR_NONE;
         }
 
@@ -81,6 +110,11 @@ namespace maix::touchscreen
             {
                 ::close(_fd);
                 _fd = -1;
+            }
+            if(_epoll_fd >= 0)
+            {
+                ::close(_epoll_fd);
+                _epoll_fd = -1;
             }
             _opened = false;
             return err::ERR_NONE;
@@ -112,8 +146,8 @@ namespace maix::touchscreen
             err::Err e = _read(false);
             if(e != err::ERR_NONE)
                 return e;
-            x = 552 - _x;
-            y = 368 - _y;
+            x = 640 - _x;
+            y = 480 - _y;
             pressed = _pressed;
             return err::ERR_NONE;
         }
@@ -131,6 +165,11 @@ namespace maix::touchscreen
 
 
     private:
+        static constexpr const char *_default_device()
+        {
+            return "/dev/input/event0";
+        }
+
         int _x;
         int _y;
         bool _pressed;
@@ -143,12 +182,23 @@ namespace maix::touchscreen
         int _y_max;
         int _epoll_fd;
 
+        bool _query_abs_info(int code, int out[6], const char *name)
+        {
+            errno = 0;
+            int ret = ioctl(_fd, EVIOCGABS(code), out);
+            if(ret < 0)
+            {
+                return false;
+            }
+            return true;
+        }
+
         void _init_epoll(int fd)
         {
             _epoll_fd = epoll_create(1);
             if(_epoll_fd < 0)
             {
-                log::error("create epoll failed: %s", strerror(errno));
+                // log::error("create epoll failed: fd=%d err=%s(%d)", fd, strerror(errno), errno);
                 return;
             }
             struct epoll_event ev;
@@ -156,20 +206,37 @@ namespace maix::touchscreen
             ev.data.fd = fd;
             if(epoll_ctl(_epoll_fd, EPOLL_CTL_ADD, fd, &ev) < 0)
             {
-                log::error("epoll_ctl add failed: %s", strerror(errno));
+                // log::error("epoll_ctl add failed: fd=%d epoll_fd=%d err=%s(%d)", fd, _epoll_fd, strerror(errno), errno);
+                ::close(_epoll_fd);
+                _epoll_fd = -1;
                 return;
             }
         }
 
         bool _available(int timeout)
         {
+            if(_epoll_fd < 0)
+            {
+                // log::error("touchscreen available check failed: invalid epoll_fd=%d timeout=%d", _epoll_fd, timeout);
+                return false;
+            }
             struct epoll_event events[1];
             int nfds = epoll_wait(_epoll_fd, events, 1, timeout);
+            if(nfds < 0)
+            {
+                //log::error("touchscreen epoll_wait failed: epoll_fd=%d timeout=%d err=%s(%d)", _epoll_fd, timeout, strerror(errno), errno);
+                return false;
+            }
             return nfds > 0;
         }
 
         err::Err _read(bool empty_buffer)
         {
+            if(_fd < 0)
+            {
+                // log::error("touchscreen read failed: device not opened, fd=%d", _fd);
+                return err::ERR_IO;
+            }
             struct input_event event;
             // struct epoll_event events[1];
             bool event_press = false;
@@ -188,12 +255,20 @@ namespace maix::touchscreen
                         return err::ERR_NONE;
                     if(errno == EAGAIN || errno == EWOULDBLOCK)
                         return err::ERR_NOT_READY;
-                    log::error("read touch screen failed: %s, %d", strerror(errno), ret);
+                    // log::error("read touch screen failed: fd=%d ret=%d err=%s(%d)", _fd, ret, strerror(errno), errno);
                     return err::ERR_IO;
                 }
-                // printf("event %d %d\n", event.type, event.code);
                 if(event.type == EV_ABS)
                 {
+                    if(event.code == ABS_MT_TRACKING_ID)
+                    {
+                        bool pressed = event.value >= 0;
+                        if(_pressed != pressed)
+                        {
+                            _pressed = pressed;
+                            event_press = true;
+                        }
+                    }
                     if(event.code == ABS_MT_POSITION_X || event.code == ABS_X)
                     {
                         // _x = event.value;
@@ -211,7 +286,7 @@ namespace maix::touchscreen
                 }
                 else if(event.type == EV_KEY)
                 {
-                    if(event.code == BTN_TOUCH)
+                    if(event.code == BTN_TOUCH || event.code == BTN_TOOL_FINGER)
                     {
                         _pressed = event.value == 1;
                         event_press = true;

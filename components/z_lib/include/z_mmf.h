@@ -10,6 +10,10 @@ extern "C" {
 #endif
 #endif /* End of #ifdef __cplusplus */
 
+/* VIO 管线统一输出分辨率 */
+#define Z_WIDTH  640
+#define Z_HEIGHT 480
+
 typedef struct _Z_VI_CTX_S {
     VI_DEV ViDev;
     VI_PIPE ViPipe;
@@ -51,6 +55,24 @@ CVI_S32 Z_SIMPLE_VPSS_ConvertRGB888(
 //CVI_S32 Z_SIMPLE_VPSS_ReleaseFrame(VIDEO_FRAME_INFO_S *pstOutFrame);
 CVI_S32 Z_SIMPLE_VPSS_FreeConvertedFrame(VIDEO_FRAME_INFO_S *pFrame);
 CVI_S32 Z_VI_DEINIT(Z_VI_CTX_S *pstViCtx);
+
+/**
+ * @brief 在已启动的 VPSS 组上动态添加一个通道。
+ *        用于在 VIO 管线运行期间为 NN 推理配置专用预处理通道。
+ *
+ * @param grp      目标 VPSS 组号
+ * @param chn      目标 VPSS 通道号
+ * @param coeff    缩放系数级别（来自 CVI_TDL_GetVpssChnConfig）
+ * @param pChnAttr 通道属性（来自 CVI_TDL_GetVpssChnConfig，调用者可修改 u32Depth）
+ * @return CVI_SUCCESS on success
+ */
+CVI_S32 Z_VPSS_AddChn(VPSS_GRP grp, VPSS_CHN chn, VPSS_SCALE_COEF_E coeff,
+                      const VPSS_CHN_ATTR_S *pChnAttr);
+
+/**
+ * @brief 禁用并移除一个 VPSS 通道（与 Z_VPSS_AddChn 对应）。
+ */
+CVI_S32 Z_VPSS_RemoveChn(VPSS_GRP grp, VPSS_CHN chn);
 
 #ifdef __cplusplus
 #if __cplusplus

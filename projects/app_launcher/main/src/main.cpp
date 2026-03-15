@@ -31,6 +31,9 @@
 #include <thread>
 #include "maix_comm.hpp"
 
+#include "z_lib.hpp"
+
+
 static Maix_GUI_Activity *main_activity = NULL;
 
 // static std::string strip(const std::string& str) {
@@ -136,6 +139,23 @@ int _main(int argc, char **argv)
     int ret;
 
     printf("----- launcher start -----\n");
+
+#if 0
+    display::Display *disp = new display::Display(640, 480);
+    image::Image *img = new image::Image(640, 480);
+    img->draw_string(28, 28, "Launcher", image::COLOR_RED, 3, 2);
+    disp->show(*img);
+    time::sleep(1);
+
+    delete img;
+    img = nullptr;
+
+    delete disp;
+    z_lib_deinit();
+
+    log::info("Program exit");
+#endif
+
     printf("arg len: %d\n", argc);
     for (int i = 0; i < argc; i++)
     {
@@ -205,7 +225,7 @@ int _main(int argc, char **argv)
     display::Display *screen = nullptr;
     try
     {
-        screen = new display::Display();
+        screen = new display::Display(640, 480);
     }
     catch (...)
     {

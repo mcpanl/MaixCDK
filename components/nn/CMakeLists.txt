@@ -1,14 +1,14 @@
 
 list(APPEND ADD_INCLUDE "include")
-list(APPEND ADD_PRIVATE_INCLUDE "include_private")
+#list(APPEND ADD_PRIVATE_INCLUDE "include_private")
 
 
 
 append_srcs_dir(ADD_SRCS "src")
-list(APPEND ADD_REQUIREMENTS basic ini clipper2 vision cvi-tdl-sdk)
+list(APPEND ADD_REQUIREMENTS basic ini clipper2 vision cvi-tdl-sdk cvi_tpu)
 
 if(PLATFORM_MAIXCAM)
-    append_srcs_dir(ADD_SRCS "port/maixcam")
+    #append_srcs_dir(ADD_SRCS "port/maixcam")
 #    list(APPEND ADD_REQUIREMENTS maixcam_lib alsa_lib)
 #    list(APPEND ADD_DYNAMIC_LIB "lib/libms_asr_sg2002.so")
 #    list(APPEND ADD_DEFINITIONS -DDR_WAV_IMPLEMENTATION)

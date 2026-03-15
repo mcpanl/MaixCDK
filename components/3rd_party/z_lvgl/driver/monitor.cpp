@@ -22,8 +22,21 @@
 
 using namespace maix;
 
-static int hres = 552;
-static int vres = 368;
+static int hres = 640;
+static int vres = 480;
+static uint64_t last_present_ms = 0;
+static constexpr uint32_t present_interval_ms = 33;
+
+static inline void copy_bgr888_to_rgb888(uint8_t *dest, const uint8_t *src, uint32_t pixel_count)
+{
+    for(uint32_t x = 0; x < pixel_count; ++x) {
+        dest[0] = src[2];
+        dest[1] = src[1];
+        dest[2] = src[0];
+        src += 3;
+        dest += 3;
+    }
+}
 
 /**
  * Initialize the monitor
@@ -45,75 +58,49 @@ void monitor_rect(int* w, int* h)
 void monitor_flush(lv_display_t *disp_drv, const lv_area_t * area, uint8_t *px_map)
 {
     assert(LV_COLOR_DEPTH == 24); // RGB888
-    uint8_t * color_p = px_map;
+    if (!z_image || !z_display || !z_image->data()) {
+        lv_disp_flush_ready(disp_drv);
+        return;
+    }
 
     if(area->x2 < 0 || area->y2 < 0 || area->x1 >= hres || area->y1 >= vres) {
         lv_disp_flush_ready(disp_drv);
         return;
     }
 
-    uint32_t w = lv_area_get_width(area);
-    uint32_t line_bytes = w * 3;   // ✅ 每行像素 * 3 bytes (RGB888)
+    const int32_t src_width = lv_area_get_width(area);
+    const int32_t clip_x1 = area->x1 < 0 ? 0 : area->x1;
+    const int32_t clip_y1 = area->y1 < 0 ? 0 : area->y1;
+    const int32_t clip_x2 = area->x2 >= hres ? hres - 1 : area->x2;
+    const int32_t clip_y2 = area->y2 >= vres ? vres - 1 : area->y2;
 
-
-    // swap R and B
-    for(int32_t y = area->y1; y <= area->y2 && y < vres; y++) {
-
-        uint8_t * dest = (uint8_t*)z_image->data() + (y * hres + area->x1) * 3;
-        uint8_t * src = color_p;
-
-        uint32_t x = 0;
-
-        // 每次处理 3 像素 (9 bytes)
-        while (x + 3 <= w) {
-            uint32_t p0 = src[0] | (src[1] << 8) | (src[2] << 16);
-            uint32_t p1 = src[3] | (src[4] << 8) | (src[5] << 16);
-            uint32_t p2 = src[6] | (src[7] << 8) | (src[8] << 16);
-
-            // 交换 R / B
-            p0 = (p0 & 0x00FF00) | ((p0 & 0xFF0000) >> 16) | ((p0 & 0x0000FF) << 16);
-            p1 = (p1 & 0x00FF00) | ((p1 & 0xFF0000) >> 16) | ((p1 & 0x0000FF) << 16);
-            p2 = (p2 & 0x00FF00) | ((p2 & 0xFF0000) >> 16) | ((p2 & 0x0000FF) << 16);
-
-            dest[0] = p0 & 0xFF;
-            dest[1] = (p0 >> 8) & 0xFF;
-            dest[2] = (p0 >> 16) & 0xFF;
-
-            dest[3] = p1 & 0xFF;
-            dest[4] = (p1 >> 8) & 0xFF;
-            dest[5] = (p1 >> 16) & 0xFF;
-
-            dest[6] = p2 & 0xFF;
-            dest[7] = (p2 >> 8) & 0xFF;
-            dest[8] = (p2 >> 16) & 0xFF;
-
-            src += 9;
-            dest += 9;
-            x += 3;
-        }
-
-        // 处理剩余像素（不足 3）
-        for(; x < w; x++) {
-            dest[0] = src[2];
-            dest[1] = src[1];
-            dest[2] = src[0];
-            src += 3;
-            dest += 3;
-        }
-
-        color_p += w * 3;
+    if (clip_x1 > clip_x2 || clip_y1 > clip_y2) {
+        lv_disp_flush_ready(disp_drv);
+        return;
     }
 
-//    for(int32_t y = area->y1; y <= area->y2 && y < vres; y++) {
-//
-//        uint8_t * dest = (uint8_t*)z::z_image->data() + (y * hres + area->x1) * 3; // ✅ RGB888 地址计算
-//        memcpy(dest, color_p, line_bytes);
-//
-//        color_p += line_bytes;
-//    }
+    const uint32_t copy_width = (uint32_t)(clip_x2 - clip_x1 + 1);
+    const uint32_t src_row_bytes = (uint32_t)src_width * 3;
+    uint8_t *src_row = px_map + (uint32_t)(clip_y1 - area->y1) * src_row_bytes;
+
+    for(int32_t y = clip_y1; y <= clip_y2; ++y) {
+        uint8_t *dest = (uint8_t*)z_image->data() + ((size_t)y * hres + clip_x1) * 3;
+        const uint8_t *src = src_row + (uint32_t)(clip_x1 - area->x1) * 3;
+        copy_bgr888_to_rgb888(dest, src, copy_width);
+        src_row += src_row_bytes;
+    }
 
     if(lv_disp_flush_is_last(disp_drv)) {
-        z_display->show(*z_image);  // ✅ 直接输出 RGB888
+        uint64_t now = time::ticks_ms();
+        if (last_present_ms != 0) {
+            uint64_t elapsed = now - last_present_ms;
+            if (elapsed < present_interval_ms) {
+                time::sleep_ms((uint32_t)(present_interval_ms - elapsed));
+            }
+        }
+
+        z_display->show(*z_image, image::FIT_FILL);
+        last_present_ms = time::ticks_ms();
     }
 
     lv_disp_flush_ready(disp_drv);

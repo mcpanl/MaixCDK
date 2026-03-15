@@ -1,5 +1,5 @@
-set(TDL_SDK_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/tdl_sdk)
-set(MPI_SDK_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/../cvi-middleware/cvi_mpi)
+set(TDL_SDK_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/tdl_sdk_milkv)
+set(MPI_SDK_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/../cvi-middleware/cvi_mpi_sophgo)
 
 list(APPEND ADD_INCLUDE
         ${TDL_SDK_ROOT}/include
@@ -15,25 +15,24 @@ list(APPEND ADD_SRCS
         ${CMAKE_CURRENT_SOURCE_DIR}/dummy.cpp
 )
 
-list(APPEND ADD_DYNAMIC_LIB "${TDL_SDK_ROOT}/lib/libaaa_imgcodecs.so")
-list(APPEND ADD_DYNAMIC_LIB "${TDL_SDK_ROOT}/lib/libaaa_imgproc.so")
-list(APPEND ADD_DYNAMIC_LIB "${TDL_SDK_ROOT}/lib/libaaa_core.so")
+# libaaa_*.so were opencv 3.2 compatibility shims; removed after upgrading to opencv 4.9
+# list(APPEND ADD_DYNAMIC_LIB "${TDL_SDK_ROOT}/lib/libaaa_imgcodecs.so")
+# list(APPEND ADD_DYNAMIC_LIB "${TDL_SDK_ROOT}/lib/libaaa_imgproc.so")
+# list(APPEND ADD_DYNAMIC_LIB "${TDL_SDK_ROOT}/lib/libaaa_core.so")
 
 
 
 
 
-
-
-list(APPEND ADD_DYNAMIC_LIB "tdl_sdk/lib/libcvikernel.so")
-list(APPEND ADD_DYNAMIC_LIB "tdl_sdk/lib/libcviruntime.so")
-list(APPEND ADD_DYNAMIC_LIB "tdl_sdk/lib/libcvimath.so")
-list(APPEND ADD_DYNAMIC_LIB "tdl_sdk/lib/libcvi_draw_rect.so")
-list(APPEND ADD_DYNAMIC_LIB "tdl_sdk/lib/libcvi_md.so")
-list(APPEND ADD_DYNAMIC_LIB "tdl_sdk/lib/libcvi_kit.so")
-list(APPEND ADD_DYNAMIC_LIB "tdl_sdk/lib/libcvi_preprocess.so")
-list(APPEND ADD_DYNAMIC_LIB "tdl_sdk/lib/libcvi_tdl.so")
-list(APPEND ADD_DYNAMIC_LIB "tdl_sdk/lib/libcvi_tdl_app.so")
+list(APPEND ADD_DYNAMIC_LIB "${TDL_SDK_ROOT}/lib/libcvikernel.so")
+list(APPEND ADD_DYNAMIC_LIB "${TDL_SDK_ROOT}/lib/libcviruntime.so")
+list(APPEND ADD_DYNAMIC_LIB "${TDL_SDK_ROOT}/lib/libcvimath.so")
+list(APPEND ADD_DYNAMIC_LIB "${TDL_SDK_ROOT}/lib/libcvi_draw_rect.so")
+list(APPEND ADD_DYNAMIC_LIB "${TDL_SDK_ROOT}/lib/libcvi_md.so")
+list(APPEND ADD_DYNAMIC_LIB "${TDL_SDK_ROOT}/lib/libcvi_kit.so")
+list(APPEND ADD_DYNAMIC_LIB "${TDL_SDK_ROOT}/lib/libcvi_preprocess.so")
+list(APPEND ADD_DYNAMIC_LIB "${TDL_SDK_ROOT}/lib/libcvi_tdl.so")
+list(APPEND ADD_DYNAMIC_LIB "${TDL_SDK_ROOT}/lib/libcvi_tdl_app.so")
 
 
 

@@ -11,7 +11,7 @@
 #include <chrono>
 #include <iostream>
 #include <string>
-#include "z_nn_test.hpp"
+#include "z_nn_test_yolo.hpp"
 #include "z_nn_object.hpp"
 #include "maix_key.hpp"
 
@@ -108,7 +108,7 @@ std::string coco80IdToName(int id)
 enum TimeIndex {
     T_CAM_READ = 0,
     T_VPSS_TAKE,
-    T_OD_DETECT,
+    T_YOLO_DETECT,
     T_PRINT_RESULT,
     T_DRAW_RECT,
     T_TDL_FREE,
@@ -165,22 +165,20 @@ int _main(int argc, char* argv[])
 
     z::camera::Camera *cam = new z::camera::Camera(552, 368);
 
-    cvitdl_handle_t tdl_handle = NULL;
+    yolo_ctx_t yolo_ctx;
 
-    if (od_init(&tdl_handle) != CVI_SUCCESS) {
-        printf("OD init failed\n");
+    if (yolo_init(&yolo_ctx) != CVI_SUCCESS) {
+        printf("YOLO init failed\n");
     }
 
     while(!app::need_exit())
     {
-        VIDEO_FRAME_INFO_S bg2;
-
         z::image::Image *cam_img = cam->read();
+        if (!cam_img) break;
 
         cvtdl_object_t obj_meta;
         memset(&obj_meta, 0, sizeof(obj_meta));
-        z::z_lib_vpss_take_frame1_1(&bg2, 2000);
-        od_detect(tdl_handle, &bg2, &obj_meta);
+        yolo_detect(&yolo_ctx, &obj_meta);
 
         // printf("obj num = %d\n", obj_meta.size);
         // for (uint32_t i = 0; i < obj_meta.size; i++) {
@@ -229,7 +227,6 @@ int _main(int argc, char* argv[])
         }
 
         delete cam_img;
-        z::z_lib_vpss_release_frame1_1(&bg2);
 
         time::sleep_ms(33);
     }
@@ -257,9 +254,9 @@ int _main(int argc, char* argv[])
 //     time_sum[T_VPSS_TAKE] += Ms(t3 - t2).count();
 //
 //     auto t4 = Clock::now();
-//     od_detect(tdl_handle, &bg2, &obj_meta);
+//     yolo_detect(&yolo_ctx, &obj_meta);
 //     auto t5 = Clock::now();
-//     time_sum[T_OD_DETECT] += Ms(t5 - t4).count();
+//     time_sum[T_YOLO_DETECT] += Ms(t5 - t4).count();
 //
 //     auto t6 = Clock::now();
 //     for (uint32_t i = 0; i < obj_meta.size; i++) {
@@ -345,7 +342,7 @@ int _main(int argc, char* argv[])
 //             "\n[Avg TimeCost over %u frames] (ms)\n"
 //             " cam->read        : %.2f\n"
 //             " vpss_take_frame  : %.2f\n"
-//             " od_detect        : %.2f\n"
+//             " yolo_detect      : %.2f\n"
 //             " print_result     : %.2f\n"
 //             " draw_rect        : %.2f\n"
 //             " CVI_TDL_Free     : %.2f\n"
@@ -357,7 +354,7 @@ int _main(int argc, char* argv[])
 //             sample_cnt,
 //             time_sum[T_CAM_READ] / sample_cnt,
 //             time_sum[T_VPSS_TAKE] / sample_cnt,
-//             time_sum[T_OD_DETECT] / sample_cnt,
+//             time_sum[T_YOLO_DETECT] / sample_cnt,
 //             time_sum[T_PRINT_RESULT] / sample_cnt,
 //             time_sum[T_DRAW_RECT] / sample_cnt,
 //             time_sum[T_TDL_FREE] / sample_cnt,
@@ -375,8 +372,7 @@ int _main(int argc, char* argv[])
 
 
 
-    od_deinit(tdl_handle);
-    tdl_handle = NULL;
+    yolo_deinit(&yolo_ctx);
 
 
     z::z_lib_deinit();

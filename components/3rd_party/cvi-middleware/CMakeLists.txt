@@ -1,4 +1,4 @@
-set(middleware_src_path "${CMAKE_CURRENT_SOURCE_DIR}/cvi_mpi")
+set(middleware_src_path "${CMAKE_CURRENT_SOURCE_DIR}/cvi_mpi_sophgo")
 
 # middleware
 set(middleware_include_dir .

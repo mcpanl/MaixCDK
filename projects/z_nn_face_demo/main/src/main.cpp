@@ -148,12 +148,12 @@ int _main(int argc, char* argv[])
 
     printf("Object = %s\n", obj.to_str().c_str());
 
-    display::Display *disp = new display::Display(552, 368);
+    display::Display *disp = new display::Display(640, 480);
     printf("disp = %p\n", disp);
 
     image::Image* img = nullptr;
-    img = new image::Image(552, 368);
-    img->draw_string(28, 28, "YOLO Demo", image::COLOR_RED, 3, 2);
+    img = new image::Image(640, 480);
+    img->draw_string(28, 28, "Face Demo", image::COLOR_RED, 3, 2);
     disp->show(*img);
 
     sleep(1);
@@ -163,24 +163,21 @@ int _main(int argc, char* argv[])
         img = nullptr;
     }
 
-    camera::Camera *cam = new camera::Camera(552, 368);
+    camera::Camera *cam = new camera::Camera(640, 480);
 
-    cvitdl_handle_t tdl_handle = NULL;
+    fd_ctx_t fd_ctx;
 
-    if (fd_init(&tdl_handle) != CVI_SUCCESS) {
+    if (fd_init(&fd_ctx) != CVI_SUCCESS) {
         printf("FD init failed\n");
     }
 
     while(!app::need_exit())
     {
-        VIDEO_FRAME_INFO_S bg2;
-
         image::Image *cam_img = cam->read();
-
+        if (!cam_img) break;
         cvtdl_face_t obj_meta;
         memset(&obj_meta, 0, sizeof(obj_meta));
-        z_lib_vpss_take_frame1_1(&bg2, 2000);
-        fd_detect(tdl_handle, &bg2, &obj_meta);
+        fd_detect(&fd_ctx, &obj_meta);
 
 
         // printf("========== Face Detect Result ==========\n");
@@ -283,7 +280,6 @@ int _main(int argc, char* argv[])
         }
 
         delete cam_img;
-        z_lib_vpss_release_frame1_1(&bg2);
 
         time::sleep_ms(33);
     }
@@ -429,8 +425,7 @@ int _main(int argc, char* argv[])
 
 
 
-    fd_deinit(tdl_handle);
-    tdl_handle = NULL;
+    fd_deinit(&fd_ctx);
 
 
     z_lib_deinit();

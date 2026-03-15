@@ -262,19 +262,48 @@ namespace pointing_private {
             return PointingType::ABS;
         }
         virtual bool check_initialized() const noexcept override {
-            return true;
+            return z_touchscreen != nullptr;
         }
         virtual bool try_init() override {
-            return true;
+            if (!z_touchscreen) {
+                const auto now = maix::time::ticks_ms();
+                if (now - this->_last_null_log_ms >= this->_LOG_INTERVAL_MS) {
+                    maix::log::info("TouchScreenDevice try_init failed: z_touchscreen is nullptr");
+                    this->_last_null_log_ms = now;
+                }
+            } else if (!this->_logged_init_ready) {
+                maix::log::info("TouchScreenDevice try_init success: z_touchscreen is ready");
+                this->_logged_init_ready = true;
+            }
+            return z_touchscreen != nullptr;
         }
         virtual bool need_cursor() const noexcept override {
             return false;
         }
         virtual PointingData read() {
+            if (!z_touchscreen) {
+                const auto now = maix::time::ticks_ms();
+                if (now - this->_last_null_log_ms >= this->_LOG_INTERVAL_MS) {
+                    maix::log::info("TouchScreenDevice read skipped: z_touchscreen is nullptr");
+                    this->_last_null_log_ms = now;
+                }
+                PointingData data2;
+                data2.x = -1;
+                data2.y = -1;
+                data2.pressed = false;
+                data2.continue_reading = false;
+                return data2;
+            }
+
             int x = 0;
             int y = 0;
             bool pressed = false;
             if(z_touchscreen->read0(x, y, pressed) == maix::err::ERR_NOT_READY) {
+                const auto now = maix::time::ticks_ms();
+                if (now - this->_last_not_ready_log_ms >= this->_LOG_INTERVAL_MS) {
+                    maix::log::info("TouchScreenDevice read0 not ready");
+                    this->_last_not_ready_log_ms = now;
+                }
                 PointingData data2;
                 data2.x = -1;
                 data2.y = -1;
@@ -288,10 +317,38 @@ namespace pointing_private {
             this->_data.y = y;
             this->_data.pressed = pressed;
 
+            const auto now = maix::time::ticks_ms();
+            if (!this->_logged_first_read) {
+                maix::log::info("TouchScreenDevice first valid read: x=%d, y=%d, pressed=%d, available=%d",
+                                x, y, pressed, this->_data.continue_reading);
+                this->_logged_first_read = true;
+                this->_last_state_log_ms = now;
+            } else if ((pressed != this->_last_pressed_state || this->_data.continue_reading != this->_last_available_state)
+                       && now - this->_last_state_log_ms >= 100) {
+                maix::log::info("TouchScreenDevice state changed: x=%d, y=%d, pressed=%d, available=%d",
+                                x, y, pressed, this->_data.continue_reading);
+                this->_last_state_log_ms = now;
+            } else if (now - this->_last_state_log_ms >= this->_LOG_INTERVAL_MS) {
+                maix::log::info("TouchScreenDevice heartbeat: x=%d, y=%d, pressed=%d, available=%d",
+                                x, y, pressed, this->_data.continue_reading);
+                this->_last_state_log_ms = now;
+            }
+
+            this->_last_pressed_state = pressed;
+            this->_last_available_state = this->_data.continue_reading;
+
             return this->_data;
         }
     private:
         PointingData _data;
+        uint64_t _last_null_log_ms{0};
+        uint64_t _last_not_ready_log_ms{0};
+        uint64_t _last_state_log_ms{0};
+        bool _logged_init_ready{false};
+        bool _logged_first_read{false};
+        bool _last_pressed_state{false};
+        bool _last_available_state{false};
+        static const uint64_t _LOG_INTERVAL_MS = 1000;
     };
 
     /* Add your device */
@@ -302,7 +359,12 @@ namespace pointing_private {
 void pointing_device_init(lv_indev_t * indev_drv)
 {
     using namespace pointing_private;
-    device_list.emplace_back(std::make_unique<TouchScreenDevice>());
+    if (z_touchscreen) {
+        maix::log::info("pointing_device_init: touchscreen detected, register TouchScreenDevice");
+        device_list.emplace_back(std::make_unique<TouchScreenDevice>());
+    } else {
+        maix::log::info("pointing_device_init: z_touchscreen is nullptr, touchscreen device not registered");
+    }
     device_list.emplace_back(std::make_unique<UsbMouseDevice>());
     /* add your device */
     // device_list.emplace_back(std::make_unique<YourDevice>());

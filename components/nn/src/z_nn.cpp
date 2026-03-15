@@ -10,12 +10,31 @@
 #include "maix_basic.hpp"
 #include "inifile.h"
 //#include "maix_nn_self_learn_classifier.hpp"
-
+#include <iostream>
 #if PLATFORM_MAIXCAM
     #include "z_nn_maixcam.hpp"
 //    #include "speech/dr_wav.h"
 #endif
 
+void PrintIni(inifile::IniFile &ini)
+{
+    std::vector<std::string> sections;
+    ini.GetSections(&sections);
+
+    for (const auto &secName : sections)
+    {
+        std::cout << "[" << secName << "]" << std::endl;
+
+        inifile::IniSection *sec = ini.getSection(secName);
+
+        for (auto it = sec->begin(); it != sec->end(); ++it)
+        {
+            std::cout << it->key << " = " << it->value << std::endl;
+        }
+
+        std::cout << std::endl;
+    }
+}
 
 namespace maix::nn
 {
@@ -169,6 +188,10 @@ namespace maix::nn
 
         inifile::IniFile ini;
         int ret = ini.Load(model_path);
+
+        printf(">>> z_nn.cpp MUD::load ini <<< \n");
+        PrintIni(ini);
+
         if (ret != 0)
         {
             log::error("parse model %s failed, err %d\n", model_path.c_str(), ret);

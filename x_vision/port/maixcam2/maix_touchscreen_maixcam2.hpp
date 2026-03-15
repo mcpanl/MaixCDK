@@ -22,11 +22,15 @@ namespace maix::touchscreen
     class TouchScreen_MaixCam final : public TouchScreen_Base
     {
     public:
-        TouchScreen_MaixCam(const std::string &device = "/dev/input/event1")
+        TouchScreen_MaixCam(const std::string &device = "/dev/input/event0")
         {
             _opened = false;
             _fd = -1;
-            _device = device;
+            _device = device.empty() ? _default_device() : device;
+            if(device.empty())
+            {
+                log::info("touchscreen device not specified, fallback to default: %s", _device.c_str());
+            }
         }
 
         err::Err open()
@@ -62,7 +66,7 @@ namespace maix::touchscreen
             _y_max = absY[2];
             if(_x_max <= 0 || _y_max <= 0)
             {
-                log::error("get touchscreen resolution failed");
+                log::error("get touchscreen resolution failed3");
                 _x_max = 368;
                 _y_max = 552;
             }
@@ -129,6 +133,11 @@ namespace maix::touchscreen
 
 
     private:
+        static constexpr const char *_default_device()
+        {
+            return "/dev/input/event0";
+        }
+
         int _x;
         int _y;
         bool _pressed;

@@ -12,7 +12,10 @@
 #include "maix_basic.hpp"
 #include "maix_touchscreen_base.hpp"
 #include <linux/input.h>
+#include <cerrno>
+#include <cstring>
 #include <fcntl.h>
+#include <sys/ioctl.h>
 #include <unistd.h>
 #include <sys/epoll.h>
 
@@ -22,11 +25,18 @@ namespace maix::touchscreen
     class TouchScreen_MaixCam final : public TouchScreen_Base
     {
     public:
-        TouchScreen_MaixCam(const std::string &device = "/dev/input/event1")
+        TouchScreen_MaixCam(const std::string &device = "/dev/input/event0")
         {
             _opened = false;
             _fd = -1;
-            _device = device;
+            _epoll_fd = -1;
+            _device = device.empty() ? _default_device() : device;
+            _x_abs_code = ABS_MT_POSITION_X;
+            _y_abs_code = ABS_MT_POSITION_Y;
+            if(device.empty())
+            {
+                log::info("touchscreen device not specified, fallback to default: %s", _device.c_str());
+            }
         }
 
         err::Err open()
@@ -39,7 +49,7 @@ namespace maix::touchscreen
             _fd = ::open(_device.c_str(), O_RDONLY);
             if(_fd < 0)
             {
-                log::error("open touch screen failed: %s", _device.c_str());
+                log::error("open touch screen failed: device=%s err=%s(%d)", _device.c_str(), strerror(errno), errno);
                 return err::ERR_IO;
             }
 
@@ -55,16 +65,23 @@ namespace maix::touchscreen
             int absX[6] = {};
             int absY[6] = {};
 
-            ioctl(_fd, EVIOCGABS(ABS_MT_POSITION_X), absX);
-            ioctl(_fd, EVIOCGABS(ABS_MT_POSITION_Y), absY);
+            bool has_mt_x = _query_abs_info(ABS_MT_POSITION_X, absX, "ABS_MT_POSITION_X");
+            bool has_mt_y = _query_abs_info(ABS_MT_POSITION_Y, absY, "ABS_MT_POSITION_Y");
+            bool has_x = has_mt_x || _query_abs_info(ABS_X, absX, "ABS_X");
+            bool has_y = has_mt_y || _query_abs_info(ABS_Y, absY, "ABS_Y");
+            if(has_x && has_y)
+            {
+                _x_abs_code = has_mt_x ? ABS_MT_POSITION_X : ABS_X;
+                _y_abs_code = has_mt_y ? ABS_MT_POSITION_Y : ABS_Y;
+            }
 
             _x_max = absX[2];
             _y_max = absY[2];
             if(_x_max <= 0 || _y_max <= 0)
             {
-                log::error("get touchscreen resolution failed");
-                _x_max = 368;
-                _y_max = 552;
+                log::error("get touchscreen resolution failed2");
+                _x_max = 480;
+                _y_max = 640;
             }
 
             _init_epoll(_fd);
@@ -79,6 +96,11 @@ namespace maix::touchscreen
             {
                 ::close(_fd);
                 _fd = -1;
+            }
+            if(_epoll_fd >= 0)
+            {
+                ::close(_epoll_fd);
+                _epoll_fd = -1;
             }
             _opened = false;
             return err::ERR_NONE;
@@ -129,6 +151,11 @@ namespace maix::touchscreen
 
 
     private:
+        static constexpr const char *_default_device()
+        {
+            return "/dev/input/event0";
+        }
+
         int _x;
         int _y;
         bool _pressed;
@@ -140,6 +167,21 @@ namespace maix::touchscreen
         int _x_max;
         int _y_max;
         int _epoll_fd;
+        int _x_abs_code;
+        int _y_abs_code;
+
+        bool _query_abs_info(int code, int out[6], const char *name)
+        {
+            errno = 0;
+            int ret = ioctl(_fd, EVIOCGABS(code), out);
+            if(ret < 0)
+            {
+                log::debug("query touchscreen abs failed: device=%s code=%s err=%s(%d)", _device.c_str(), name, strerror(errno), errno);
+                return false;
+            }
+            log::debug("query touchscreen abs success: device=%s code=%s min=%d max=%d", _device.c_str(), name, out[1], out[2]);
+            return true;
+        }
 
         void _init_epoll(int fd)
         {
@@ -192,6 +234,11 @@ namespace maix::touchscreen
                 // printf("event %d %d\n", event.type, event.code);
                 if(event.type == EV_ABS)
                 {
+                    if(event.code == ABS_MT_TRACKING_ID)
+                    {
+                        _pressed = event.value >= 0;
+                        event_press = true;
+                    }
                     if(event.code == ABS_MT_POSITION_X || event.code == ABS_X)
                     {
                         // _x = event.value;
@@ -209,7 +256,7 @@ namespace maix::touchscreen
                 }
                 else if(event.type == EV_KEY)
                 {
-                    if(event.code == BTN_TOUCH)
+                    if(event.code == BTN_TOUCH || event.code == BTN_TOOL_FINGER)
                     {
                         _pressed = event.value == 1;
                         event_press = true;

@@ -44,12 +44,7 @@ namespace maix
         {
             throw std::runtime_error("lvgl_init display is null");
         }
-         if (!touchscreen)
-         {
-             throw std::runtime_error("lvgl_init touchscreen is null");
-         }
-
-        int buf_size_byte = display->width() * 100 * 4;
+        int buf_size_byte = display->width() * 100 * (int)sizeof(lv_color_t);
         if (buf1_1)
         {
             throw std::runtime_error("lvgl_init already init");
@@ -67,6 +62,7 @@ namespace maix
             throw std::runtime_error("lvgl_init malloc failed");
         }
         z_image = new image::Image(display->width(), display->height(), image::FMT_RGB888);
+        memset(z_image->data(), 0, z_image->data_size());
         z_display = display;
         z_touchscreen = touchscreen;
 #ifdef PLATFORM_LINUX
