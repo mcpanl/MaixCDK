@@ -344,7 +344,7 @@ namespace maix::nn {
 
         // ── determine expected input shape ───────────────────────────────────
         const LayerInfo &in_info = d->inputs_info_cache[0];
-        log::info("forward_image: input img=%dx%d fmt=%d, model input '%s' dtype=%d dims=%d",
+        log::debug("forward_image: input img=%dx%d fmt=%d, model input '%s' dtype=%d dims=%d",
                   img.width(), img.height(), (int)img.format(),
                   in_info.name.c_str(), (int)in_info.dtype, (int)in_info.shape.size());
 
@@ -354,19 +354,19 @@ namespace maix::nn {
             model_c = in_info.shape[1];
             model_h = in_info.shape[2];
             model_w = in_info.shape[3];
-            log::info("forward_image: NCHW layout -> N=%d C=%d H=%d W=%d",
+            log::debug("forward_image: NCHW layout -> N=%d C=%d H=%d W=%d",
                       in_info.shape[0], model_c, model_h, model_w);
         } else if (in_info.shape.size() == 3) {
             if (chw) {
                 model_c = in_info.shape[0];
                 model_h = in_info.shape[1];
                 model_w = in_info.shape[2];
-                log::info("forward_image: CHW layout -> C=%d H=%d W=%d", model_c, model_h, model_w);
+                log::debug("forward_image: CHW layout -> C=%d H=%d W=%d", model_c, model_h, model_w);
             } else {
                 model_h = in_info.shape[0];
                 model_w = in_info.shape[1];
                 model_c = in_info.shape[2];
-                log::info("forward_image: HWC layout -> H=%d W=%d C=%d", model_h, model_w, model_c);
+                log::debug("forward_image: HWC layout -> H=%d W=%d C=%d", model_h, model_w, model_c);
             }
         } else {
             log::error("forward_image: unsupported input shape dims: %d", (int)in_info.shape.size());
@@ -387,10 +387,10 @@ namespace maix::nn {
 
         if (img.width() == model_w && img.height() == model_h) {
             resized = &img;
-            log::info("forward_image: no resize needed, img already %dx%d",
+            log::debug("forward_image: no resize needed, img already %dx%d",
                       model_w, model_h);
         } else {
-            log::info("forward_image: resizing %dx%d -> %dx%d fit=%d",
+            log::debug("forward_image: resizing %dx%d -> %dx%d fit=%d",
                       img.width(), img.height(), model_w, model_h, (int)fit);
             resized = img.resize(model_w, model_h, fit);
             if (!resized) {
@@ -399,7 +399,7 @@ namespace maix::nn {
                 return nullptr;
             }
             need_delete_resized = true;
-            log::info("forward_image: resize done -> %dx%d fmt=%d",
+            log::debug("forward_image: resize done -> %dx%d fmt=%d",
                       resized->width(), resized->height(), (int)resized->format());
         }
 
@@ -407,7 +407,7 @@ namespace maix::nn {
         image::Image *rgb_img = nullptr;
         bool need_delete_rgb = false;
         if (resized->format() != image::FMT_RGB888) {
-            log::info("forward_image: converting fmt %d -> RGB888", (int)resized->format());
+            log::debug("forward_image: converting fmt %d -> RGB888", (int)resized->format());
             rgb_img = resized->to_format(image::FMT_RGB888);
             if (!rgb_img) {
                 log::error("forward_image: to_format(RGB888) returned null! src fmt=%d size=%dx%d",
@@ -416,11 +416,11 @@ namespace maix::nn {
                 return nullptr;
             }
             need_delete_rgb = true;
-            log::info("forward_image: format convert done -> %dx%d fmt=%d",
+            log::debug("forward_image: format convert done -> %dx%d fmt=%d",
                       rgb_img->width(), rgb_img->height(), (int)rgb_img->format());
         } else {
             rgb_img = resized;
-            log::info("forward_image: no format convert needed, already RGB888");
+            log::debug("forward_image: no format convert needed, already RGB888");
         }
 
         if (!rgb_img->data()) {
@@ -432,12 +432,14 @@ namespace maix::nn {
         }
 
         // ── [diag] save resized/formatted input for visual inspection ─────────
+        #if 0
         {
             err::Err _se = rgb_img->save("/tmp/nn_input_debug.jpg", 90);
-            log::info("forward_image: [diag] saved resized input -> /tmp/nn_input_debug.jpg "
+            log::debug("forward_image: [diag] saved resized input -> /tmp/nn_input_debug.jpg "
                       "(%dx%d fmt=%d err=%d)",
                       rgb_img->width(), rgb_img->height(), (int)rgb_img->format(), (int)_se);
         }
+        #endif
 
         // ── get cvi input tensor reference early for fmt-based branching ──────
         CVI_TENSOR &ct        = d->input_tensors[0];
@@ -445,7 +447,7 @@ namespace maix::nn {
         int total_pixels       = model_c * model_h * model_w;
         const uint8_t *src     = static_cast<const uint8_t *>(rgb_img->data());
 
-        log::info("forward_image: CVI input tensor '%s' fmt=%d cvi_size=%zu total_pixels=%d layout=%s",
+        log::debug("forward_image: CVI input tensor '%s' fmt=%d cvi_size=%zu total_pixels=%d layout=%s",
                   ct.name ? ct.name : "?", (int)ct.fmt,
                   cvi_tensor_size, total_pixels, chw ? "CHW" : "HWC");
 
@@ -463,7 +465,7 @@ namespace maix::nn {
             // to [-128, 127].  The correct encoding is:
             //   q = (uint8_t pixel) - 128
             // NOT a raw bitwise reinterpret of the uint8 byte.
-            log::info("forward_image: int8 preprocess path, building %d-byte int8 buf", total_pixels);
+            log::debug("forward_image: int8 preprocess path, building %d-byte int8 buf", total_pixels);
             int8_t *int8_buf = new int8_t[total_pixels];
             if (chw) {
                 // HWC -> CHW reorder + pixel-128 encoding
@@ -477,14 +479,14 @@ namespace maix::nn {
                 for (int i = 0; i < total_pixels; i++)
                     int8_buf[i] = (int8_t)((int)src[i] - 128);
             }
-            log::info("forward_image: int8 preprocess done, sample [0]=%d [1]=%d [2]=%d",
+            log::debug("forward_image: int8 preprocess done, sample [0]=%d [1]=%d [2]=%d",
                       (int)int8_buf[0], (int)int8_buf[1], (int)int8_buf[2]);
 
             // clean up image temporaries
             if (need_delete_rgb)     { delete rgb_img;  rgb_img  = nullptr; }
             if (need_delete_resized) { delete resized;  resized  = nullptr; }
 
-            log::info("forward_image: memcpy %zu bytes to CVI input buffer @ %p",
+            log::debug("forward_image: memcpy %zu bytes to CVI input buffer @ %p",
                       (size_t)total_pixels, cvi_dst);
             memcpy(cvi_dst, int8_buf, (size_t)total_pixels);
             delete[] int8_buf;
@@ -492,7 +494,7 @@ namespace maix::nn {
         } else {
             // ── float32 path with optional mean/scale normalisation ────────────
             size_t float_buf_bytes = (size_t)(total_pixels * sizeof(float));
-            log::info("forward_image: fp32 preprocess path, alloc %zu bytes, "
+            log::debug("forward_image: fp32 preprocess path, alloc %zu bytes, "
                       "normalize=%s mean.size=%d scale.size=%d",
                       float_buf_bytes,
                       (!mean.empty() && !scale.empty()) ? "yes" : "no",
@@ -524,7 +526,7 @@ namespace maix::nn {
                                 do_normalize ? ((float)pv - m) * s : (float)pv;
                         }
             }
-            log::info("forward_image: fp32 preprocess done, sample [0]=%.3f [1]=%.3f [2]=%.3f",
+            log::debug("forward_image: fp32 preprocess done, sample [0]=%.3f [1]=%.3f [2]=%.3f",
                       float_buf[0], float_buf[1], float_buf[2]);
 
             // clean up image temporaries
@@ -535,14 +537,14 @@ namespace maix::nn {
                 log::warn("forward_image: CVI tensor size=%zu != float buf size=%zu, copying min",
                           cvi_tensor_size, float_buf_bytes);
             size_t copy_bytes = std::min(float_buf_bytes, cvi_tensor_size);
-            log::info("forward_image: memcpy %zu bytes to CVI input buffer @ %p",
+            log::debug("forward_image: memcpy %zu bytes to CVI input buffer @ %p",
                       copy_bytes, cvi_dst);
             memcpy(cvi_dst, float_buf, copy_bytes);
             delete[] float_buf;
         }
 
         // ── run inference ─────────────────────────────────────────────────────
-        log::info("forward_image: calling CVI_NN_Forward ...");
+        log::debug("forward_image: calling CVI_NN_Forward ...");
         CVI_RC rc = CVI_NN_Forward(d->model,
                                    d->input_tensors,  d->input_num,
                                    d->output_tensors, d->output_num);
@@ -550,7 +552,7 @@ namespace maix::nn {
             log::error("forward_image: CVI_NN_Forward failed rc=%d", rc);
             return nullptr;
         }
-        log::info("forward_image: CVI_NN_Forward done");
+        log::debug("forward_image: CVI_NN_Forward done");
 
         // ── pack output tensors ───────────────────────────────────────────────
         tensor::Tensors *outputs = new tensor::Tensors();
@@ -558,7 +560,7 @@ namespace maix::nn {
             CVI_TENSOR &oct = d->output_tensors[i];
             const LayerInfo &li = d->outputs_info_cache[i];
             void *out_src = CVI_NN_TensorPtr(&oct);
-            log::info("forward_image: output[%d] '%s' fmt=%d size=%zu ptr=%p",
+            log::debug("forward_image: output[%d] '%s' fmt=%d size=%zu ptr=%p",
                       i, li.name.c_str(), (int)oct.fmt, CVI_NN_TensorSize(&oct), out_src);
             if (!out_src) {
                 log::error("forward_image: CVI_NN_TensorPtr null for output %d '%s'",
@@ -569,7 +571,7 @@ namespace maix::nn {
             tensor::Tensor *t = new tensor::Tensor(li.shape, li.dtype, out_src, copy_result);
             outputs->add_tensor(li.name, t, false, true);
         }
-        log::info("forward_image: all %d outputs packed", d->output_num);
+        log::debug("forward_image: all %d outputs packed", d->output_num);
         return outputs;
     }
 

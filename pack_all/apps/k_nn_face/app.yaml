@@ -1,0 +1,10 @@
+id: k_nn_face
+name: NN_FACE
+name[zh]: NN_FACE
+version: 1.0.0
+icon: assets/logo.png
+author: 
+desc: 
+desc[zh]:
+files:
+  assets: assets

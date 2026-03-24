@@ -5,19 +5,15 @@
 #include "maix_app.hpp"
 #include "maix_basic.hpp"
 #include "i18n.hpp"
-#include "maix_network.hpp"
-#include "httplib.h"
 #include "maix_pmu.hpp"
 #include "maix_key.hpp"
 
 using namespace maix;
 
-static thread::Thread *check_thread = nullptr;
 static thread::Thread *bar_update_thread = nullptr;
 static ext_dev::pmu::PMU *pmu = nullptr;
 static peripheral::key::Key *powerkey = nullptr;
 static bool gui_destroyed = true;
-static bool check_thread_exit = true;
 static bool bar_update_thread_exit = true;
 
 #define theme_bg_color lv_color_hex(0x000000)
@@ -81,180 +77,6 @@ extern "C"
 }
 
 
-// Split a string by delimiter
-static std::vector<std::string> split(const std::string &s, char delimiter)
-{
-    std::vector<std::string> tokens;
-    std::string token;
-    std::istringstream tokenStream(s);
-    while (std::getline(tokenStream, token, delimiter))
-    {
-        tokens.push_back(token);
-    }
-    return tokens;
-}
-
-static std::string get_curr_version()
-{
-    #define LIB_VERSION_FILE_PATH "/maixapp/maixcam_lib.version"
-    fs::File *file = fs::open(LIB_VERSION_FILE_PATH, "r");
-    if (!file)
-    {
-        return "";
-    }
-    std::string *version = file->readline();
-    std::string curr_version = *version;
-    delete version;
-    file->close();
-    delete file;
-    return curr_version;
-}
-
-static std::string parse_version(const std::string &response)
-{
-    log::info("%s", response.c_str());
-    // Find the position of version key in the response string
-    size_t version_pos = response.find("version");
-
-    // If version key is found
-    if (version_pos != std::string::npos)
-    {
-        // Find the start and end positions of the version value
-        size_t start_pos = response.find(":", version_pos + 1) + 1;
-        size_t end_pos = response.find("\"", start_pos + 1);
-
-        // Extract the version substring
-        if (start_pos != std::string::npos && end_pos != std::string::npos)
-        {
-            return response.substr(start_pos + 1, end_pos - start_pos - 1);
-        }
-    }
-    // Return empty string if version key is not found or if extraction fails
-    return "";
-}
-
-static std::string get_ip_by_hostname(const std::string &hostname) {
-    struct addrinfo hints, *res, *p;
-    int status;
-    char ipstr[INET6_ADDRSTRLEN];
-
-    memset(&hints, 0, sizeof hints);
-    hints.ai_family = AF_UNSPEC; // AF_INET or AF_INET6 to force version
-    hints.ai_socktype = SOCK_STREAM;
-
-    if ((status = getaddrinfo(hostname.c_str(), NULL, &hints, &res)) != 0) {
-        log::error("getaddrinfo: %s", gai_strerror(status));
-        return "";
-    }
-
-    for (p = res; p != NULL; p = p->ai_next) {
-        void *addr;
-        std::string ipver;
-
-        // get the pointer to the address itself,
-        // different fields in IPv4 and IPv6:
-        if (p->ai_family == AF_INET) { // IPv4
-            struct sockaddr_in *ipv4 = (struct sockaddr_in *)p->ai_addr;
-            addr = &(ipv4->sin_addr);
-            ipver = "IPv4";
-        } else { // IPv6
-            struct sockaddr_in6 *ipv6 = (struct sockaddr_in6 *)p->ai_addr;
-            addr = &(ipv6->sin6_addr);
-            ipver = "IPv6";
-        }
-
-        // convert the IP to a string and return it
-        inet_ntop(p->ai_family, addr, ipstr, sizeof ipstr);
-        freeaddrinfo(res); // free the linked list
-        return ipstr; // return the first IP address found
-    }
-
-    freeaddrinfo(res); // free the linked list if no addresses were found
-    return ""; // return empty string if no addresses were found
-}
-
-static std::string get_latest_version(const std::string &uid, std::string &err_msg)
-{
-    if (!network::have_network())
-    {
-        err_msg = "no network";
-        return "";
-    }
-    std::string os_version = sys::os_version();
-    std::string maixpy_version = sys::maixpy_version();
-    try
-    {
-        httplib::Client cli("https://maixvision.sipeed.com");
-        cli.enable_server_certificate_verification(false);
-        // 添加请求头
-        httplib::Headers headers;
-        headers.insert({"token", "MaixVision2024"});
-        const auto res = cli.Get("/api/v1/devices/encryption/version?uid=" + uid + "&os=" + os_version + "&maixpy=" + maixpy_version, headers);
-        if(!res)
-        {
-            std::string ip = get_ip_by_hostname("maixvision.sipeed.com");
-            if(ip.empty())
-            {
-                log::error("DNS resolve failed, please check network or DNS settings");
-                err_msg = "DNS resolve failed, please check network or DNS settings";
-                return "";
-            }
-            log::error("get latest version failed, http request failed");
-            err_msg = "http request failed";
-            return "";
-        }
-        const auto response = res.value();
-        // 检查响应状态
-        if (response.status == httplib::StatusCode::OK_200)
-        {
-            // 返回响应体
-            return parse_version(response.body);
-        }
-        else
-        {
-            log::error(("get latest version failed" + std::to_string(response.status)).c_str());
-            err_msg = "get latest version failed" + std::to_string(response.status);
-            return "";
-        }
-    }
-    catch (const std::exception &e)
-    {
-        // 处理异常
-        log::error("get latest version exception");
-        err_msg = "get latest version failed, " + std::string(e.what());
-        return "";
-    }
-}
-
-static bool need_upgrade(const std::string &latest, const std::string &curr)
-{
-    if (latest.empty())
-        return false;
-    if (curr.empty())
-        return true;
-    // Split version strings into parts
-    std::vector<std::string> curr_parts = split(curr, '.');
-    std::vector<std::string> latest_parts = split(latest, '.');
-
-    // Compare each part of the version numbers
-    for (size_t i = 0; i < curr_parts.size() && i < latest_parts.size(); ++i)
-    {
-        int curr_part = std::stoi(curr_parts[i]);
-        int latest_part = std::stoi(latest_parts[i]);
-        if (latest_part > curr_part)
-        {
-            return true;
-        }
-        else if (latest_part < curr_part)
-        {
-            return false;
-        }
-    }
-
-    // If all parts are equal up to the shorter version's length, check for additional parts
-    return latest_parts.size() > curr_parts.size();
-}
-
 static void on_close_msg(lv_event_t *e)
 {
     lv_obj_t *mbox = (lv_obj_t *)lv_event_get_user_data(e);
@@ -309,37 +131,6 @@ static void update_battery_level(lv_obj_t *obj)
     if(pmu->is_charging()) {
         lv_label_set_text(bat_icon, LV_SYMBOL_CHARGE);
     }
-}
-
-void check_process(void *args)
-{
-    check_thread_exit = false;
-    std::string key = sys::device_key();
-    std::string err_msg = "";
-    std::string latest_version = get_latest_version(key, err_msg);
-    std::string curr_version = get_curr_version();
-    while(!gui_destroyed)
-    {
-        log::info("check runtime upgrade");
-        if(need_upgrade(latest_version, curr_version) && !gui_destroyed)
-        {
-            while(!lv_ui_mutex_lock(200))
-            {
-                time::sleep_ms(20);
-            }
-            lv_obj_t *mbox = lv_msgbox_create(lv_scr_act());
-            lv_msgbox_add_title(mbox, _("Device Activation"));
-            lv_msgbox_add_text(mbox, _("Connect to WiFi in \"settings\" to activate the device on first use."));
-            lv_msgbox_add_close_button(mbox);
-            lv_obj_t *btn = lv_msgbox_add_footer_button(mbox, _("OK"));
-            lv_obj_add_event_cb(btn, on_close_msg, LV_EVENT_CLICKED, mbox);
-            lv_obj_add_event_cb(mbox, on_close_msg, LV_EVENT_DELETE, mbox);
-            lv_obj_center(mbox);
-            lv_ui_mutex_unlock();
-        }
-        break;
-    }
-    check_thread_exit = true;
 }
 
 void bar_update_process(void *args)
@@ -689,42 +480,12 @@ void launcher::create_home_items(Maix_GUI_Activity *activity, vector<app::APP_In
         fs::remove(path.c_str());
     }
 
-    #define LIB_VERSION_FILE_PATH "/maixapp/maixcam_lib.version"
-
-    // check lib file
-    if(!fs::exists(LIB_VERSION_FILE_PATH))
-    {
-        log::info("runtime not installed");
-        lv_obj_t *mbox = lv_msgbox_create(lv_scr_act());
-        lv_msgbox_add_title(mbox, _("Device Activation"));
-        lv_msgbox_add_text(mbox, _("Connect to WiFi in \"settings\" to activate the device on first use."));
-        lv_msgbox_add_close_button(mbox);
-        lv_obj_t *btn = lv_msgbox_add_footer_button(mbox, _("OK"));
-        lv_obj_add_event_cb(btn, on_close_msg, LV_EVENT_CLICKED, mbox);
-        lv_obj_add_event_cb(mbox, on_close_msg, LV_EVENT_DELETE, mbox);
-        lv_obj_center(mbox);
-    }
-    else
-    {
-        // check thread
-        check_thread = new thread::Thread(check_process, nullptr);
-        check_thread->detach();
-    }
 }
 
 
 void launcher::home_items_free(Maix_GUI_Activity *activity, vector<app::APP_Info>& app_info, void* screen)
 {
     gui_destroyed = true;
-    log::info("wait check thread exit");
-    while(!check_thread_exit)
-    {
-        time::sleep_ms(20);
-    }
-    log::info("wait check thread exit done");
-    delete check_thread;
-    check_thread = nullptr;
-
     log::info("wait bar update thread exit");
     while(!bar_update_thread_exit)
     {

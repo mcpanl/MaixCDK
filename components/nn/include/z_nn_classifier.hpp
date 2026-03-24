@@ -7,11 +7,9 @@
 
 #pragma once
 #include "maix_basic.hpp"
-#include "z_nn.hpp"
-#include "z_image.hpp"
+#include "maix_nn.hpp"
+#include "maix_image.hpp"
 #include "z_nn_F.hpp"
-
-using namespace maix;
 
 namespace maix::nn
 {
@@ -34,7 +32,6 @@ namespace maix::nn
          */
         Classifier(const string &model = "", bool dual_buff = true)
         {
-            printf(">>> z_nn_classifier.hpp Classifier()\n");
             _model = nullptr;
             _dual_buff = dual_buff;
             _chw = true;
@@ -71,21 +68,12 @@ namespace maix::nn
          */
         err::Err load(const string &model)
         {
-            printf(">>> z_nn_classifier.hpp load()\n");
-
             if (_model)
             {
                 delete _model;
                 _model = nullptr;
             }
-
-            printf(">>> z_nn_classifier.hpp new nn::NN\n");
             _model = new nn::NN(model, _dual_buff);
-            printf(">>> _model ptr = %p\n", _model);
-            _model->test();
-            printf(">>> z_nn_classifier.hpp new nn::NN done\n");
-
-            return err::ERR_NOT_IMPL;
             if (!_model)
             {
                 return err::ERR_NO_MEM;

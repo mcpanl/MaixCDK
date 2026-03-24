@@ -1,0 +1,101 @@
+[   19.596269] dwc2 4340000.usb: new address 2
+[  102.153451] vi_open:6183(): -
+[  102.153509] vpss_open
+[  102.162711] vi_start_pipe:323(): ISP_COMPRESS_ON(1)
+[  102.163042] vi_tuning_buf_setup:360(): tuning fe_addr[0]=0x887ff490, be_addr[0]=0x887f7290, post_addr[0]=0x887e0000
+[  102.269627] _vi_s_ctrl:5484(): raw_num=0, color_mode=2, frm_num=1, snr_w:h=2560:1440, active_w:h=2560:1440
+[  102.271507] _vi_scene_ctrl:2774(): Total_chn_num=1, rawb_chnstr_num=1
+[  102.271575] _vi_ctrl_init:2523(): sensor_0 csibdg_w_h(2560:1440)
+[  102.271590] _vi_ctrl_init:2612(): sensor_0 init_done
+[  102.271604] ispblk_dma_buf_get_size:823(): dmaid=10, size=345600
+[  102.271618] ispblk_dma_buf_get_size:823(): dmaid=45, size=2764800
+[  102.271629] ispblk_dma_buf_get_size:823(): dmaid=45, size=2764800
+[  102.271641] ispblk_dma_buf_get_size:823(): dmaid=42, size=8160
+[  102.271725] ispblk_dma_buf_get_size:823(): dmaid=53, size=14208
+[  102.271737] ispblk_dma_buf_get_size:823(): dmaid=55, size=49152
+[  102.271749] ispblk_dma_buf_get_size:823(): dmaid=67, size=57600
+[  102.271760] ispblk_dma_buf_get_size:823(): dmaid=57, size=16960
+[  102.271772] ispblk_dma_buf_get_size:823(): dmaid=95, size=2048
+[  102.271783] ispblk_dma_buf_get_size:823(): dmaid=86, size=115200
+[  102.271795] ispblk_dma_buf_get_size:823(): dmaid=106, size=795136
+[  102.271807] ispblk_dma_buf_get_size:823(): dmaid=105, size=1586688
+[  102.271819] ispblk_dma_buf_get_size:823(): dmaid=116, size=512
+[  102.271831] ispblk_dma_buf_get_size:823(): dmaid=123, size=768
+[  102.271844] _vi_yuvtop_get_dma_size:1535(): ldci bufsize: total(768), used(768), wasted_for_alignment(0)
+[  102.272004] _vi_s_ctrl:5603(): ISP dma buf paddr(0x84269000) size=0x8a3c00
+[  102.272334] vi_tuning_mempool_alloc:285(): tuning_buf pool already allocated
+[  102.282684] vi_tuning_buf_setup:360(): tuning fe_addr[0]=0x887ff490, be_addr[0]=0x887f7290, post_addr[0]=0x887e0000
+[  102.282795] vi_tuning_buf_clear:414(): Clear tuning buffer pool in normal mode
+[  102.283431] ispblk_dma_buf_get_size:823(): dmaid=10, size=345600
+[  102.283449] _isp_preraw_fe_dma_dump:473(): ***************PRERAW_FE_0************************
+[  102.283459] _isp_preraw_fe_dma_dump:475(): bayer_le(0x0)
+[  102.283470] _isp_preraw_fe_dma_dump:475(): bayer_le(0x0)
+[  102.283480] _isp_preraw_fe_dma_dump:478(): rgbmap_le(0x84269000)
+[  102.283491] _isp_preraw_fe_dma_dump:478(): rgbmap_le(0x842bd600)
+[  102.283501] _isp_preraw_fe_dma_dump:488(): rgbmap_zero(0x0)
+[  102.283510] _isp_preraw_fe_dma_dump:497(): *************************************************
+[  102.283564] ispblk_dma_buf_get_size:823(): dmaid=45, size=2764800
+[  102.283604] ispblk_dma_buf_get_size:823(): dmaid=45, size=2764800
+[  102.283630] _isp_preraw_be_dma_dump:506(): ***************PRERAW_BE************************
+[  102.283640] _isp_preraw_be_dma_dump:507(): be_rdma_le(0x0)
+[  102.283727] _isp_preraw_be_dma_dump:509(): be_wdma_le(0x84311c00)
+[  102.283738] _isp_preraw_be_dma_dump:509(): be_wdma_le(0x845b4c00)
+[  102.283749] _isp_preraw_be_dma_dump:521(): ***********************raw_0*****************
+[  102.283759] _isp_preraw_be_dma_dump:522(): af(0x84857c00, 0x84859be0)
+[  102.283771] _isp_preraw_be_dma_dump:526(): *************************************************
+[  102.283790] ispblk_dma_buf_get_size:823(): dmaid=55, size=49152
+[  102.283803] ispblk_dma_buf_get_size:823(): dmaid=67, size=57600
+[  102.283816] _isp_rawtop_dma_dump:534(): ***************RAW_TOP************************
+[  102.283826] _isp_rawtop_dma_dump:535(): rawtop_rdma_le(0x84311c00)
+[  102.283838] _isp_rawtop_dma_dump:544(): ***********************raw_0*****************
+[  102.283846] _isp_rawtop_dma_dump:545(): lsc(0x8485bbc0)
+[  102.283859] _isp_rawtop_dma_dump:546(): ae_le(0x84885440, 0x84889680)
+[  102.283870] _isp_rawtop_dma_dump:549(): gms(0x8485f340, 0x8486b340)
+[  102.283881] _isp_rawtop_dma_dump:552(): awb(0x0, 0x0)
+[  102.283891] _isp_rawtop_dma_dump:555(): lmap_le(0x84877340)
+[  102.283901] _isp_rawtop_dma_dump:565(): *************************************************
+[  102.283914] ispblk_dma_buf_get_size:823(): dmaid=95, size=2048
+[  102.283926] ispblk_dma_buf_get_size:823(): dmaid=86, size=115200
+[  102.283941] ispblk_dma_buf_get_size:823(): dmaid=106, size=795136
+[  102.283954] ispblk_dma_buf_get_size:823(): dmaid=105, size=1586688
+[  102.283968] _isp_rgbtop_dma_dump:573(): ***************RGB_TOP************************
+[  102.283979] _isp_rgbtop_dma_dump:578(): ***********************raw_0*****************
+[  102.283989] _isp_rgbtop_dma_dump:579(): hist_edge_v(0x8488d8c0, 0x8488e0c0)
+[  102.284002] _isp_rgbtop_dma_dump:582(): manr(0x8488e8c0 0x848aaac0), manr_rtile(0x0)
+[  102.284014] _isp_rgbtop_dma_dump:586(): tdnr(0x848c6d00, 0x84988f00), tdnr_rtile(0x0, 0x0)
+[  102.284025] _isp_rgbtop_dma_dump:593(): *************************************************
+[  102.284042] _isp_yuvtop_dma_dump:604(): ***************YUV_TOP************************
+[  102.284053] _isp_yuvtop_dma_dump:609(): ***********************raw_0*****************
+[  102.284063] _isp_yuvtop_dma_dump:610(): dci(0x84b0c500, 0x84b0c700)
+[  102.284075] _isp_yuvtop_dma_dump:613(): ldci(0x84b0c900)
+[  102.284086] _isp_yuvtop_dma_dump:618(): ldci wasted_bufsize_for_alignment(0)
+[  102.284097] _isp_yuvtop_dma_dump:621(): *************************************************
+[  102.284106] _isp_yuvtop_dma_dump:622(): VI total reserved memory(0x8a3c00)
+[  102.284117] _isp_yuvtop_dma_dump:623(): *************************************************
+[  102.284148] vi_start_streaming:3020(): ISP scene path, be_off=0, post_off=1, slice_buff_on=0
+[  102.284173] _viBWCalSet:2859(): isp rdma bw_limiter=0x1341, BW=298, bwltxn=4, bwlwin=833
+[  102.285309] CHECK_VPSS_GRP_CREATED:124(): Grp(1) isn't created yet.
+[  102.297454] CHECK_VPSS_GRP_CREATED:124(): Grp(1) isn't created yet.
+[  102.304965] CHECK_VPSS_GRP_CREATED:124(): Grp(1) isn't created yet.
+[  102.312123] CHECK_VPSS_GRP_CREATED:124(): Grp(1) isn't created yet.
+[  102.323066] CHECK_VPSS_GRP_CREATED:124(): Grp(0) isn't created yet.
+[  102.330470] CHECK_VPSS_GRP_CREATED:124(): Grp(0) isn't created yet.
+[  102.338081] CHECK_VPSS_GRP_CREATED:124(): Grp(0) isn't created yet.
+[  102.345010] CHECK_VPSS_GRP_CREATED:124(): Grp(0) isn't created yet.
+[  102.356622] vo_enable_chn:904(): VoLayer(0) VoChn(0) already enabled.
+[  102.363302] vo_irq_handler:2364():  disp bw failed at frame#1
+[  104.809919] base_get_chn_buffer:267(): Mod(VPSS) Grp(1) Chn(0), jobs wait(0) work(0) done(0)
+[  104.818768] vpss_get_chn_frame:4557(): Grp(1) Chn(0) get chn frame fail, s32MilliSec=2000, ret=-1
+[  106.857916] base_get_chn_buffer:267(): Mod(VPSS) Grp(1) Chn(0), jobs wait(0) work(0) done(0)
+[  106.867234] vpss_get_chn_frame:4557(): Grp(1) Chn(0) get chn frame fail, s32MilliSec=2000, ret=-1
+[  108.905917] base_get_chn_buffer:267(): Mod(VPSS) Grp(1) Chn(0), jobs wait(0) work(0) done(0)
+[  108.915240] vpss_get_chn_frame:4557(): Grp(1) Chn(0) get chn frame fail, s32MilliSec=2000, ret=-1
+[  110.953916] base_get_chn_buffer:267(): Mod(VPSS) Grp(1) Chn(0), jobs wait(0) work(0) done(0)
+[  110.963194] vpss_get_chn_frame:4557(): Grp(1) Chn(0) get chn frame fail, s32MilliSec=2000, ret=-1
+[  113.001917] base_get_chn_buffer:267(): Mod(VPSS) Grp(1) Chn(0), jobs wait(0) work(0) done(0)
+[  113.010746] vpss_get_chn_frame:4557(): Grp(1) Chn(0) get chn frame fail, s32MilliSec=2000, ret=-1
+[  115.049917] base_get_chn_buffer:267(): Mod(VPSS) Grp(1) Chn(0), jobs wait(0) work(0) done(0)
+[  115.058748] vpss_get_chn_frame:4557(): Grp(1) Chn(0) get chn frame fail, s32MilliSec=2000, ret=-1
+[  117.097915] base_get_chn_buffer:267(): Mod(VPSS) Grp(1) Chn(0), jobs wait(0) work(0) done(0)
+[  117.107229] vpss_get_chn_frame:4557(): Grp(1) Chn(0) get chn frame fail, s32MilliSec=2000, ret=-1
+[root@sg200x]~#

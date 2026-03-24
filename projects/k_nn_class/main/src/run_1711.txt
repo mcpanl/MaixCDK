@@ -1,0 +1,96 @@
+[root@sg200x]/maixapp/apps/k_nn_class# ./k_nn_class
+-- [I] Program start
+=== DisplayCviMmf init
+[z_lib] z_lib init
+[SAMPLE_COMM_SNS_ParseIni]-2252: Parse /mnt/data/sensor_cfg.ini
+[parse_sensor_name]-1926: sensor =  GCORE_GC4653_MIPI_4M_30FPS_10BIT
+[parse_sensor_busid]-1955: bus_id =  4
+[parse_sensor_i2caddr]-1966: sns_i2c_addr =  29
+[parse_sensor_mipidev]-1977: mipi_dev =  0
+[parse_sensor_laneid]-1988: Lane_id =  4, 1, 0, -1, -1
+[parse_sensor_pnswap]-1999: pn_swap =  0, 1, 1, 0, 0
+[parse_sensor_mclken]-2021: mclk_en =  1
+[parse_sensor_mclk]-2032: mclk =  1
+<<< init system
+<<< start vi
+ISP Vipipe(0) Allocate pa(0x8421c000) va(0x0x3ff41d4000) size(311592)
+stSnsrMode.u16Width 2560 stSnsrMode.u16Height 1440 25.000000 wdrMode 0 pstSnsObj 0x3ff4d67ae0
+[SAMPLE_COMM_VI_StartMIPI]-594: sensor 0 stDevAttr.devno 0
+awbInit ver 6.9@2021500
+0 R:1400 B:3100 CT:2850
+1 R:1500 B:2500 CT:3900
+2 R:2300 B:1600 CT:6500
+Golden 1024 1024 1024
+WB Quadratic:0
+isWdr:0
+ViPipe:0,===GC4653 1440P 30fps 10bit LINEAR Init OK!===
+[SAMPLE_COMM_ISP_Thread]-390: ISP Dev 0 running!
+<<< init vpss group 1
+[Z_VI_INIT]-138: [Z_VI_INIT] pre-cleanup Group 1 done
+<<< start vpss group 1
+<<< vi bind vpss group 1
+<<< init vpss group 0
+[Z_VI_INIT]-201: [Z_VI_INIT] pre-cleanup Group 0 done
+<<< start vpss group 0
+<<< init vo
+[SAMPLE_COMM_VO_StartChn]-356: u32Width:480, u32Height:640, u32Square:1
+VO_IOC_S_CTRL - vo_sdk_enable_chn NG, No such file or directory
+[Z_VI_INIT]-253: [Z_VI_INIT] success. width=2560 height=1440
+[z_lib] Z_VI_INIT result: 0
+-- [I] ====== DEVICE = w?
+-- [I] touchscreen device not specified, fallback to default: /dev/input/event1
+-- [I] touchscreen wait backend: epoll
+-- [I] open touchscreen start: device=/dev/input/event1
+-- [I] open touchscreen success: device=/dev/input/event1 fd=25
+-- [I] touchscreen abs source ready: mt_x=1 mt_y=1 x_max=480 y_max=640
+-- [I] touchscreen resolution ready: x_max=480 y_max=640
+-- [I] touchscreen epoll init start: fd=25
+-- [I] touchscreen epoll_create success: epoll_fd=26
+-- [I] touchscreen epoll_ctl(ADD) success: fd=25 epoll_fd=26 events=EPOLLIN
+-- [I] touchscreen open finished: device=/dev/input/event1 x_max=480 y_max=640
+>>> z_nn.cpp new NN impl
+>>> z_nn.cpp new NN impl done
+>>> z_nn.cpp load()
+>>> z_nn.cpp load() impl
+>>> z_nn.cpp load() impl begin _mud.load()
+>>> z_nn.cpp MUD::load
+>>> z_nn.cpp MUD::load ini <<<
+[]
+
+[basic]
+type = cvimodel
+model = mobilenet_v2_rgb_224_int8.cvimodel
+
+[extra]
+model_type = classifier
+input_type = rgb
+mean = 123.675, 116.28, 103.53
+scale = 0.017124753831663668, 0.01750700280112045, 0.017429193899782137
+labels = imagenet_classes.txt
+
+>>> z_nn.cpp load() impl begin _mud.load() done
+-- [I] NN_MaixCam::load /root/models/mobilenet_v2_rgb_224_int8.cvimodel
+-- [I] NN_MaixCam: loaded 1 inputs, 1 outputs
+>>> z_nn.cpp load() done
+        labels num: 1000
+-- [I] load classifier model /root/models/mobilenetv2.mud success
+[ERR] CVI_VPSS_GetChnFrame fail ret=0xc006800e
+[ERR] CVI_VPSS_GetChnFrame fail ret=0xc006800e
+[ERR] CVI_VPSS_GetChnFrame fail ret=0xc006800e
+[ERR] CVI_VPSS_GetChnFrame fail ret=0xc006800e
+[ERR] CVI_VPSS_GetChnFrame fail ret=0xc006800e
+[ERR] CVI_VPSS_GetChnFrame fail ret=0xc006800e
+[ERR] CVI_VPSS_GetChnFrame fail ret=0xc006800e
+[ERR] CVI_VPSS_GetChnFrame fail ret=0xc006800e
+^C[ERR] CVI_VPSS_GetChnFrame fail ret=0xc006800e
+[z_lib] z_lib deinit
+[SAMPLE_COMM_VPSS_Stop]-150: Vpss stop Grp 3 channel 0 failed! Please check param
+-- [I] read key thread exit
+19700101 00:02:01.132 0364 E isp isp_3aLib_exit:621 type 2 registered af lib can't init
+ISP Vipipe(0) Free pa(0x8421c000) va(0x0x3ff41d4000)
+^C[Z_VI_DEINIT]-317: [Z_VI_DEINIT] done
+[z_lib] Z_VI_DEINIT result: 0
+-- [I] Program exit
+-- [I] touchscreen closed (epoll backend)
+-- [I] wait read key thread exit
+[root@sg200x]/maixapp/apps/k_nn_class#

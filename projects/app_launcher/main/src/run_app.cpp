@@ -21,6 +21,8 @@ void launcher::run_app(const char *app_path, const char* launcher_exec, const ch
 {
     FILE *file;
 
+    log::info(">>> RUN APP");
+
     file = fopen("/tmp/run_app.txt", "w");
     if (file == NULL)
     {

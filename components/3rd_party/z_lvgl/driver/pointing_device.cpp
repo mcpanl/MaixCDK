@@ -301,7 +301,7 @@ namespace pointing_private {
             if(z_touchscreen->read0(x, y, pressed) == maix::err::ERR_NOT_READY) {
                 const auto now = maix::time::ticks_ms();
                 if (now - this->_last_not_ready_log_ms >= this->_LOG_INTERVAL_MS) {
-                    maix::log::info("TouchScreenDevice read0 not ready");
+                    // maix::log::info("TouchScreenDevice read0 not ready");
                     this->_last_not_ready_log_ms = now;
                 }
                 PointingData data2;
