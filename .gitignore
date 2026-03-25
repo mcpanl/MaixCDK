@@ -92,3 +92,16 @@ projects/*/data/
 
 !components/3rd_party/cvi-middleware/cvi_mpi/**/*.a
 !components/3rd_party/cvi-middleware/cvi_mpi/**/*.so
+
+
+#!make_image/boot0/
+#!make_image/boot1/
+
+#!make_image/boot0/**
+#!make_image/boot1/**
+
+
+make_image/
+
+!make_image/boot1/mnt/system/auto.sh
+!make_image/boot1/maixapp/app_launcher.py
