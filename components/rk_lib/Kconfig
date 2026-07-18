@@ -1,0 +1,15 @@
+config RK_LIB_COMPILE_FROM_SOURCE
+	bool "Compile rk_lib from source (V4L2 + X11 shared library)"
+	default y
+	help
+	  When enabled, MaixCDK builds librk_lib.so from maixcdk_rk_lib/src.
+	  When disabled, place a prebuilt lib/librk_lib.so in components/rk_lib
+	  so you can ship binaries without distributing implementation sources.
+
+config RK_LIB_BUNDLED_X11
+	bool "Build libX11 from MaixCDK x11_client (X.Org sources: libxcb + libX11, no apt libx11-dev)"
+	default y
+	depends on RK_LIB_COMPILE_FROM_SOURCE
+	help
+	  Uses components/3rd_party/x11_client (meson + autotools on host). Disable to link
+	  system libX11 instead (native or multiarch/sysroot).

@@ -1,0 +1,7 @@
+id: rk3566_rknn_yolo_cam_demo
+name: RK3566 RKNN YOLOv5 camera + X11 overlay
+name[zh]: RK3566 摄像头 YOLO 实时检测与显示
+version: 0.1.0
+author: MaixCDK
+desc: Load ~/models/yolov5n_224.mud, run YOLO on camera frames, draw boxes to X11
+desc[zh]: 固定加载 ~/models/yolov5n_224.mud，摄像头循环推理并将检测框画到屏幕

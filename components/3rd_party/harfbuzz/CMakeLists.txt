@@ -111,7 +111,7 @@ if(NOT ADD_INCLUDE)
 
     if(PLATFORM_M2DOCK)
         set(harfbuzz_toolchain_file ${CMAKE_CURRENT_LIST_DIR}/toolchain_m2dock.cmake)
-    elseif(PLATFORM_MAIXCAM OR PLATFORM_MAIXCAM2)
+    elseif(PLATFORM_MAIXCAM OR PLATFORM_MAIXCAM2 OR PLATFORM_RK3566)
         set(harfbuzz_toolchain_file ${CMAKE_CURRENT_LIST_DIR}/toolchain_linux_cross.cmake)
     elseif(PLATFORM_LINUX)
         set(harfbuzz_toolchain_file ${CMAKE_CURRENT_LIST_DIR}/toolchain_linux.cmake)

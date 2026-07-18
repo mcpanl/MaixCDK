@@ -18,3 +18,16 @@ menu "Python version"
       help
         Python package patch version
 endmenu
+
+config PYTHON3_COMPILE_FROM_SOURCE
+	bool "Cross-compile CPython from source (MaixCAM: replaces prebuilt musl libpython tarball)"
+	default n
+	help
+	  When enabled for MaixCAM (and not using COMPONENTS_COMPILE_FROM_SOURCE for all libs),
+	  the python3 component downloads the official Python CPython tarball (plus zlib/openssl
+	  deps), cross-compiles libpython for the current toolchain, and links pybind/MaixPy
+	  against that build instead of the prebuilt python3_lib_maixcam_musl package from
+	  MaixCDK releases.
+
+	  First builds are much slower; use host Python matching the target x.y (e.g. 3.11) to
+	  avoid compiling a host Python for --with-build-python.

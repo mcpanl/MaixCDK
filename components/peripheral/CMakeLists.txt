@@ -16,7 +16,7 @@ append_srcs_dir(ADD_SRCS "src")     # append source file in src dir to var ADD_S
 # if (PLATFORM_LINUX OR PLATFORM_MAIXCAM)
 #     append_srcs_dir(ADD_SRCS "port/linux")
 # endif()
-if (PLATFORM_LINUX)
+if (PLATFORM_LINUX OR PLATFORM_RK3566)
     append_srcs_dir(ADD_SRCS "port/linux_common")
     append_srcs_dir(ADD_SRCS "port/linux")
 elseif (PLATFORM_MAIXCAM OR PLATFORM_MAIXCAM2)

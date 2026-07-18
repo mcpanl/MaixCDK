@@ -1,0 +1,7 @@
+id: rk3566_rk_lib_demo
+name: RK3566 rk_lib V4L2 + X11 demo
+name[zh]: RK3566 摄像头与 X11 窗口演示
+version: 0.1.0
+author: MaixCDK
+desc: Capture from /dev/video0 (YUYV) and show in a 640x480 X11 window
+desc[zh]: 从 /dev/video0 采集 YUYV 并在 640x480 X11 窗口显示

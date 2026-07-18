@@ -3,7 +3,7 @@
 list(APPEND ADD_INCLUDE "include"
                         "include/base"
 )
-if(PLATFORM_LINUX)
+if(PLATFORM_LINUX OR PLATFORM_RK3566)
     list(APPEND ADD_PRIVATE_INCLUDE "port/linux")
 elseif(PLATFORM_MAIXCAM OR PLATFORM_MAIXCAM2)
     list(APPEND ADD_PRIVATE_INCLUDE "port/maixcam")
@@ -18,7 +18,7 @@ endif()
 # list(APPEND ADD_SRCS  ${EXTRA_SRC})
 # aux_source_directory(src ADD_SRCS)  # collect all source file in src dir, will set var ADD_SRCS
 append_srcs_dir(ADD_SRCS "src")     # append source file in src dir to var ADD_SRCS
-if(PLATFORM_LINUX)
+if(PLATFORM_LINUX OR PLATFORM_RK3566)
     append_srcs_dir(ADD_SRCS "port/linux")
 elseif(PLATFORM_MAIXCAM OR PLATFORM_MAIXCAM2)
     append_srcs_dir(ADD_SRCS "port/maixcam")
@@ -33,7 +33,7 @@ endif()
 
 ###### Add required/dependent components ######
 list(APPEND ADD_REQUIREMENTS basic)
-if(PLATFORM_LINUX)
+if(PLATFORM_LINUX OR PLATFORM_RK3566)
     list(APPEND ADD_REQUIREMENTS )
 elseif(PLATFORM_MAIXCAM OR PLATFORM_MAIXCAM2)
     list(APPEND ADD_REQUIREMENTS tinyalsa)

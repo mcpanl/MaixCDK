@@ -1,0 +1,20 @@
+# Rockchip RK3566 (Cortex-A55, AArch64), standard glibc Linux rootfs.
+# Prerequisite: install a cross toolchain on the host, e.g. Debian/Ubuntu:
+#   sudo apt install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+#
+# Uses aarch64-linux-gnu-gcc from PATH (empty CONFIG_TOOLCHAIN_PATH + prefix).
+
+toolchain:
+  - name: System AArch64 Linux GNU cross compiler (aarch64-linux-gnu-)
+    id: aarch64_linux_gnu
+    default: true
+    url:
+    urls:
+    sites:
+    sha256sum:
+    filename:
+    path:
+    bin_path:
+    prefix: aarch64-linux-gnu-
+    c_flags: ""
+    cxx_flags: ""

@@ -71,7 +71,7 @@ def add_file_downloads(confs : dict) -> list:
                     'rename': rename,
                     'extract': False
                 })
-        elif confs.get("PLATFORM_LINUX", None):
+        elif confs.get("PLATFORM_LINUX", None) or confs.get("PLATFORM_RK3566", None):
             files.extend([
                 {
                     'url': f'https://github.com/opencv/ade/archive/v0.1.2b.zip',
@@ -86,20 +86,23 @@ def add_file_downloads(confs : dict) -> list:
                     'rename': {},
                     'extract': False
                 },
-                {
-                    'url': f'https://raw.githubusercontent.com/opencv/opencv_3rdparty/1224f78da6684df04397ac0f40c961ed37f79ccb/ippicv/ippicv_2021.8_lnx_intel64_20230330_general.tgz',
-                    'urls': [],
-                    'sites': [],
-                    'sha256sum': "7cfe0fb0e15ea8f3d2d971c19df2d14382469943d4efa85e48bf358930daa85d",
-                    'filename': "43219bdc7e3805adcbe3a1e2f1f3ef3b-ippicv_2021.8_lnx_intel64_20230330_general.tgz",
-                    'path': "opencv/cache/ippicv",
-                    'check_files': [
-                    ],
-                    'rename': {},
-                    'extract': False
-                }
-            ]
-            )
+            ])
+            # x86 IPPICV only (host / Linux desktop). AArch64 cross (e.g. rk3566) builds without it.
+            if confs.get("PLATFORM_LINUX", None) and not confs.get("PLATFORM_RK3566", None):
+                files.extend([
+                    {
+                        'url': f'https://raw.githubusercontent.com/opencv/opencv_3rdparty/1224f78da6684df04397ac0f40c961ed37f79ccb/ippicv/ippicv_2021.8_lnx_intel64_20230330_general.tgz',
+                        'urls': [],
+                        'sites': [],
+                        'sha256sum': "7cfe0fb0e15ea8f3d2d971c19df2d14382469943d4efa85e48bf358930daa85d",
+                        'filename': "43219bdc7e3805adcbe3a1e2f1f3ef3b-ippicv_2021.8_lnx_intel64_20230330_general.tgz",
+                        'path': "opencv/cache/ippicv",
+                        'check_files': [
+                        ],
+                        'rename': {},
+                        'extract': False
+                    }
+                ])
         else:
             raise Exception("No opencv config for this board, please edit to add opencv support for this board")
 
