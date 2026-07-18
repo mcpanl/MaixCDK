@@ -150,6 +150,11 @@ namespace maix::display
         err::Err show(image::Image &img, image::Fit fit = image::FIT_CONTAIN);
 
         /**
+         * Poll display backend events (e.g. window close on RK3566 + X11). Safe to call in a UI loop.
+         */
+        err::Err poll_events();
+
+        /**
          * Get display device path
          * @return display device path
          * @maixpy maix.display.Display.device

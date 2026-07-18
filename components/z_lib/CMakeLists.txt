@@ -62,6 +62,9 @@ elseif(PLATFORM_MAIXCAM2)
         list(APPEND ADD_DIST_LIB_IGNORE "lib/libmaixcam2_lib.so")
         register_component()
     endif()
+elseif(PLATFORM_RK3566)
+    message(STATUS "PLATFORM_RK3566: z_lib not implemented (stub)")
+    register_component()
 endif()
 
 # Config enable component2 or not in Kconfig

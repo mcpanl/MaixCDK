@@ -112,7 +112,8 @@ namespace maix::display
             this->_layer = 0;       // layer 0 means vedio layer
             err::check_bool_raise(_format == image::FMT_RGB888
                                 || _format == image::FMT_YVU420SP
-                                || _format == image::FMT_BGRA8888, "Format not support");
+                                || _format == image::FMT_BGRA8888
+                                || _format == image::FMT_RGBA8888, "Format not support");
 
             if (this->_layer == 0) {
                 bool flip = false;
@@ -275,13 +276,36 @@ namespace maix::display
         err::Err show(image::Image &img, image::Fit fit)
         {
             err::check_bool_raise((img.width() % 2 == 0 && img.height() % 2 == 0), "Image width and height must be a multiple of 2.");
-            if (img.format() != image::FMT_RGB888) {
-                err::check_raise(err::ERR_ARGS, "Display::show currently only supports RGB888 in z_lib path");
-            }
 
+            CVI_S32 ret;
             VIDEO_FRAME_INFO_S outFrame;
 
-            CVI_S32 ret = Z_VO_PUSH_FRAME_WITH_RGB888(nullptr, (const CVI_U8 *)img.data(), img.width(), img.height(), &outFrame);
+            if (img.format() == image::FMT_RGB888) {
+                ret = Z_VO_PUSH_FRAME_WITH_RGB888(nullptr, (const CVI_U8 *)img.data(), img.width(), img.height(), &outFrame);
+            } else if (img.format() == image::FMT_RGBA8888) {
+                // Convert RGBA8888 to RGB888
+                int w = img.width();
+                int h = img.height();
+                int rgb_size = w * h * 3;
+                CVI_U8 *rgb_data = (CVI_U8 *)malloc(rgb_size);
+                if (!rgb_data) {
+                    log::error("display show failed: malloc failed for RGB conversion\n");
+                    return err::ERR_RUNTIME;
+                }
+
+                const CVI_U8 *rgba = (const CVI_U8 *)img.data();
+                for (int i = 0; i < w * h; i++) {
+                    rgb_data[i * 3 + 0] = rgba[i * 4 + 0]; // R
+                    rgb_data[i * 3 + 1] = rgba[i * 4 + 1]; // G
+                    rgb_data[i * 3 + 2] = rgba[i * 4 + 2]; // B
+                }
+
+                ret = Z_VO_PUSH_FRAME_WITH_RGB888(nullptr, rgb_data, w, h, &outFrame);
+                free(rgb_data);
+            } else {
+                err::check_raise(err::ERR_ARGS, "Display::show currently only supports RGB888 and RGBA8888 in z_lib path");
+            }
+
             if (ret != CVI_SUCCESS) {
                 log::error("display show failed: 0x%x, size=%dx%d, format=%d\n", ret, img.width(), img.height(), img.format());
                 return err::ERR_RUNTIME;

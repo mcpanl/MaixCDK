@@ -119,6 +119,12 @@ namespace maix::display
         */
         virtual err::Err set_vflip(bool en) = 0;
 
+        /**
+         * Process pending display events (e.g. X11 window close) without submitting a new frame.
+         * Default: no-op. RK3566 X11 backend updates is_opened() when the user closes the window.
+         */
+        virtual err::Err poll_events() { return err::ERR_NONE; }
+
     };
 }
 

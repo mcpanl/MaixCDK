@@ -15,12 +15,19 @@
 //    #include "maix_display_fb.hpp"
 #endif
 #ifdef PLATFORM_MAIXCAM
-    #include "z_display_mmf.hpp"
-//    #include "maix_display_fb.hpp"
+    #include "vision_maixcam_config.h"
+    #if MAIXCAM_VISION_USE_X_MMF
+        #include "z_display_xmmf.hpp"
+    #else
+        #include "z_display_mmf.hpp"
+    #endif
 #endif
 #ifdef PLATFORM_MAIXCAM2
 //    #include "maix_display_maixcam2.hpp"
 //    #include "maix_display_fb.hpp"
+#endif
+#ifdef PLATFORM_RK3566
+#include "z_display_rk_x11.hpp"
 #endif
 
 using namespace maix;
@@ -35,7 +42,7 @@ namespace maix::display
         return {"0"};
     }
 
-    Display::Display(int width, int height, image::Format format, const string &device, bool open)
+    Display::Display(int width, int height, image::Format format, const std::string &device, bool open)
     {
         _impl = NULL;
         _device = device;
@@ -43,12 +50,17 @@ namespace maix::display
         if (device != "") {
 //            _impl = new FB_Display(device, width, height, format);
         } else {
-            // Select implementation by platform
-#ifdef PLATFORM_LINUX
-//            _impl = new SDL_Display(device, width, height, format);
-#endif
-#ifdef PLATFORM_MAIXCAM
+            // Select implementation by platform and backend
+#ifdef PLATFORM_RK3566
+            _impl = new DisplayRkX11(device, width, height, format);
+#elif defined(PLATFORM_MAIXCAM)
+    #if MAIXCAM_VISION_USE_X_MMF
+            _impl = new DisplayCviXmmf(device, width, height, format);
+    #else
             _impl = new DisplayCviMmf(device, width, height, format);
+    #endif
+#elif defined(PLATFORM_LINUX)
+//            _impl = new SDL_Display(device, width, height, format);
 #endif
         }
 
@@ -58,7 +70,7 @@ namespace maix::display
         }
     }
 
-    Display::Display(const string &device, DisplayBase *base, int width, int height, image::Format format, bool open)
+    Display::Display(const std::string &device, DisplayBase *base, int width, int height, image::Format format, bool open)
     {
         err::Err e;
         _impl = base;
@@ -71,20 +83,29 @@ namespace maix::display
 
     Display::~Display()
     {
-#ifdef PLATFORM_LINUX
+#ifdef PLATFORM_RK3566
+        if (_impl) {
+            this->close();
+            delete (DisplayRkX11 *)_impl;
+            _impl = NULL;
+        }
+#elif defined(PLATFORM_LINUX)
 //        if (_device != "")
 //            delete (FB_Display *)_impl;
 //        else
 //            delete (SDL_Display *)_impl;
-#endif
-#ifdef PLATFORM_MAIXCAM
+#elif defined(PLATFORM_MAIXCAM)
         if (_device != "") {
 
         }
 //            delete (FB_Display *)_impl;
         else {
             this->close();
+    #if MAIXCAM_VISION_USE_X_MMF
+            delete (DisplayCviXmmf *)_impl;
+    #else
             delete (DisplayCviMmf *)_impl;
+    #endif
         }
 #endif
     }
@@ -214,50 +235,28 @@ namespace maix::display
             _impl->show(img, fit);
         }
         return e;
+#elif defined(PLATFORM_RK3566)
+        if (img.format() != image::Format::FMT_RGB888) {
+            image::Image *show_img = img.to_format(image::Format::FMT_RGB888);
+            if (show_img == NULL) {
+                log::error("image format convert failed\n");
+                return err::ERR_RUNTIME;
+            }
+            e = _impl->show(*show_img, fit);
+            delete show_img;
+            return e;
+        }
+        return _impl->show(img, fit);
 #else
-//        image::Image *show_img = NULL;
-//        bool show_img_need_delete = false;
-//        if (fit == image::FIT_NONE)
-//        {
-//            // img is bigger than display size, crop it
-//            if (img.width() > _impl->width() || img.height() > _impl->height())
-//            {
-//                show_img = img.crop(0, 0, _impl->width(), _impl->height());
-//                show_img_need_delete = true;
-//            }
-//            else
-//            {
-//                show_img = &img;
-//            }
-//        }
-//        else if (img.width() != _impl->width() || img.height() != _impl->height())
-//        {
-//            show_img = img.resize(_impl->width(), _impl->height(), fit);
-//            show_img_need_delete = true;
-//        }
-//        else
-//        {
-//            show_img = &img;
-//        }
-//
-//        if (img.format() != _impl->format()) {
-//            image::Image *impl_fmt_img = show_img->to_format(_impl->format());
-//            if (impl_fmt_img == NULL) {
-//                log::error("image format convert failed\n");
-//                return err::ERR_RUNTIME;
-//            }
-//
-//            e = _impl->show(*impl_fmt_img);
-//            delete impl_fmt_img;
-//        } else {
-//            e = _impl->show(*show_img);
-//        }
-//
-//        if (show_img_need_delete) {
-//            delete show_img;
-//        }
 #endif
         return e;
+    }
+
+    err::Err Display::poll_events()
+    {
+        if (_impl == NULL)
+            return err::ERR_NOT_INIT;
+        return _impl->poll_events();
     }
 
     void Display::set_backlight(float value)
