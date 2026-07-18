@@ -15,6 +15,20 @@
 namespace maix::log
 {
     /**
+     * Error log level enums
+     * @maixpy maix.log.LogLevel
+     */
+     enum class LogLevel
+     {
+         LEVEL_NONE  = 0,
+         LEVEL_ERROR,
+         LEVEL_WARN,
+         LEVEL_INFO,
+         LEVEL_DEBUG,
+         LEVEL_MAX
+     };
+
+    /**
      * print error log
      * @param fmt format string
      * @param ... args
@@ -87,6 +101,15 @@ namespace maix::log
      * @maixcdk maix.log.print
     */
     void print(const char *fmt, ...);
+
+    /**
+     * print log info with specified log level, no '\n' at end and no prefix like "-- [E] ".
+     * this function will add prefix like "-- [E] " to log
+     * @param fmt format string
+     * @param ... args
+     * @maixcdk maix.log.print
+    */
+    void print(log::LogLevel level, const char *fmt, ...);
 
 } // namespace maix::log
 

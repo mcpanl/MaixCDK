@@ -14,6 +14,10 @@ namespace maix::util
         (void)process;
     }
 
+    void init_before_main() {
+
+    }
+
     void do_exit_function() {
     }
 
@@ -21,4 +25,3 @@ namespace maix::util
         atexit(do_exit_function);
     }
 }
-

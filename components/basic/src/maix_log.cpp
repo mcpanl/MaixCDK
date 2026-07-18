@@ -114,4 +114,12 @@ namespace maix::log
         va_end(args);
     }
 
+    void print(LogLevel level, const char *fmt, ...)
+    {
+        va_list args;
+        va_start(args, fmt);
+        vprintf(fmt, args);
+        va_end(args);
+    }
+
 } // namespace maix::log

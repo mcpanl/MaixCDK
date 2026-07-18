@@ -14,7 +14,7 @@ list(APPEND ADD_INCLUDE "include"
 # aux_source_directory(src ADD_SRCS)  # collect all source file in src dir, will set var ADD_SRCS
 append_srcs_dir(ADD_SRCS "src")     # append source file in src dir to var ADD_SRCS
 
-if(PLATFORM_LINUX)
+if(PLATFORM_LINUX OR PLATFORM_RK3566)
 append_srcs_dir(ADD_SRCS "port/linux")
 elseif(PLATFORM_MAIXCAM)
 append_srcs_dir(ADD_SRCS "port/maixcam")

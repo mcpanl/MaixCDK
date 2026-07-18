@@ -44,6 +44,10 @@ namespace maix::util
 
     static std::vector<void(*)()> *exit_function_list;
 
+    void init_before_main() {
+
+    }
+
     void register_exit_function(void (*process)(void)) {
         if (exit_function_list == nullptr) {
             exit_function_list = new std::vector<void(*)()>;
@@ -56,6 +60,8 @@ namespace maix::util
             for (auto& func : *exit_function_list) {
                 func();
             }
+            delete exit_function_list;
+            exit_function_list = nullptr;
         }
     }
 
@@ -63,4 +69,3 @@ namespace maix::util
         atexit(do_exit_function);
     }
 }
-
