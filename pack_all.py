@@ -12,7 +12,11 @@ from concurrent.futures import ThreadPoolExecutor
 WORKSPACE = os.path.expanduser("~/maix/MaixCDK")
 PROJECTS_DIR = os.path.join(WORKSPACE, "projects")
 PACK_ALL_DIR = os.path.join(WORKSPACE, "pack_all")
-APPS_DIR = os.path.join(PACK_ALL_DIR, "apps")
+# 仅向 maixcdk_apps 写入/清空；maixpy_apps 不参与打包覆盖
+MAIXCDK_APPS_DIR = os.path.join(PACK_ALL_DIR, "maixcdk_apps")
+MAIXPY_APPS_DIR = os.path.join(PACK_ALL_DIR, "maixpy_apps")
+# 最终平铺汇总：maixpy_apps + maixcdk_apps 下的各 app 目录 + app.info
+FLAT_APPS_DIR = os.path.join(PACK_ALL_DIR, "apps")
 
 EXTRA_PROJECTS = ["app_launcher", "app_settings"]
 MAX_WORKERS = 1
@@ -214,7 +218,7 @@ def process_project(proj_name, force=False, verbose=False):
 
         src_dir = os.path.join(pack_root, actual_pack_dir)
         # 目标目录名也使用 dist/pack 下“唯一目录名”，避免再套一层项目名。
-        dst_dir = os.path.join(APPS_DIR, actual_pack_dir)
+        dst_dir = os.path.join(MAIXCDK_APPS_DIR, actual_pack_dir)
 
         if os.path.exists(dst_dir):
             shutil.rmtree(dst_dir)
@@ -241,10 +245,11 @@ def collect_projects():
     return projects
 
 
-def prepare_apps_dir():
-    if os.path.exists(APPS_DIR):
-        shutil.rmtree(APPS_DIR)
-    os.makedirs(APPS_DIR, exist_ok=True)
+def prepare_maixcdk_apps_dir():
+    """每次打包只清空/重建 maixcdk_apps，不改动 maixpy_apps。"""
+    if os.path.exists(MAIXCDK_APPS_DIR):
+        shutil.rmtree(MAIXCDK_APPS_DIR)
+    os.makedirs(MAIXCDK_APPS_DIR, exist_ok=True)
 
 
 def analyze_projects(projects, force):
@@ -275,12 +280,14 @@ def analyze_projects(projects, force):
     return need_build + cached
 
 
-# ========= 新增：生成 app.info =========
-def generate_app_info(apps_dir):
-    app_info_content = "[basic]\nversion=1\n\n"
-
-    high_priority_apps = ["app_store", "settings"]
-    apps_info = {}
+# ========= 生成 app.info（合并多个 app 根目录）=========
+def _scan_apps_dir_to_sections(apps_dir):
+    """
+    扫描 apps_dir 下一层子目录中的 app.yaml，返回 { app_id: ini段落字符串 }。
+    """
+    sections = {}
+    if not os.path.isdir(apps_dir):
+        return sections
 
     for name in os.listdir(apps_dir):
         app_dir = os.path.join(apps_dir, name)
@@ -291,13 +298,23 @@ def generate_app_info(apps_dir):
         if not os.path.exists(app_yaml_path):
             continue
 
-        with open(app_yaml_path, "r") as f:
-            app_info = yaml.safe_load(f)
-
-        if app_info["id"] == "launcher":
+        try:
+            with open(app_yaml_path, "r", encoding="utf-8") as f:
+                app_info = yaml.safe_load(f)
+        except Exception as e:
+            log_error(f"{app_yaml_path} 读取失败，跳过: {e}")
             continue
 
-        s = f'[{app_info["id"]}]\n'
+        if not app_info or not isinstance(app_info, dict):
+            continue
+
+        app_id = app_info.get("id")
+        if not isinstance(app_id, str) or not app_id:
+            continue
+        if app_id == "launcher":
+            continue
+
+        s = f"[{app_id}]\n"
         valid_keys = ["name", "version", "icon", "author", "desc"]
 
         for k, v in app_info.items():
@@ -307,28 +324,74 @@ def generate_app_info(apps_dir):
         if "main.py" in os.listdir(app_dir):
             exec_path = "main.py"
         else:
-            exec_path = app_info["id"]
+            exec_path = app_id
 
         s += f"exec={exec_path}\n\n"
+        sections[app_id] = s
 
-        apps_info[app_info["id"]] = s
+    return sections
 
-    # 高优先级
+
+def generate_app_info(pack_all_dir, *apps_roots):
+    """
+    合并 apps_roots 中各目录下的应用，写入 pack_all_dir/app.info。
+    后传入的目录中相同 app id 会覆盖先传入的（默认 maixpy 在前、maixcdk 在后，原生包优先）。
+    """
+    app_info_content = "[basic]\nversion=1\n\n"
+    high_priority_apps = ["app_store", "settings"]
+    apps_info = {}
+
+    for root in apps_roots:
+        if root and os.path.isdir(root):
+            apps_info.update(_scan_apps_dir_to_sections(root))
+
     for id in high_priority_apps:
         if id in apps_info:
             app_info_content += apps_info[id]
 
-    # 普通排序
     for id in sorted(apps_info.keys()):
         if id in high_priority_apps:
             continue
         app_info_content += apps_info[id]
 
-    app_info_path = os.path.join(apps_dir, "app.info")
+    app_info_path = os.path.join(pack_all_dir, "app.info")
+    os.makedirs(pack_all_dir, exist_ok=True)
     with open(app_info_path, "w", encoding="utf-8") as f:
         f.write(app_info_content)
 
-    print(f"[INFO] app.info 已生成")
+    print(f"[INFO] app.info 已生成: {app_info_path}")
+
+
+def materialize_flat_apps_dir():
+    """
+    清空并重建 pack_all/apps，将 maixpy_apps、maixcdk_apps 中各一级子目录
+    平铺复制到 apps/（同名以后复制的 maixcdk 为准），并复制 pack_all/app.info。
+    """
+    if os.path.exists(FLAT_APPS_DIR):
+        shutil.rmtree(FLAT_APPS_DIR)
+    os.makedirs(FLAT_APPS_DIR, exist_ok=True)
+
+    def copy_app_subdirs(src_root):
+        if not os.path.isdir(src_root):
+            return
+        for name in sorted(os.listdir(src_root)):
+            src = os.path.join(src_root, name)
+            if not os.path.isdir(src):
+                continue
+            dst = os.path.join(FLAT_APPS_DIR, name)
+            if os.path.exists(dst):
+                shutil.rmtree(dst)
+            shutil.copytree(src, dst)
+
+    copy_app_subdirs(MAIXPY_APPS_DIR)
+    copy_app_subdirs(MAIXCDK_APPS_DIR)
+
+    merged_info = os.path.join(PACK_ALL_DIR, "app.info")
+    if os.path.isfile(merged_info):
+        shutil.copy2(merged_info, os.path.join(FLAT_APPS_DIR, "app.info"))
+        print(f"[INFO] 已平铺复制到: {FLAT_APPS_DIR}（含 app.info）")
+    else:
+        log_error(f"未找到 {merged_info}，跳过复制到 apps/")
 
 
 def make_zip():
@@ -362,7 +425,7 @@ def main():
     parser.add_argument("--zip", action="store_true", help="完成后压缩")
     args = parser.parse_args()
 
-    prepare_apps_dir()
+    prepare_maixcdk_apps_dir()
     projects = collect_projects()
 
     projects = analyze_projects(projects, args.force)
@@ -376,8 +439,9 @@ def main():
             print(f"\n>>> 重试项目: {proj}")
             process_project(proj, force=True, verbose=True)
 
-    # ✅ 生成 app.info
-    generate_app_info(APPS_DIR)
+    # 合并 maixpy_apps + maixcdk_apps 生成顶层 app.info
+    generate_app_info(PACK_ALL_DIR, MAIXPY_APPS_DIR, MAIXCDK_APPS_DIR)
+    materialize_flat_apps_dir()
 
     # ✅ 可选压缩
     if args.zip:

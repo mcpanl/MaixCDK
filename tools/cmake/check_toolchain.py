@@ -1,4 +1,5 @@
 import sys, re, os
+import shutil
 import yaml
 import json
 
@@ -88,7 +89,21 @@ def main(board_name, boards_dir, out_cmake, toolchain_id = None):
 
     check_toolchain_info(toolchain_info, board_name)
 
-    toolchain_bin_path = os.path.join(dl_dir, "extracted", toolchain_info['bin_path']) if toolchain_info['bin_path'] else None
+    if toolchain_info['bin_path']:
+        toolchain_bin_path = os.path.join(dl_dir, "extracted", toolchain_info['bin_path'])
+    else:
+        prefix = toolchain_info.get('prefix') or ''
+        if prefix:
+            gcc = prefix + 'gcc'
+            found = shutil.which(gcc)
+            if found:
+                toolchain_bin_path = os.path.dirname(found)
+            else:
+                print("Error: cross compiler %r not found in PATH (install toolchain or fix prefix in platforms/%s.yaml)"
+                      % (gcc, board_name))
+                sys.exit(1)
+        else:
+            toolchain_bin_path = None
 
     # generate cmake file, set CONFIG_TOOLCHAIN_PATH and CONFIG_TOOLCHAIN_PREFIX
     with open(out_cmake, 'w') as f:

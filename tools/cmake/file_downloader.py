@@ -39,7 +39,7 @@ def unzip_file(zip_file, dst_dir):
     if ext == ".zip":
         with zipfile.ZipFile(zip_file, 'r') as z:
             z.extractall(dst_dir)
-    elif ext == ".gz" and zip_file.endswith(".tar.gz"):
+    elif zip_file.endswith(".tar.gz") or zip_file.endswith(".tgz"):
         with tarfile.open(zip_file, 'r:gz') as t:
             t.extractall(dst_dir)
     elif ext == ".xz" and zip_file.endswith(".tar.xz"):
@@ -57,6 +57,71 @@ def check_sha256sum(file, sum):
     with open(file, "rb") as f:
         sha256sum=hashlib.sha256(f.read()).hexdigest()
     return sha256sum == sum, sha256sum
+
+def _remove_pkg_and_temp(pkg_path):
+    if os.path.exists(pkg_path):
+        os.remove(pkg_path)
+    name = os.path.basename(pkg_path)
+    temp_path = os.path.join(os.path.dirname(pkg_path), ".{}.temp".format(name))
+    if os.path.exists(temp_path):
+        os.remove(temp_path)
+
+def _download_item_try_urls(item, pkg_path, headers):
+    '''
+    Try item["url"] then each entry in item["urls"]. On network/sha256 failure remove pkg and try next.
+    '''
+    candidates = []
+    if item.get("url"):
+        candidates.append(item["url"])
+    for u in item.get("urls") or []:
+        if u and u not in candidates:
+            candidates.append(u)
+    if not candidates:
+        print("-- Error: no download url in item", item.get("filename"))
+        sys.exit(1)
+
+    last_sha_msg = None
+    for cand_idx, try_url in enumerate(candidates):
+        print("-- try url [{}/{}]: {}".format(cand_idx + 1, len(candidates), try_url))
+        err_times = 3
+        delay_time = 0
+        while err_times > 0:
+            try:
+                _remove_pkg_and_temp(pkg_path)
+                d = Downloader(try_url, pkg_path, max_thead_num=8, force_write=True, headers=headers)
+                d.start()
+                break
+            except Exception as e:
+                print("-- download failed:", e)
+                err_times -= 1
+                if err_times > 0:
+                    delay_time += 5
+                    print(f"-- retry same url after {delay_time}s ({err_times} left)")
+                    time.sleep(delay_time)
+                else:
+                    _remove_pkg_and_temp(pkg_path)
+                    break
+        else:
+            # broke by success
+            pass
+        if not os.path.exists(pkg_path):
+            continue
+        if item.get("sha256sum"):
+            ok, sha256sum = check_sha256sum(pkg_path, item["sha256sum"])
+            if ok:
+                return True
+            last_sha_msg = (item["sha256sum"], sha256sum)
+            print("-- sha256 mismatch after download, expected {}, got {} — try next url if any".format(
+                item["sha256sum"], sha256sum))
+            _remove_pkg_and_temp(pkg_path)
+            continue
+        return True
+    if last_sha_msg:
+        print("-- Error: sha256sum check failed after all urls, should be {}, but last file's sha256sum was {}.\n   Please download manually to {}".format(
+            last_sha_msg[0], last_sha_msg[1], pkg_path))
+    else:
+        print("-- Error: download failed for {} from all urls".format(item.get("filename")))
+    sys.exit(1)
 
 class DownloaderThread(threading.Thread):
     def __init__(self, url, fd, range: tuple, callback, headers):
@@ -251,40 +316,30 @@ def download_extract_files(items):
     for item in items:
         pkg_path = item["pkg_path"]
         extract_dir = os.path.join(sdk_path, "dl", "extracted", item["path"])
-        if not os.path.exists(pkg_path):
+        need_download = True
+        if os.path.exists(pkg_path):
+            if item.get("sha256sum"):
+                ok, sha256sum = check_sha256sum(pkg_path, item["sha256sum"])
+                if ok:
+                    need_download = False
+                else:
+                    print("-- Removing invalid existing file (wrong sha256 {}): {}".format(sha256sum, pkg_path))
+                    _remove_pkg_and_temp(pkg_path)
+            else:
+                need_download = False
+
+        if need_download:
             print("\n-------------------------------------------------------------------")
-            print("-- Downloading {} from:\n   {}\n   save to: {}\n   you can also download it manually and save to this position{}{}".format(
-                item["filename"], item["url"], pkg_path, 
-                "\n   other urls: {}".format(item["urls"]) if item["urls"] else "",
-                "\n   sites: {}".format(item["sites"]) if item["sites"] else ""))
+            print("-- Downloading {} save to: {}{}{}".format(
+                item["filename"], pkg_path,
+                "\n   primary url: {}".format(item["url"]) if item.get("url") else "",
+                "\n   backup urls: {}".format(item.get("urls")) if item.get("urls") else "",
+                "\n   sites: {}".format(item["sites"]) if item.get("sites") else ""))
             print("-------------------------------------------------------------------\n")
-            headers = {
-                # "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
-            }
+            headers = {}
             if "user-agent" in item:
                 headers["User-Agent"] = item["user-agent"]
-            err_times = 3
-            delay_time = 0
-            while 1:
-                try:
-                    d = Downloader(item["url"], pkg_path, max_thead_num = 8, force_write=True, headers=headers)
-                    d.start()
-                    break
-                except Exception as e:
-                    print("-- download failed:", e)
-                    err_times -= 1
-                    if err_times > 0:
-                        delay_time += 5
-                        print(f"-- retry {3 - err_times} after {delay_time}s")
-                        time.sleep(delay_time)
-                        continue
-                    break
-            # check sha256sum
-            if "sha256sum" in item and item["sha256sum"]:
-                ok, sha256sum = check_sha256sum(pkg_path, item["sha256sum"])
-                if not ok:
-                    print("-- Error: sha256sum check failed, should be {}, but files's sha256sum is {}.\n   Please download this file manually".format(item["sha256sum"], sha256sum))
-                    sys.exit(1)
+            _download_item_try_urls(item, pkg_path, headers)
         # extract_dir not empty means already extracted, continue
         need_extract = False
         if "extract" in item and not item["extract"]:
