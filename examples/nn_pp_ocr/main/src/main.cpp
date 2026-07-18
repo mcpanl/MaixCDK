@@ -1,7 +1,8 @@
 
 #include "maix_basic.hpp"
-#include "maix_vision.hpp"
-#include "maix_nn_pp_ocr.hpp"
+#include "z_camera.hpp"
+#include "z_display.hpp"
+#include "z_nn_pp_ocr.hpp"
 #include "main.h"
 
 using namespace maix;

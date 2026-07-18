@@ -4,6 +4,10 @@
 #include "z_nn_maixcam.hpp"
 #include "maix_log.hpp"
 #include <cviruntime.h>
+
+#if defined(MAIXCAM_NN_USE_XMMF_RUNTIME) && MAIXCAM_NN_USE_XMMF_RUNTIME
+#include "maix_cvi_media_runtime.hpp"
+#endif
 #include <string>
 #include <vector>
 #include <cstring>
@@ -132,6 +136,9 @@ namespace maix::nn {
     NN_MaixCam::~NN_MaixCam()
     {
         unload();
+#if defined(MAIXCAM_NN_USE_XMMF_RUNTIME) && MAIXCAM_NN_USE_XMMF_RUNTIME
+        maix::cvi::MediaRuntime::release();
+#endif
     }
 
     void NN_MaixCam::_init(bool dual_buff)
@@ -139,6 +146,9 @@ namespace maix::nn {
         _loaded           = false;
         _enable_dual_buff = dual_buff;
         _data             = nullptr;
+#if defined(MAIXCAM_NN_USE_XMMF_RUNTIME) && MAIXCAM_NN_USE_XMMF_RUNTIME
+        maix::cvi::MediaRuntime::acquire();
+#endif
     }
 
     // ──────────────────────────────────────────────────────────────────────────

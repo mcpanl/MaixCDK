@@ -9,3 +9,4 @@
 
 #include "z_nn.hpp"
 #include "z_nn_F.hpp"
+#include "maix_nn_coexist.hpp"

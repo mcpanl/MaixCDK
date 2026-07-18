@@ -138,6 +138,12 @@ int _main(int argc, char* argv[])
 
     log::info("Program start");
 
+#ifdef PLATFORM_MAIXCAM
+    /* Before first X_MMF / MediaRuntime SYS init: shrink default VI VB pool so
+     * CVI_NN_RegisterModel can still allocate ION (see maix_nn_coexist.hpp). */
+    nn::maixcam_mmf_set_vb_blk_cnt_hint(8);
+#endif
+
     display::Display *disp = new display::Display(DISP_W, DISP_H);
     camera::Camera *cam = new camera::Camera(DISP_W, DISP_H);
 

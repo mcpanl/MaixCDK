@@ -9,11 +9,14 @@
 #include "z_nn.hpp"
 #include "maix_basic.hpp"
 #include "inifile.h"
-//#include "maix_nn_self_learn_classifier.hpp"
+#include "z_nn_self_learn_classifier.hpp"
 #include <iostream>
 #if PLATFORM_MAIXCAM
     #include "z_nn_maixcam.hpp"
 //    #include "speech/dr_wav.h"
+#endif
+#if PLATFORM_RK3566
+    #include "z_nn_rk3566.hpp"
 #endif
 
 void PrintIni(inifile::IniFile &ini)
@@ -234,6 +237,8 @@ namespace maix::nn
         printf(">>> z_nn.cpp new NN impl \n");
         _impl = new NN_MaixCam(dual_buff);
         printf(">>> z_nn.cpp new NN impl done\n");
+#elif PLATFORM_RK3566
+        _impl = new NN_RK3566(dual_buff);
 #endif
         if(!_impl)
         {
@@ -350,13 +355,14 @@ namespace maix::nn
         return _impl->forward_image(img, mean, scale, fit, copy_result, dual_buff_wait, chw);
     }
 
-//    int SelfLearnClassifier::learn()
-//    {
-//        #if PLATFORM_MAIXCAM
-//            return maix_nn_self_learn_classifier_learn(_features, _features_sample, _feature_num);
-//        #else
-//            throw err::Exception(err::ERR_NOT_IMPL);
-//        #endif
-//    }
+   int SelfLearnClassifier::learn()
+   {
+    throw err::Exception(err::ERR_NOT_IMPL);
+    //    #if PLATFORM_MAIXCAM
+    //        return maix_nn_self_learn_classifier_learn(_features, _features_sample, _feature_num);
+    //    #else
+    //        throw err::Exception(err::ERR_NOT_IMPL);
+    //    #endif
+   }
 
 } // namespace maix::nn

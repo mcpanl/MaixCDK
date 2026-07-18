@@ -2,18 +2,30 @@
 list(APPEND ADD_INCLUDE "include")
 #list(APPEND ADD_PRIVATE_INCLUDE "include_private")
 
-
+# z_nn_test_*.hpp 的实现在 z_nn_test_*.cpp 中；默认不编进 nn 库以减小体积。
+# 需要时：cmake 配置阶段传 -DMAIX_NN_BUILD_Z_NN_TEST=ON，
+# 或在工程根目录 compile/compile_flags.cmake 里 set(... CACHE BOOL ... FORCE)。
+option(MAIX_NN_BUILD_Z_NN_TEST "Build z_nn_test_*.cpp into nn (z_nn_test_*.hpp helpers)" OFF)
 
 append_srcs_dir(ADD_SRCS "src")
-list(APPEND ADD_REQUIREMENTS basic ini clipper2 vision cvi-tdl-sdk cvi_tpu)
+if(NOT MAIX_NN_BUILD_Z_NN_TEST)
+    list(FILTER ADD_SRCS EXCLUDE REGEX ".*/z_nn_test_[^/]+\\.cpp$|^z_nn_test_[^/]+\\.cpp$")
+endif()
+list(APPEND ADD_REQUIREMENTS basic ini clipper2 vision)
 
 if(PLATFORM_MAIXCAM)
-    #append_srcs_dir(ADD_SRCS "port/maixcam")
-#    list(APPEND ADD_REQUIREMENTS maixcam_lib alsa_lib)
-#    list(APPEND ADD_DYNAMIC_LIB "lib/libms_asr_sg2002.so")
-#    list(APPEND ADD_DEFINITIONS -DDR_WAV_IMPLEMENTATION)
+    list(APPEND ADD_REQUIREMENTS cvi-tdl-sdk cvi_tpu)
+    # When x_mmf vision backend is selected, NN_MaixCam shares the MediaRuntime
+    # so that SYS/VB is properly initialized even for NN-only use cases.
+    if(MAIXCAM_VISION_BACKEND STREQUAL "x_mmf")
+        list(APPEND ADD_REQUIREMENTS x_lib)
+        list(APPEND ADD_DEFINITIONS_PRIVATE -DMAIXCAM_NN_USE_XMMF_RUNTIME=1)
+    endif()
+elseif(PLATFORM_RK3566)
+    list(APPEND ADD_INCLUDE "port/rk3566")
+    append_srcs_dir(ADD_SRCS "port/rk3566")
+    list(APPEND ADD_REQUIREMENTS rknn_runtime)
 else()
-#    append_srcs_dir(ADD_SRCS "port/linux")
 endif()
 
 register_component()

@@ -1,8 +1,9 @@
 
 #include "maix_basic.hpp"
-#include "maix_vision.hpp"
-#include "maix_touchscreen.hpp"
-#include "maix_nn_nanotrack.hpp"
+#include "z_display.hpp"
+#include "z_camera.hpp"
+#include "z_touchscreen.hpp"
+#include "z_nn_nanotrack.hpp"
 #include "main.h"
 
 using namespace maix;
