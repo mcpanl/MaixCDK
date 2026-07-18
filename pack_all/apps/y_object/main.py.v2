@@ -1,0 +1,101 @@
+from maix import display, image, time
+import threading
+from loading import Loading
+
+font_size = 20
+image.load_font("sourcehansans", "/maixapp/share/font/SourceHanSansCN-Regular.otf", size = font_size)  # 加载自定义字体
+image.set_default_font("sourcehansans")  # 设置默认字体
+
+disp = display.Display(640, 480, image.Format.FMT_RGBA8888)
+show_loading = True
+loaindg = Loading(disp)
+loading_thread = None
+display_show_lock = threading.Lock()
+
+# 加载动画，import 逻辑放到加载动画后面用来以防黑屏等待提升用户体验
+def loading_thread_main():
+    global show_loading, loading_thread
+
+    should_break = False
+
+    while 1:
+        with display_show_lock:
+            if show_loading:
+                img = loaindg.draw()
+                disp.show(img)
+            else:
+                should_break = True
+        
+        if should_break:
+            break
+
+        time.sleep_ms(5)
+
+loading_thread = threading.Thread(target=loading_thread_main, daemon=True)
+loading_thread.start()
+
+mode = 0
+
+from maix import key
+
+longpress_lock = False
+
+def on_user_key(key_id, state):
+    global show_delete_popup, rect_lock, longpress_lock
+
+    if key_id == 352:
+        if state == 0 and longpress_lock == False:
+            if mode == 1:
+                with rect_lock:
+                    show_del_btn = False
+                    
+                    # 如果存在自学习后的对象
+                    if len(rect_list) > 0:
+                        for index, value in enumerate(rect_list):
+                            obj = value["tracker"].track(img2)
+
+                            # 如果物体在屏幕画面内才显示识别框
+                            if obj.score > score_threshold:
+                                # 如果屏幕的准心在该物体范围内
+                                if is_in_button(screen_center_x, screen_center_y, [obj.x, obj.y, obj.w, obj.h]):
+                                    show_del_btn = True
+                                    break
+
+                    if show_del_btn:
+                        show_delete_popup = True
+                    else:
+                        learning()
+        elif state == 1:
+            longpress_lock = False
+        elif state == 2:
+            longpress_lock = True
+    elif key_id == 352 and state == 0:
+        pass
+
+# 覆盖原来的用户按钮事件
+key_obj = key.Key(on_user_key)
+
+
+
+from maix import camera, app, nn, touchscreen, pinmap, gpio
+
+cam = camera.Camera(disp.width(), disp.height(), image.Format.FMT_RGB888)
+
+img = cam.read()
+print(img)
+
+# cam2 = cam.add_channel(disp.width() // 2, disp.height() // 2, image.Format.FMT_RGB888)
+# img2 = cam2.read()
+# print(img2)
+
+detector = nn.YOLOv5(model="/root/models/yolov5s.mud", dual_buff=False)
+
+objs = detector.detect(img, conf_th = 0.5, iou_th = 0.45)
+print(objs)
+
+
+
+while not app.need_exit():
+    print("loop")
+    time.sleep_ms(1000)
+

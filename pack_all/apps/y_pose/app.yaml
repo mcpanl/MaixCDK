@@ -1,0 +1,13 @@
+id: y_pose
+name: Pose
+version: 1.0.2
+author: MBUILD
+icon: app.png
+desc: 姿态识别
+files:
+  - custom_maix\__init__.py
+  - custom_maix\display.py
+  - static\image\ArrowLeft_32_32.png
+  - app.png
+  - app.yaml
+  - main.py
