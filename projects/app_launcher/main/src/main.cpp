@@ -31,8 +31,6 @@
 #include <thread>
 #include "maix_comm.hpp"
 
-#include "z_lib.hpp"
-
 
 static Maix_GUI_Activity *main_activity = NULL;
 

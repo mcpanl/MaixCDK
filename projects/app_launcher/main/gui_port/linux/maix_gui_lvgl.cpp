@@ -137,9 +137,16 @@ void Maix_GUI<T_OBJ>::run()
         /* Periodically call the lv_task handler.
          * It could be done in a timer interrupt or an OS task too.*/
         lv_ui_mutex_lock(-1);
-        lv_timer_handler();
+        uint32_t time_till_next = lv_timer_handler();
         lv_ui_mutex_unlock();
-        time::sleep_us(10000);
+
+        /* Sleep until the next timer event, with a small minimum to prevent busy-waiting */
+        if (time_till_next > 1) {
+            time::sleep_ms(time_till_next);
+        } else {
+            time::sleep_us(500);  // Minimal yield for busy scenarios
+        }
+
         if(!this->screen->is_opened())
         {
             break;
