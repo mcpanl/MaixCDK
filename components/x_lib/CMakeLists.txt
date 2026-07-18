@@ -12,7 +12,7 @@ set(X_MMF_ENABLE_VDEC 1 CACHE STRING "Enable X_MMF VDEC module")
 set(X_MMF_ENABLE_REGION 1 CACHE STRING "Enable X_MMF REGION module")
 
 if(PLATFORM_MAIXCAM)
-    message(STATUS "PLATFORM_MAIXCAM")
+    message(STATUS "PLATFORM_MAIXCAM MAIX_ARCH=${MAIX_ARCH}")
     set(source_dir "maixcdk_x_lib/src")
 
     list(APPEND ADD_REQUIREMENTS cvi-middleware)
@@ -40,6 +40,9 @@ if(PLATFORM_MAIXCAM)
 
     # C++ singleton that wraps X_MMF_Init/Deinit for vision + nn shared lifecycle
     list(APPEND ADD_SRCS "${source_dir}/maix_cvi_media_runtime.cpp")
+
+    # Optional large arch-specific adaptations under maixcdk_x_lib/src/<arch>/
+    maix_append_arch_port_srcs(ADD_SRCS "maixcdk_x_lib/src")
 
     list(APPEND ADD_DEFINITIONS
         -DX_MMF_ENABLE_VI=${X_MMF_ENABLE_VI}

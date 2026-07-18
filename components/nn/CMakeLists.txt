@@ -21,6 +21,8 @@ if(PLATFORM_MAIXCAM)
         list(APPEND ADD_REQUIREMENTS x_lib)
         list(APPEND ADD_DEFINITIONS_PRIVATE -DMAIXCAM_NN_USE_XMMF_RUNTIME=1)
     endif()
+    # Optional large arch-specific NN adaptations
+    maix_append_arch_port_srcs(ADD_SRCS "port/maixcam")
 elseif(PLATFORM_RK3566)
     list(APPEND ADD_INCLUDE "port/rk3566")
     append_srcs_dir(ADD_SRCS "port/rk3566")

@@ -2,22 +2,62 @@
 # if include exist, then add it to ADD_INCLUDE for local debug
 if(EXISTS ${CMAKE_CURRENT_LIST_DIR}/cvi_tpu_lib)
     list(APPEND ADD_INCLUDE "cvi_tpu_lib/include")
-    # if toolchain path string contain musl, then use musl libc
-    if(${CONFIG_TOOLCHAIN_PATH} MATCHES "musl")
-        message(STATUS "cvi_tpu lib use musl libc")
+    # Prefer MAIX_ARCH; fall back to toolchain path heuristic
+    if(MAIX_ARCH STREQUAL "arm64" OR (NOT MAIX_ARCH STREQUAL "riscv64" AND NOT ${CONFIG_TOOLCHAIN_PATH} MATCHES "musl"))
+        message(STATUS "cvi_tpu lib use glibc (MAIX_ARCH=${MAIX_ARCH})")
+        if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/cvi_tpu_lib/lib_glibc")
+            list(APPEND ADD_STATIC_LIB "cvi_tpu_lib/lib_glibc/libcvimath-static.a"
+                                    "cvi_tpu_lib/lib_glibc/libcviruntime-static.a"
+                                    "cvi_tpu_lib/lib_glibc/libcvikernel-static.a"
+            )
+        elseif(EXISTS "${CMAKE_CURRENT_LIST_DIR}/lib/arm64")
+            list(APPEND ADD_STATIC_LIB "lib/arm64/libcvimath-static.a"
+                                    "lib/arm64/libcviruntime-static.a"
+                                    "lib/arm64/libcvikernel-static.a"
+            )
+        endif()
+    else()
+        message(STATUS "cvi_tpu lib use musl (MAIX_ARCH=${MAIX_ARCH})")
         list(APPEND ADD_STATIC_LIB  "cvi_tpu_lib/lib_musl/libcvimath-static.a"
                                     "cvi_tpu_lib/lib_musl/libcviruntime-static.a"
                                     "cvi_tpu_lib/lib_musl/libcvikernel-static.a"
             )
-    else()
-        message(STATUS "cvi_tpu lib use glibc")
-        list(APPEND ADD_STATIC_LIB "cvi_tpu_lib/lib_glibc/libcvimath-static.a"
-                                "cvi_tpu_lib/lib_glibc/libcviruntime-static.a"
-                                "cvi_tpu_lib/lib_glibc/libcvikernel-static.a"
-        )
     endif()
 elseif(PLATFORM_MAIXCAM AND NOT CONFIG_COMPONENTS_COMPILE_FROM_SOURCE)
-    if(CONFIG_TOOLCHAIN_PATH MATCHES "musl" OR CONFIG_TOOLCHAIN_PATH MATCHES "glibc")
+    if(MAIX_ARCH STREQUAL "arm64")
+        # Prefer synced MaixArm64Lib cache or local lib/arm64
+        set(_repo_root "${SDK_PATH}/..")
+        set(_arm64_tpu "${_repo_root}/MaixArm64Lib/arm64-glibc/tpu_sdk")
+        if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/lib/arm64")
+            set(cvi_tpu_lib_dir "${CMAKE_CURRENT_LIST_DIR}/lib/arm64")
+        elseif(EXISTS "${_arm64_tpu}")
+            set(cvi_tpu_lib_dir "${_arm64_tpu}")
+        else()
+            message(WARNING "cvi_tpu: arm64 libs not found; place under lib/arm64 or sync MaixArm64Lib")
+        endif()
+        if(cvi_tpu_lib_dir)
+            if(EXISTS "${cvi_tpu_lib_dir}/include")
+                list(APPEND ADD_INCLUDE "${cvi_tpu_lib_dir}/include")
+                set_property(SOURCE "${cvi_tpu_lib_dir}/include" PROPERTY GENERATED 1)
+            endif()
+            # Try common layout variants
+            foreach(_cand
+                    "${cvi_tpu_lib_dir}/lib_glibc"
+                    "${cvi_tpu_lib_dir}/lib"
+                    "${cvi_tpu_lib_dir}")
+                if(EXISTS "${_cand}/libcvimath-static.a")
+                    set(harfbuzz_lib_file "${_cand}/libcvimath-static.a"
+                                          "${_cand}/libcviruntime-static.a"
+                                          "${_cand}/libcvikernel-static.a")
+                    break()
+                endif()
+            endforeach()
+            if(harfbuzz_lib_file)
+                set_property(SOURCE ${harfbuzz_lib_file} PROPERTY GENERATED 1)
+                list(APPEND ADD_STATIC_LIB ${harfbuzz_lib_file})
+            endif()
+        endif()
+    elseif(CONFIG_TOOLCHAIN_PATH MATCHES "musl" OR CONFIG_TOOLCHAIN_PATH MATCHES "glibc" OR MAIX_ARCH STREQUAL "riscv64")
         set(cvi_tpu_lib_parent_dir "${DL_EXTRACTED_PATH}/cvi_tpu")
         file(GLOB ALL_SUBDIRS LIST_DIRECTORIES true "${cvi_tpu_lib_parent_dir}/*")
         if(ALL_SUBDIRS)
@@ -25,100 +65,33 @@ elseif(PLATFORM_MAIXCAM AND NOT CONFIG_COMPONENTS_COMPILE_FROM_SOURCE)
             get_filename_component(FIRST_SUBDIR_NAME "${FIRST_SUBDIR}" NAME)
             set(cvi_tpu_lib_dir "${cvi_tpu_lib_parent_dir}/${FIRST_SUBDIR_NAME}")
         else()
-            message(WARNING "No subdirectories found in ${DIRECTORY_PATH}")
+            message(WARNING "No subdirectories found in ${cvi_tpu_lib_parent_dir}")
         endif()
         set(harfbuzz_include_dir "${cvi_tpu_lib_dir}/include")
         set_property(SOURCE ${harfbuzz_include_dir} PROPERTY GENERATED 1)
-    endif()
-    if(NOT cvi_tpu_lib_dir)
-        message(FATAL_ERROR "cvi_tpu not support this toolchain")
-    endif()
-    if(CONFIG_TOOLCHAIN_PATH MATCHES "musl")
-        set(harfbuzz_lib_file "${cvi_tpu_lib_dir}/lib_musl/libcvimath-static.a"
-                              "${cvi_tpu_lib_dir}/lib_musl/libcviruntime-static.a"
-                              "${cvi_tpu_lib_dir}/lib_musl/libcvikernel-static.a"
-        )
-    elseif(CONFIG_TOOLCHAIN_PATH MATCHES "glibc")
-        set(harfbuzz_lib_file "${cvi_tpu_lib_dir}/lib_glibc/libcvimath-static.a"
-                            "${cvi_tpu_lib_dir}/lib_glibc/libcviruntime-static.a"
-                            "${cvi_tpu_lib_dir}/lib_glibc/libcvikernel-static.a"
-        )
-    endif()
-    if(harfbuzz_lib_file)
-        set_property(SOURCE ${harfbuzz_lib_file} PROPERTY GENERATED 1)
-        list(APPEND ADD_INCLUDE ${harfbuzz_include_dir})
-        list(APPEND ADD_STATIC_LIB ${harfbuzz_lib_file})
+        if(NOT cvi_tpu_lib_dir)
+            message(FATAL_ERROR "cvi_tpu not support this toolchain")
+        endif()
+        if(CONFIG_TOOLCHAIN_PATH MATCHES "musl" OR MAIX_ARCH STREQUAL "riscv64")
+            set(harfbuzz_lib_file "${cvi_tpu_lib_dir}/lib_musl/libcvimath-static.a"
+                                  "${cvi_tpu_lib_dir}/lib_musl/libcviruntime-static.a"
+                                  "${cvi_tpu_lib_dir}/lib_musl/libcvikernel-static.a"
+            )
+        elseif(CONFIG_TOOLCHAIN_PATH MATCHES "glibc")
+            set(harfbuzz_lib_file "${cvi_tpu_lib_dir}/lib_glibc/libcvimath-static.a"
+                                "${cvi_tpu_lib_dir}/lib_glibc/libcviruntime-static.a"
+                                "${cvi_tpu_lib_dir}/lib_glibc/libcvikernel-static.a"
+            )
+        endif()
+        if(harfbuzz_lib_file)
+            set_property(SOURCE ${harfbuzz_lib_file} PROPERTY GENERATED 1)
+            list(APPEND ADD_INCLUDE ${harfbuzz_include_dir})
+            list(APPEND ADD_STATIC_LIB ${harfbuzz_lib_file})
+        endif()
     endif()
 endif()
 if(PLATFORM_MAIXCAM AND NOT ADD_INCLUDE)
-    message(FATAL_ERROR "cvi_tpu_lib not found please check")
+    message(FATAL_ERROR "cvi_tpu_lib not found please check (MAIX_ARCH=${MAIX_ARCH})")
 endif()
 
 register_component()
-
-
-
-# Config enable component2 or not in Kconfig
-################# Add include #################
-# list(APPEND ADD_INCLUDE "include"
-#     )
-# list(APPEND ADD_PRIVATE_INCLUDE "include_private")
-###############################################
-
-############## Add source files ###############
-# list(APPEND ADD_SRCS  "src/lib2.c"
-#     )
-# FILE(GLOB_RECURSE EXTRA_SRC  "src/*.c")
-# FILE(GLOB EXTRA_SRC  "src/*.c")
-# list(APPEND ADD_SRCS  ${EXTRA_SRC})
-# aux_source_directory(src ADD_SRCS)  # collect all source file in src dir, will set var ADD_SRCS
-# append_srcs_dir(ADD_SRCS "src")     # append source file in src dir to var ADD_SRCS
-# list(REMOVE_ITEM COMPONENT_SRCS "src/test.c")
-# set(ADD_ASM_SRCS "src/asm.S")
-# list(APPEND ADD_SRCS ${ADD_ASM_SRCS})
-# SET_PROPERTY(SOURCE ${ADD_ASM_SRCS} PROPERTY LANGUAGE C) # set .S  ASM file as C language
-# SET_SOURCE_FILES_PROPERTIES(${ADD_ASM_SRCS} PROPERTIES COMPILE_FLAGS "-x assembler-with-cpp -D BBBBB")
-###############################################
-
-
-###### Add required/dependent components ######
-# list(APPEND ADD_REQUIREMENTS basic)
-###############################################
-
-###### Add link search path for requirements/libs ######
-# list(APPEND ADD_LINK_SEARCH_PATH "${CONFIG_TOOLCHAIN_PATH}/lib")
-# list(APPEND ADD_REQUIREMENTS pthread m)  # add system libs, pthread and math lib for example here
-# set (OpenCV_DIR opencv/lib/cmake/opencv4)
-# find_package(OpenCV REQUIRED)
-###############################################
-
-############ Add static libs ##################
-# list(APPEND ADD_STATIC_LIB "lib/libtest.a")
-###############################################
-
-############ Add dynamic libs ##################
-# list(APPEND ADD_DYNAMIC_LIB "lib/arch/v831/libmaix_nn.so"
-#                             "lib/arch/v831/libmaix_cam.so"
-# )
-###############################################
-
-#### Add compile option for this component ####
-#### Just for this component, won't affect other 
-#### modules, including component that depend 
-#### on this component
-# list(APPEND ADD_DEFINITIONS_PRIVATE -DAAAAA=1)
-
-#### Add compile option for this component
-#### Add components that depend on this component
-# list(APPEND ADD_DEFINITIONS -DAAAAA222=1
-#                             -DAAAAA333=1)
-###############################################
-
-############ Add static libs ##################
-#### Update parent's variables like CMAKE_C_LINK_FLAGS
-# set(CMAKE_C_LINK_FLAGS "${CMAKE_C_LINK_FLAGS} -Wl,--start-group libmaix/libtest.a -ltest2 -Wl,--end-group" PARENT_SCOPE)
-###############################################
-
-# register component, DYNAMIC or SHARED flags will make component compiled to dynamic(shared) lib
-# register_component()
-

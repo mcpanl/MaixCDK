@@ -3,7 +3,7 @@ list(APPEND ADD_REQUIREMENTS basic ini)
 list(APPEND ADD_INCLUDE "include")
 
 if(PLATFORM_MAIXCAM)
-    message(STATUS "PLATFORM_MAIXCAM")
+    message(STATUS "PLATFORM_MAIXCAM MAIX_ARCH=${MAIX_ARCH}")
     # sophgo-middleware
     set(middleware_src_path "${CMAKE_CURRENT_SOURCE_DIR}/../3rd_party/sophgo-middleware/sophgo-middleware")
 
@@ -29,8 +29,19 @@ if(PLATFORM_MAIXCAM)
 
         register_component(DYNAMIC)
     else()
-        list(APPEND ADD_DYNAMIC_LIB "lib/libmaixcam_lib.so")
-        list(APPEND ADD_DIST_LIB_IGNORE "lib/libmaixcam_lib.so")
+        # Prefer lib/<arch>/; fall back to legacy lib/ for riscv64
+        set(_maixcam_lib_arch "lib/${MAIX_ARCH}/libmaixcam_lib.so")
+        set(_maixcam_lib_legacy "lib/libmaixcam_lib.so")
+        if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/${_maixcam_lib_arch}")
+            set(_maixcam_lib "${_maixcam_lib_arch}")
+        elseif(MAIX_ARCH STREQUAL "riscv64" AND EXISTS "${CMAKE_CURRENT_LIST_DIR}/${_maixcam_lib_legacy}")
+            set(_maixcam_lib "${_maixcam_lib_legacy}")
+        else()
+            message(FATAL_ERROR "maixcam_lib: missing ${_maixcam_lib_arch} for MAIX_ARCH=${MAIX_ARCH}. See lib/arm64/README.md")
+        endif()
+        maix_assert_elf_arch("${CMAKE_CURRENT_LIST_DIR}/${_maixcam_lib}")
+        list(APPEND ADD_DYNAMIC_LIB "${_maixcam_lib}")
+        list(APPEND ADD_DIST_LIB_IGNORE "${_maixcam_lib}")
         list(APPEND ADD_REQUIREMENTS sophgo-middleware)
 
         register_component()

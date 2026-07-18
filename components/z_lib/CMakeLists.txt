@@ -5,12 +5,14 @@ list(APPEND ADD_INCLUDE "include")
 message("[Z_LIB]")
 
 if(PLATFORM_MAIXCAM)
-    message(STATUS "PLATFORM_MAIXCAM")
+    message(STATUS "PLATFORM_MAIXCAM MAIX_ARCH=${MAIX_ARCH}")
     # cvi-middleware
     set(middleware_src_path "${CMAKE_CURRENT_SOURCE_DIR}/../3rd_party/cvi-middleware/cvi_mpi")
     set(source_dir "maixcdk_z_lib/src")
 
     append_srcs_dir(ADD_SRCS "${source_dir}")
+    # Optional large arch-specific adaptations
+    maix_append_arch_port_srcs(ADD_SRCS "maixcdk_z_lib/src")
     list(APPEND ADD_REQUIREMENTS cvi-middleware)
     set_property(SOURCE ${middleware_src_dir} PROPERTY GENERATED 1)
     list(APPEND ADD_DEFINITIONS_PRIVATE -Wl,--exclude-libs,ALL)

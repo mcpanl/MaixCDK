@@ -7,9 +7,20 @@ set(log_file_path ${src_path}/build.log)
 list(APPEND ADD_REQUIREMENTS)
 list(APPEND ADD_FILE_DEPENDS ${output_path}/lib/libmodbus.a)
 set_property(SOURCE ${python_h_path} PROPERTY GENERATED 1)
+# Derive configure --host from toolchain prefix / MAIX_ARCH
+if(MAIX_ARCH STREQUAL "arm64")
+    set(LIBMODBUS_HOST "aarch64-linux-gnu")
+elseif(MAIX_ARCH STREQUAL "riscv64")
+    set(LIBMODBUS_HOST "riscv64")
+else()
+    set(LIBMODBUS_HOST "riscv64")
+endif()
+if(CONFIG_TOOLCHAIN_PREFIX)
+    string(REGEX REPLACE "-$" "" LIBMODBUS_HOST "${CONFIG_TOOLCHAIN_PREFIX}")
+endif()
 add_custom_command(OUTPUT ${output_path}/lib/libmodbus.a
-    COMMAND cd ${src_path} && ./autogen.sh >> ${log_file_path} 2>&1 && CC=${CMAKE_C_COMPILER} ./configure --host=riscv64 --enable-static --prefix=${output_path} >> ${log_file_path} 2>&1 && make >> ${log_file_path} 2>&1 && make install >> ${log_file_path} 2>&1 || (echo "Error occurred during libmodbus generation, check ${log_file_path}" && exit 1)
-    COMMENT "Generating libmodbus-v${libmodbus_version_str}"
+    COMMAND cd ${src_path} && ./autogen.sh >> ${log_file_path} 2>&1 && CC=${CMAKE_C_COMPILER} ./configure --host=${LIBMODBUS_HOST} --enable-static --prefix=${output_path} >> ${log_file_path} 2>&1 && make >> ${log_file_path} 2>&1 && make install >> ${log_file_path} 2>&1 || (echo "Error occurred during libmodbus generation, check ${log_file_path}" && exit 1)
+    COMMENT "Generating libmodbus-v${libmodbus_version_str} for host=${LIBMODBUS_HOST}"
 )
 
 set(libmodbus_include_dir "${output_path}/include")

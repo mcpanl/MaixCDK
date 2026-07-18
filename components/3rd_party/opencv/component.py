@@ -4,6 +4,9 @@ def add_file_downloads(confs : dict) -> list:
         @param confs kconfig vars, dict type
         @return list type, items is dict type
     '''
+    import os, sys
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "tools", "cmake"))
+    from maix_arch_util import get_maix_arch, is_maixcam_arm64, toolchain_is_musl
 
     def get_opencv_version() -> str:
         if bool(confs.get("PLATFORM_MAIXCAM", None)):
@@ -14,7 +17,6 @@ def add_file_downloads(confs : dict) -> list:
             return "4.9.0"
 
     if not (bool(confs.get("PLATFORM_MAIXCAM", None)) or bool(confs.get('PLATFORM_MAIXCAM2', None))) or confs.get("CONFIG_COMPONENTS_COMPILE_FROM_SOURCE", None) or confs.get("CONFIG_OPENCV_COMPILE_FROM_SOURCE", None):
-        # version = f"{confs['CONFIG_PYTHON_VERSION_MAJOR']}.{confs['CONFIG_PYTHON_VERSION_MINOR']}.{confs['CONFIG_PYTHON_VERSION_PATCH']}"
         version = get_opencv_version()
         url = f"https://github.com/opencv/opencv/archive/{version}.zip"
         if version == "4.6.0":
@@ -87,7 +89,6 @@ def add_file_downloads(confs : dict) -> list:
                     'extract': False
                 },
             ])
-            # x86 IPPICV only (host / Linux desktop). AArch64 cross (e.g. rk3566) builds without it.
             if confs.get("PLATFORM_LINUX", None) and not confs.get("PLATFORM_RK3566", None):
                 files.extend([
                     {
@@ -108,9 +109,13 @@ def add_file_downloads(confs : dict) -> list:
 
         return files
     elif confs.get("PLATFORM_MAIXCAM", None):
-        if "musl" not in confs["CONFIG_TOOLCHAIN_PATH"]:
+        arch = get_maix_arch(confs)
+        if arch == "arm64":
+            # Prebuilt OpenCV for MaixCAM arm64 not published yet; compile-from-source or place under lib/arm64
+            print("[opencv] PLATFORM_MAIXCAM arch=arm64: no prebuilt package URL yet, skip download (use source or lib/arm64)")
             return []
-        # version = f"{confs['CONFIG_OMV_VERSION_MAJOR']}.{confs['CONFIG_OMV_VERSION_MINOR']}.{confs['CONFIG_OMV_VERSION_PATCH']}"
+        if not toolchain_is_musl(confs):
+            return []
         version = get_opencv_version()
         url = f"https://github.com/sipeed/MaixCDK/releases/download/v0.0.0/opencv4_lib_maixcam_musl_4.9.0.tar.xz"
         if version == "4.9.0":
@@ -138,11 +143,10 @@ def add_file_downloads(confs : dict) -> list:
             }
         ]
     elif confs.get("PLATFORM_MAIXCAM2", None):
-        # version = f"{confs['CONFIG_OMV_VERSION_MAJOR']}.{confs['CONFIG_OMV_VERSION_MINOR']}.{confs['CONFIG_OMV_VERSION_PATCH']}"
         version = get_opencv_version()
         url = f"https://github.com/sipeed/MaixCDK/releases/download/v0.0.0/opencv4_lib_maixcam2_glibc_{version}.tar.xz"
         if version == "4.6.0":
-            sha256sum = "7225b441995273ed9d965596c4a955f363ff5196483303da532d4e82a4e74bad"
+            sha256sum = "7225b441995273ed9d965596c4a955f363ff5196483303da532d4a82a4e74bad"
         elif version == "4.9.0":
             sha256sum = "42e2827b632cdfcd168e4a3d77414ce57e0d9c3398893ac899635124d1579a53"
         elif version == "4.11.0":

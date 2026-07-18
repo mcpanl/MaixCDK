@@ -4,8 +4,16 @@ def add_file_downloads(confs : dict) -> list:
         @param confs kconfig vars, dict type
         @return list type, items is dict type
     '''
+    import os, sys
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "tools", "cmake"))
+    from maix_arch_util import get_maix_arch
+
     version = f"{confs['CONFIG_FFMPEG_VERSION_MAJOR']}.{confs['CONFIG_FFMPEG_VERSION_MINOR']}.{confs['CONFIG_FFMPEG_VERSION_PATCH']}.{confs['CONFIG_FFMPEG_COMPILED_VERSION']}"
     if confs.get('PLATFORM_MAIXCAM', None):
+        arch = get_maix_arch(confs)
+        if arch == "arm64":
+            print("[FFmpeg] PLATFORM_MAIXCAM arch=arm64: no prebuilt package URL yet, skip download (place under lib/arm64)")
+            return []
         url = f"https://github.com/sipeed/MaixCDK/releases/download/v0.0.0/ffmpeg_libs_n{version}.tar.xz"
         if version == "4.4.4.1":
             sha256sum = "d4b8eb70a7864c855e8e286fef39b9b90faf72c1b77491148c451da252cad6c0"

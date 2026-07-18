@@ -61,6 +61,14 @@ set_property(SOURCE ${ffmpeg_include_dir} PROPERTY GENERATED 1)
 
 ############ Add dynamic libs ##################
 if (PLATFORM_MAIXCAM)
+    if(MAIX_ARCH STREQUAL "arm64")
+        # Prefer component-local lib/arm64 layout when prebuilts are placed there
+        if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/lib/arm64")
+            set(src_path "${CMAKE_CURRENT_LIST_DIR}/lib/arm64")
+        else()
+            message(WARNING "FFmpeg: MaixCAM arm64 prebuilt missing; expected lib/arm64 or downloaded package")
+        endif()
+    endif()
     set(ffmpeg_dynamic_lib_file ${src_path}/lib/libavcodec.so
                                 ${src_path}/lib/libavdevice.so
                                 ${src_path}/lib/libavfilter.so

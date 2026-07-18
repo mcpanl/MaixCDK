@@ -18,17 +18,29 @@ set_property(SOURCE ${middleware_include_dir} PROPERTY GENERATED 1)
 append_srcs_dir(middleware_src_dir  ${middleware_src_path}/sample/common
         ${middleware_src_path}/component/isp/sensor/cv181x/gcore_gc4653
         ${middleware_src_path}/component/isp/sensor/cv181x/gcore_gc2083
-#        ${middleware_src_path}/sample/z_mmf
-#        ${middleware_src_path}/component/isp/sensor/sg200x/sms_sc035gs
-#        ${middleware_src_path}/component/isp/sensor/sg200x/ov_ov2685
-#        ${middleware_src_path}/component/isp/sensor/sg200x/lontium_lt6911
-#        ${middleware_src_path}/component/isp/sensor/sg200x/ov_os04a10
-#        ${middleware_src_path}/component/isp/sensor/sg200x/gcore_gc02m1
 )
 list(APPEND ADD_SRCS        ${middleware_src_dir})
 set_property(SOURCE ${middleware_src_dir} PROPERTY GENERATED 1)
 
-set(mmf_lib_dir ${middleware_src_path}/lib)
+# Arch-aware lib dir: prefer lib/<arch>, fall back to legacy flat lib/ for riscv64
+if(MAIX_ARCH STREQUAL "arm64")
+    if(EXISTS "${middleware_src_path}/lib/arm64")
+        set(mmf_lib_dir ${middleware_src_path}/lib/arm64)
+    else()
+        set(_repo_cvi "${SDK_PATH}/../MaixArm64Lib/arm64-glibc/cvi_mpi/lib")
+        if(EXISTS "${_repo_cvi}")
+            set(mmf_lib_dir ${_repo_cvi})
+            message(STATUS "cvi-middleware: using MaixArm64Lib arm64 cvi_mpi lib")
+        else()
+            message(FATAL_ERROR "cvi-middleware: arm64 libs missing. Create ${middleware_src_path}/lib/arm64 or sync MaixArm64Lib")
+        endif()
+    endif()
+elseif(EXISTS "${middleware_src_path}/lib/riscv64")
+    set(mmf_lib_dir ${middleware_src_path}/lib/riscv64)
+else()
+    set(mmf_lib_dir ${middleware_src_path}/lib)
+endif()
+message(STATUS "cvi-middleware mmf_lib_dir=${mmf_lib_dir} (MAIX_ARCH=${MAIX_ARCH})")
 set(middleware_dynamic_lib_file
         ${mmf_lib_dir}/libcvi_ive.so
         ${mmf_lib_dir}/libcvi_bin.so

@@ -83,6 +83,8 @@ def update_configs(sdk_path, project_path, project_id, build_path, args, cmd = "
                 vars["CMAKE_GENERATOR"] = ""
         if not vars.get("TOOLCHAIN_ID", ""):
             vars["TOOLCHAIN_ID"] = ""
+        if not vars.get("MAIX_ARCH", ""):
+            vars["MAIX_ARCH"] = ""
         if not vars.get("DEFAULT_CONFIG_FILE", ""):
             path = "{}/config_defaults.mk".format(project_path)
             if os.path.exists(path):
@@ -124,6 +126,7 @@ def update_configs(sdk_path, project_path, project_id, build_path, args, cmd = "
         "DEFAULT_CONFIG_FILE": args.config_file if (hasattr(args, "config_file") and args.config_file and os.path.exists(args.config_file)) else "",
         "PLATFORM": args.platform if hasattr(args, "platform") else "",
         "TOOLCHAIN_ID": args.toolchain_id if hasattr(args, "toolchain_id") else "",
+        "MAIX_ARCH": args.arch if hasattr(args, "arch") else "",
     }
     if new_vars["DEFAULT_CONFIG_FILE"] and not os.path.isabs(new_vars["DEFAULT_CONFIG_FILE"]):
         new_vars["DEFAULT_CONFIG_FILE"] = os.path.abspath(os.path.join(project_path, new_vars["DEFAULT_CONFIG_FILE"]))
@@ -131,8 +134,33 @@ def update_configs(sdk_path, project_path, project_id, build_path, args, cmd = "
     # if var not set by args, set default
     vars = set_default(vars)
     vars = update_platform(vars, vars["PLATFORM"])
+    # Default arch for known platforms when not specified
+    if not vars.get("MAIX_ARCH"):
+        if vars["PLATFORM"] == "maixcam":
+            vars["MAIX_ARCH"] = "riscv64"
+        elif vars["PLATFORM"] in ("maixcam2", "rk3566"):
+            vars["MAIX_ARCH"] = "arm64"
+        elif vars["PLATFORM"] == "linux":
+            vars["MAIX_ARCH"] = "native"
+        else:
+            vars["MAIX_ARCH"] = "native"
     os.environ["BUILD_TYPE"] = vars["BUILD_TYPE"]
+    os.environ["MAIX_ARCH"] = vars["MAIX_ARCH"]
     return vars
+
+
+def get_build_subdir(platform, arch):
+    """Isolate build dirs for maixcam dual-arch; other platforms keep flat build/."""
+    if platform == "maixcam" and arch in ("riscv64", "arm64"):
+        return os.path.join("build", "{}_{}".format(platform, arch))
+    return "build"
+
+
+def get_dist_name(project_id, build_type, arch):
+    build_type_l = (build_type or "release").lower()
+    if arch in ("riscv64", "arm64"):
+        return "{}_{}_{}".format(project_id, build_type_l, arch)
+    return "{}_{}".format(project_id, build_type_l)
 
 def check_project_valid():
     if not os.path.exists("main"):
@@ -219,6 +247,8 @@ def parse_args(sdk_path, project_path, extra_tools):
         parser_.add_argument('--build-type', default=None, help="build type, [Debug, Release, MinRelSize, RelWithDebInfo], you can also set build type by CMAKE_BUILD_TYPE environment variable")
         parser_.add_argument('-p', "--platform", default="", help="device name, e.g. linux, maixcam, m2dock", choices=get_platforms(sdk_path))
         parser_.add_argument('--toolchain-id', default="", help="toolchain id, if platform has multiple toolchains, use this option to select one")
+        parser_.add_argument('--arch', default="", choices=["", "riscv64", "arm64", "native"],
+                             help="CPU architecture for platform (maixcam: riscv64|arm64, default riscv64)")
     add_build_args(parser_build)
     add_build_args(parser_build2)
 
@@ -229,6 +259,9 @@ def parse_args(sdk_path, project_path, extra_tools):
                             metavar='PATH',
                             default="{}/config_defaults.mk".format(project_path))
     parser_menuconfig.add_argument('-p', "--platform", default="", help="device name, e.g. linux, maixcam, m2dock", choices=get_platforms(sdk_path))
+    parser_menuconfig.add_argument('--arch', default="", choices=["", "riscv64", "arm64", "native"],
+                             help="CPU architecture for platform (maixcam: riscv64|arm64, default riscv64)")
+    parser_menuconfig.add_argument('--toolchain-id', default="", help="toolchain id, if platform has multiple toolchains, use this option to select one")
 
     # cmd clean
     subparsers.add_parser("clean", help="clean build files, won't clean configuration")
@@ -279,6 +312,54 @@ def choose_platform(sdk_path):
     new_plat = plats[idx-1]
     return new_plat, plats
 
+def resolve_build_path(project_path, args, cmd):
+    """
+    Resolve per-platform/arch build directory.
+    For maixcam dual-arch: build/maixcam_riscv64 or build/maixcam_arm64.
+    Legacy flat build/ is still cleaned by distclean.
+    """
+    platform = ""
+    arch = ""
+    if hasattr(args, "platform") and args.platform:
+        platform = args.platform
+    if hasattr(args, "arch") and args.arch:
+        arch = args.arch
+
+    # Try to read from any existing project_vars.json under build/
+    if not platform or not arch:
+        candidates = [
+            os.path.join(project_path, "build", "config", "project_vars.json"),
+            os.path.join(project_path, "build", "maixcam_riscv64", "config", "project_vars.json"),
+            os.path.join(project_path, "build", "maixcam_arm64", "config", "project_vars.json"),
+        ]
+        for p in candidates:
+            if os.path.exists(p):
+                try:
+                    with open(p, encoding="utf-8") as f:
+                        saved = json.load(f)
+                    if not platform:
+                        platform = saved.get("PLATFORM", "")
+                    if not arch:
+                        arch = saved.get("MAIX_ARCH", "")
+                    if platform and arch:
+                        break
+                except Exception:
+                    pass
+
+    if not platform:
+        platform = "linux"
+    if not arch:
+        if platform == "maixcam":
+            arch = "riscv64"
+        elif platform in ("maixcam2", "rk3566"):
+            arch = "arm64"
+        else:
+            arch = "native"
+
+    sub = get_build_subdir(platform, arch)
+    return os.path.join(project_path, sub), platform, arch
+
+
 def main(sdk_path, project_path):
     sdk_path = os.path.abspath(sdk_path)
     project_path = os.path.abspath(project_path)
@@ -291,20 +372,39 @@ def main(sdk_path, project_path):
 
     # 2. get basic vars
     project_id = get_project_name(project_path)
-    build_path = os.path.join(project_path, "build")
     dist_path = os.path.join(project_path, "dist")
     thread_num = cpu_count()
+
+    build_path, _plat_hint, _arch_hint = resolve_build_path(project_path, args, cmd)
 
     if cmd not in ["clean", "distclean"]:
         configs_old = get_saved_configs(build_path)
         is_first_compile = not os.path.exists(os.path.join(build_path, "config", "project_vars.json"))
+        # Pre-create build path so configs can be saved after platform/arch chosen
+        os.makedirs(os.path.join(build_path, "config"), exist_ok=True)
         configs = update_configs(sdk_path, project_path, project_id, build_path, args, cmd)
+
+        # Re-resolve build path after platform/arch known (may differ from hint)
+        desired_sub = get_build_subdir(configs["PLATFORM"], configs["MAIX_ARCH"])
+        desired_build = os.path.join(project_path, desired_sub)
+        if os.path.abspath(desired_build) != os.path.abspath(build_path):
+            build_path = desired_build
+            os.makedirs(os.path.join(build_path, "config"), exist_ok=True)
+            configs = update_configs(sdk_path, project_path, project_id, build_path, args, cmd)
+            configs_old = get_saved_configs(build_path)
+            is_first_compile = not os.path.exists(os.path.join(build_path, "config", "project_vars.json"))
+
         platform_old = configs_old.get("PLATFORM", "")
         build_type_old = configs_old.get("CMAKE_BUILD_TYPE", "")
+        arch_old = configs_old.get("MAIX_ARCH", "")
         if platform_old and platform_old != configs["PLATFORM"]:
             print("\nPlatform changed from {} to {}".format(platform_old, configs["PLATFORM"]))
             print("Please execute `maixcdk distclean` to clean old build files first, maybe you need to execute `maixcdk menuconfig` after distclean")
             sys.exit(1)
+        elif arch_old and arch_old != configs["MAIX_ARCH"]:
+            # Arch change should use a different build dir; if same dir somehow, force clean hint
+            print("\nArch changed from {} to {}".format(arch_old, configs["MAIX_ARCH"]))
+            print("Using isolated build dir: {}".format(build_path))
         elif build_type_old and build_type_old != configs["CMAKE_BUILD_TYPE"]:
             print("\nBuild type changed from {} to {}".format(build_type_old, configs["CMAKE_BUILD_TYPE"]))
             print("Please execute `maixcdk distclean` to clean old build files first, maybe you need to execute `maixcdk menuconfig` after distclean")
@@ -313,6 +413,14 @@ def main(sdk_path, project_path):
             new_plat, plats = choose_platform(sdk_path)
             args.platform = new_plat
             configs = update_configs(sdk_path, project_path, project_id, build_path, args, cmd)
+            desired_sub = get_build_subdir(configs["PLATFORM"], configs["MAIX_ARCH"])
+            desired_build = os.path.join(project_path, desired_sub)
+            if os.path.abspath(desired_build) != os.path.abspath(build_path):
+                build_path = desired_build
+                os.makedirs(os.path.join(build_path, "config"), exist_ok=True)
+                configs = update_configs(sdk_path, project_path, project_id, build_path, args, cmd)
+        configs["BUILD_DIR"] = build_path
+        configs["DIST_NAME"] = get_dist_name(project_id, configs.get("BUILD_TYPE", "Release"), configs["MAIX_ARCH"])
         save_configs(build_path, configs)
 
     # dispatch cmd
@@ -323,7 +431,21 @@ def main(sdk_path, project_path):
         sys.exit(0)
     elif cmd == "distclean":
         print("-- Distclean now")
+        # Clean current arch build + legacy flat build/ + all maixcam arch builds
         distclean(project_path, build_path, dist_path)
+        for extra in (
+            os.path.join(project_path, "build"),
+            os.path.join(project_path, "build", "maixcam_riscv64"),
+            os.path.join(project_path, "build", "maixcam_arm64"),
+        ):
+            if os.path.isdir(extra) and os.path.abspath(extra) != os.path.abspath(build_path):
+                # only remove if it looks like a cmake build tree
+                if os.path.exists(os.path.join(extra, "CMakeCache.txt")) or os.path.exists(os.path.join(extra, "config")):
+                    try:
+                        shutil.rmtree(extra)
+                        print("-- removed {}".format(extra))
+                    except Exception as e:
+                        print("-- skip {}: {}".format(extra, e))
         print("-- Distclean done")
         sys.exit(0)
     elif cmd in ["build", "build2"]:
@@ -332,6 +454,7 @@ def main(sdk_path, project_path):
         print("-- Project ID: {}".format(project_id))
         print("-- Project path: {}".format(project_path))
         print("-- Platform: {}".format(platform))
+        print("-- Arch: {}".format(configs["MAIX_ARCH"]))
         print("-- Build path: {}".format(build_path))
         print("-- CPU count: {}".format(thread_num))
         print("-- Build type: {} ({})".format(configs["BUILD_TYPE"], configs["CMAKE_BUILD_TYPE"]))
@@ -345,8 +468,19 @@ def main(sdk_path, project_path):
         check_project_cmakelists(project_path)
 
         # check toolchain
-        info = check_toolchain_main(platform, os.path.join(sdk_path, "platforms"), os.path.join(build_path, "config", "toolchain_config.cmake"), configs["TOOLCHAIN_ID"])
+        os.makedirs(os.path.join(build_path, "config"), exist_ok=True)
+        info = check_toolchain_main(
+            platform,
+            os.path.join(sdk_path, "platforms"),
+            os.path.join(build_path, "config", "toolchain_config.cmake"),
+            configs["TOOLCHAIN_ID"],
+            configs.get("MAIX_ARCH"),
+        )
         configs["TOOLCHAIN_ID"] = info.get("id", "")
+        if info.get("arch"):
+            configs["MAIX_ARCH"] = info["arch"]
+        configs["BUILD_DIR"] = build_path
+        configs["DIST_NAME"] = get_dist_name(project_id, configs.get("BUILD_TYPE", "Release"), configs["MAIX_ARCH"])
         save_configs(build_path, configs)
         configs["CMAKE_C_FLAGS"] = info.get("c_flags", "")
         configs["CMAKE_CXX_FLAGS"] = info.get("cxx_flags", "")
@@ -371,6 +505,7 @@ def main(sdk_path, project_path):
         print("\n==================================")
         print("build time: {:.2f}s ({})".format(t, time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())))
         print("platform  : {}".format(platform))
+        print("arch      : {}".format(configs["MAIX_ARCH"]))
         print("build type: {}({})".format(configs["BUILD_TYPE"], configs["CMAKE_BUILD_TYPE"]))
         if configs["TOOLCHAIN_ID"]:
             print("toolchain : {}".format(configs["TOOLCHAIN_ID"]))
@@ -382,6 +517,8 @@ def main(sdk_path, project_path):
         print("-- Menuconfig done")
     # extra tools
     else:
+        if "configs" not in locals():
+            configs = get_saved_configs(build_path)
         for k, v in extra_tools.items():
             if cmd == v["cmd"]:
                 tool = v["obj"]
@@ -389,10 +526,11 @@ def main(sdk_path, project_path):
                     "project_path": project_path,
                     "project_id": project_id,
                     "sdk_path": sdk_path,
-                    "build_type": configs["CMAKE_BUILD_TYPE"],
+                    "build_type": configs.get("CMAKE_BUILD_TYPE", ""),
                     "project_parser": parser,
                     "project_args": args,
                     "configs": configs,
+                    "build_path": build_path,
                 }
                 print("\n-------- {} start ---------".format(args.cmd))
                 ret = tool.main(vars)

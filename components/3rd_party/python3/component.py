@@ -4,6 +4,10 @@ def add_file_downloads(confs : dict) -> list:
         @param confs kconfig vars, dict type
         @return list type, items is dict type
     '''
+    import os, sys
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "tools", "cmake"))
+    from maix_arch_util import get_maix_arch, toolchain_is_musl
+
     if (not confs.get("PLATFORM_MAIXCAM", None)) or confs.get("CONFIG_COMPONENTS_COMPILE_FROM_SOURCE", None) or confs.get("CONFIG_PYTHON3_COMPILE_FROM_SOURCE", None):
         version = f"{confs['CONFIG_PYTHON_VERSION_MAJOR']}.{confs['CONFIG_PYTHON_VERSION_MINOR']}.{confs['CONFIG_PYTHON_VERSION_PATCH']}"
         # Kconfig 0.0.0 means "auto" (see python3/CMakeLists.txt). CMake maps MaixCAM family to 3.11.6; mirror that here
@@ -64,9 +68,12 @@ def add_file_downloads(confs : dict) -> list:
                 'path': 'openssl'
             }
         ]
-    if "musl" not in confs["CONFIG_TOOLCHAIN_PATH"]:
+    arch = get_maix_arch(confs)
+    if arch == "arm64":
+        print("[python3] PLATFORM_MAIXCAM arch=arm64: no prebuilt package URL yet, skip download")
         return []
-    # version = f"{confs['CONFIG_OMV_VERSION_MAJOR']}.{confs['CONFIG_OMV_VERSION_MINOR']}.{confs['CONFIG_OMV_VERSION_PATCH']}"
+    if not toolchain_is_musl(confs):
+        return []
     version = "3.11.6"
     url = f"https://github.com/sipeed/MaixCDK/releases/download/v0.0.0/python3_lib_maixcam_musl_3.11.6.tar.xz"
     if version == "3.11.6":
