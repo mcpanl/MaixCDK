@@ -106,6 +106,10 @@ def update_configs(sdk_path, project_path, project_id, build_path, args, cmd = "
         for k in rms:
             vars.pop(k)
         vars["PLATFORM_{}".format(platform.upper())] = 1
+        # zonhor is a MaixCAM-family board: keep PLATFORM_MAIXCAM so components
+        # that only check maixcam continue to work without duplication.
+        if platform == "zonhor":
+            vars["PLATFORM_MAIXCAM"] = 1
         return vars
     # load vars already set by args
     vars = get_saved_configs(build_path)
@@ -138,19 +142,27 @@ def update_configs(sdk_path, project_path, project_id, build_path, args, cmd = "
     if not vars.get("MAIX_ARCH"):
         if vars["PLATFORM"] == "maixcam":
             vars["MAIX_ARCH"] = "riscv64"
+        elif vars["PLATFORM"] == "zonhor":
+            vars["MAIX_ARCH"] = "arm64"
         elif vars["PLATFORM"] in ("maixcam2", "rk3566"):
             vars["MAIX_ARCH"] = "arm64"
         elif vars["PLATFORM"] == "linux":
             vars["MAIX_ARCH"] = "native"
         else:
             vars["MAIX_ARCH"] = "native"
+    # zonhor always uses the MaixArm64Host glibc toolchain by default
+    if vars["PLATFORM"] == "zonhor" and not vars.get("TOOLCHAIN_ID"):
+        vars["TOOLCHAIN_ID"] = "arm64_glibc_linaro73"
     os.environ["BUILD_TYPE"] = vars["BUILD_TYPE"]
     os.environ["MAIX_ARCH"] = vars["MAIX_ARCH"]
     return vars
 
 
 def get_build_subdir(platform, arch):
-    """Isolate build dirs for maixcam dual-arch; other platforms keep flat build/."""
+    """Isolate build dirs for maixcam dual-arch / zonhor; other platforms keep flat build/."""
+    if platform == "zonhor":
+        a = arch if arch in ("riscv64", "arm64") else "arm64"
+        return os.path.join("build", "{}_{}".format(platform, a))
     if platform == "maixcam" and arch in ("riscv64", "arm64"):
         return os.path.join("build", "{}_{}".format(platform, arch))
     return "build"
@@ -248,7 +260,7 @@ def parse_args(sdk_path, project_path, extra_tools):
         parser_.add_argument('-p', "--platform", default="", help="device name, e.g. linux, maixcam, m2dock", choices=get_platforms(sdk_path))
         parser_.add_argument('--toolchain-id', default="", help="toolchain id, if platform has multiple toolchains, use this option to select one")
         parser_.add_argument('--arch', default="", choices=["", "riscv64", "arm64", "native"],
-                             help="CPU architecture for platform (maixcam: riscv64|arm64, default riscv64)")
+                             help="CPU architecture for platform (maixcam: riscv64|arm64, zonhor: arm64 default, default riscv64 for maixcam)")
     add_build_args(parser_build)
     add_build_args(parser_build2)
 
@@ -331,6 +343,7 @@ def resolve_build_path(project_path, args, cmd):
             os.path.join(project_path, "build", "config", "project_vars.json"),
             os.path.join(project_path, "build", "maixcam_riscv64", "config", "project_vars.json"),
             os.path.join(project_path, "build", "maixcam_arm64", "config", "project_vars.json"),
+            os.path.join(project_path, "build", "zonhor_arm64", "config", "project_vars.json"),
         ]
         for p in candidates:
             if os.path.exists(p):
@@ -351,6 +364,8 @@ def resolve_build_path(project_path, args, cmd):
     if not arch:
         if platform == "maixcam":
             arch = "riscv64"
+        elif platform == "zonhor":
+            arch = "arm64"
         elif platform in ("maixcam2", "rk3566"):
             arch = "arm64"
         else:
@@ -437,6 +452,7 @@ def main(sdk_path, project_path):
             os.path.join(project_path, "build"),
             os.path.join(project_path, "build", "maixcam_riscv64"),
             os.path.join(project_path, "build", "maixcam_arm64"),
+            os.path.join(project_path, "build", "zonhor_arm64"),
         ):
             if os.path.isdir(extra) and os.path.abspath(extra) != os.path.abspath(build_path):
                 # only remove if it looks like a cmake build tree

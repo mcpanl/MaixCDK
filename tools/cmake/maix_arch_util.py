@@ -5,7 +5,7 @@ def get_maix_arch(confs: dict) -> str:
     if arch:
         return str(arch)
     # Infer from known platforms
-    if confs.get("PLATFORM_MAIXCAM2") or confs.get("PLATFORM_RK3566"):
+    if confs.get("PLATFORM_MAIXCAM2") or confs.get("PLATFORM_RK3566") or confs.get("PLATFORM_ZONHOR"):
         return "arm64"
     if confs.get("PLATFORM_MAIXCAM"):
         # legacy: toolchain path heuristic
@@ -23,6 +23,9 @@ def is_maixcam_riscv64(confs: dict) -> bool:
 
 
 def is_maixcam_arm64(confs: dict) -> bool:
+    # zonhor is the MaixCAM arm64 glibc board alias
+    if confs.get("PLATFORM_ZONHOR"):
+        return True
     return bool(confs.get("PLATFORM_MAIXCAM")) and get_maix_arch(confs) == "arm64"
 
 

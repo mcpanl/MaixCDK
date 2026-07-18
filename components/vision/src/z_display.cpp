@@ -9,22 +9,16 @@
 #include "z_display.hpp"
 #include "maix_log.hpp"
 #include "global_config.h"
-//#include "maix_image_trans.hpp"
-#ifdef PLATFORM_LINUX
-//    #include "maix_display_sdl.hpp"
-//    #include "maix_display_fb.hpp"
-#endif
-#ifdef PLATFORM_MAIXCAM
+#include "z_display_fb.hpp"
+#if defined(PLATFORM_MAIXCAM) && !MAIXCAM_VISION_FB_ONLY
     #include "vision_maixcam_config.h"
-    #if MAIXCAM_VISION_USE_X_MMF
+    /* zonhor_mmf uses FB_Display only — no VO / z_lib display headers. */
+    #if MAIXCAM_VISION_USE_ZONHOR_MMF
+    #elif MAIXCAM_VISION_USE_X_MMF
         #include "z_display_xmmf.hpp"
     #else
         #include "z_display_mmf.hpp"
     #endif
-#endif
-#ifdef PLATFORM_MAIXCAM2
-//    #include "maix_display_maixcam2.hpp"
-//    #include "maix_display_fb.hpp"
 #endif
 #ifdef PLATFORM_RK3566
 #include "z_display_rk_x11.hpp"
@@ -39,7 +33,7 @@ namespace maix::display
 
     std::vector<std::string> list_devices()
     {
-        return {"0"};
+        return {"", "/dev/fb0"};
     }
 
     Display::Display(int width, int height, image::Format format, const std::string &device, bool open)
@@ -47,21 +41,36 @@ namespace maix::display
         _impl = NULL;
         _device = device;
 
-        if (device != "") {
-//            _impl = new FB_Display(device, width, height, format);
+#ifdef PLATFORM_ZONHOR
+        /* Zonhor panel is a 172x320 framebuffer; default empty device → /dev/fb0. */
+        static constexpr int kZonhorPanelW = 172;
+        static constexpr int kZonhorPanelH = 320;
+        static constexpr const char *kZonhorFb = "/dev/fb0";
+        if (_device.empty())
+            _device = kZonhorFb;
+        if (width <= 0)
+            width = kZonhorPanelW;
+        if (height <= 0)
+            height = kZonhorPanelH;
+#endif
+
+        if (_device != "") {
+            _impl = new FB_Display(_device, width, height, format);
         } else {
             // Select implementation by platform and backend
 #ifdef PLATFORM_RK3566
             _impl = new DisplayRkX11(device, width, height, format);
-#elif defined(PLATFORM_MAIXCAM)
+#elif defined(PLATFORM_MAIXCAM) && !MAIXCAM_VISION_FB_ONLY && !MAIXCAM_VISION_USE_ZONHOR_MMF
     #if MAIXCAM_VISION_USE_X_MMF
             _impl = new DisplayCviXmmf(device, width, height, format);
     #else
             _impl = new DisplayCviMmf(device, width, height, format);
     #endif
-#elif defined(PLATFORM_LINUX)
-//            _impl = new SDL_Display(device, width, height, format);
 #endif
+        }
+
+        if (_impl == NULL) {
+            err::check_raise(err::ERR_ARGS, "display device path required (e.g. /dev/fb0)");
         }
 
         if (open) {
@@ -83,31 +92,26 @@ namespace maix::display
 
     Display::~Display()
     {
-#ifdef PLATFORM_RK3566
-        if (_impl) {
-            this->close();
-            delete (DisplayRkX11 *)_impl;
-            _impl = NULL;
+        if (!_impl) {
+            return;
         }
-#elif defined(PLATFORM_LINUX)
-//        if (_device != "")
-//            delete (FB_Display *)_impl;
-//        else
-//            delete (SDL_Display *)_impl;
-#elif defined(PLATFORM_MAIXCAM)
         if (_device != "") {
-
-        }
-//            delete (FB_Display *)_impl;
-        else {
+            this->close();
+            delete static_cast<FB_Display *>(_impl);
+        } else {
+#ifdef PLATFORM_RK3566
+            this->close();
+            delete static_cast<DisplayRkX11 *>(_impl);
+#elif defined(PLATFORM_MAIXCAM) && !MAIXCAM_VISION_FB_ONLY && !MAIXCAM_VISION_USE_ZONHOR_MMF
             this->close();
     #if MAIXCAM_VISION_USE_X_MMF
-            delete (DisplayCviXmmf *)_impl;
+            delete static_cast<DisplayCviXmmf *>(_impl);
     #else
-            delete (DisplayCviMmf *)_impl;
+            delete static_cast<DisplayCviMmf *>(_impl);
     #endif
-        }
 #endif
+        }
+        _impl = NULL;
     }
 
     int Display::get_ch_nums()
@@ -217,7 +221,30 @@ namespace maix::display
             }
         }
 
+        if (_device != "") {
+            image::Format show_img_format = img.format();
+            if (show_img_format != image::Format::FMT_RGB888
+            && show_img_format != image::Format::FMT_YVU420SP
+            && show_img_format != image::Format::FMT_BGRA8888
+            && show_img_format != image::Format::FMT_GRAYSCALE) {
+                image::Image *show_img = img.to_format(image::Format::FMT_RGB888);
+                if (show_img == NULL) {
+                    log::error("image format convert failed\n");
+                    return err::ERR_RUNTIME;
+                }
+
+                _impl->show(*show_img, fit);
+                delete show_img;
+            } else {
+                _impl->show(img, fit);
+            }
+            return e;
+        }
+
 #ifdef PLATFORM_MAIXCAM
+        if (MAIXCAM_VISION_FB_ONLY) {
+            return e;
+        }
         image::Format show_img_format = img.format();
         if (show_img_format != image::Format::FMT_RGB888
         && show_img_format != image::Format::FMT_YVU420SP

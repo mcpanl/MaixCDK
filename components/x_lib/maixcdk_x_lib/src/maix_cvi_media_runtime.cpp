@@ -7,10 +7,15 @@
  *
  * Both Camera::add_channel (VPSS grp 1, chn 1) and NN SYS/VB init share
  * this context, so any construction order is safe.
+ *
+ * PLATFORM_ZONHOR: display uses framebuffer (/dev/fb0), so VO is disabled;
+ * camera still uses VI → VPSS. Sensor mode is selected via set_sensor_ini_path()
+ * (IMX678 1080p binning vs 5MP).
  */
 
 #include "maix_cvi_media_runtime.hpp"
 #include "maix_util.hpp"
+#include "global_config.h"
 #include <cstring>
 #include <cstdio>
 
@@ -28,10 +33,66 @@ std::mutex  MediaRuntime::s_mutex;
 std::mutex  MediaRuntime::s_disp_vpss0_send_mutex;
 int         MediaRuntime::s_refcount = 0;
 X_MMF_CTX_S MediaRuntime::s_ctx;
+std::string MediaRuntime::s_sensor_ini_pending;
+std::string MediaRuntime::s_sensor_ini_active;
 
 std::mutex &MediaRuntime::display_vpss0_send_mutex()
 {
     return s_disp_vpss0_send_mutex;
+}
+
+bool MediaRuntime::is_inited()
+{
+    std::lock_guard<std::mutex> lock(s_mutex);
+    return s_ctx.inited;
+}
+
+void MediaRuntime::set_sensor_ini_path(const char *path)
+{
+    std::lock_guard<std::mutex> lock(s_mutex);
+    if (!path || path[0] == '\0') {
+        s_sensor_ini_pending.clear();
+        X_MMF_SetSensorIniPath(nullptr);
+        return;
+    }
+    s_sensor_ini_pending = path;
+    X_MMF_SetSensorIniPath(path);
+}
+
+const char *MediaRuntime::sensor_ini_path()
+{
+    /* Prefer active (what VI was inited with), else pending. */
+    if (!s_sensor_ini_active.empty())
+        return s_sensor_ini_active.c_str();
+    if (!s_sensor_ini_pending.empty())
+        return s_sensor_ini_pending.c_str();
+    const char *p = X_MMF_GetSensorIniPath();
+    return p ? p : "";
+}
+
+CVI_S32 MediaRuntime::reconfigure_sensor_if_needed()
+{
+    std::lock_guard<std::mutex> lock(s_mutex);
+    if (s_sensor_ini_pending.empty())
+        return CVI_SUCCESS;
+    if (!s_ctx.inited) {
+        X_MMF_SetSensorIniPath(s_sensor_ini_pending.c_str());
+        return CVI_SUCCESS;
+    }
+    if (s_sensor_ini_pending == s_sensor_ini_active)
+        return CVI_SUCCESS;
+    if (s_refcount > 0) {
+        printf("[MediaRuntime] cannot reconfigure sensor ini while refcount=%d "
+               "(pending=%s active=%s)\n",
+               s_refcount, s_sensor_ini_pending.c_str(), s_sensor_ini_active.c_str());
+        return CVI_FAILURE;
+    }
+    printf("[MediaRuntime] reconfigure sensor: %s -> %s\n",
+           s_sensor_ini_active.c_str(), s_sensor_ini_pending.c_str());
+    X_MMF_SetSensorIniPath(s_sensor_ini_pending.c_str());
+    _deinit();
+    _init();
+    return s_ctx.inited ? CVI_SUCCESS : CVI_FAILURE;
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -49,9 +110,15 @@ static constexpr VPSS_GRP  CAM_VPSS_GRP  = 1;
 static constexpr CVI_U32   CAM_DEF_W     = 640;
 static constexpr CVI_U32   CAM_DEF_H     = 480;
 
+#ifdef PLATFORM_ZONHOR
+// IMX678 5MP mode max (board reports up to 2848x1602; leave headroom for 2880x1620 ISP)
+static constexpr CVI_U32   CAM_VI_MAX_W  = 2880;
+static constexpr CVI_U32   CAM_VI_MAX_H  = 1620;
+#else
 // VI 典型输出（GC4653 等）；grp_attr 须 ≥ VI 输出，否则 VI→VPSS 异常（对齐 z_lib stSize）
 static constexpr CVI_U32   CAM_VI_MAX_W  = 2560;
 static constexpr CVI_U32   CAM_VI_MAX_H  = 1440;
+#endif
 
 // Display panel resolution on MaixCam（与 z_lib Z_WIDTH/Z_HEIGHT 一致；VO 使用 90° 旋转）
 static constexpr CVI_U32   DISP_W        = 640;
@@ -105,6 +172,10 @@ void MediaRuntime::_init()
         maix::util::register_exit_function(MediaRuntime::_at_exit_handler);
         maix::log::info("MediaRuntime: registered util exit handler for MMF cleanup\n");
     });
+
+    if (!s_sensor_ini_pending.empty()) {
+        X_MMF_SetSensorIniPath(s_sensor_ini_pending.c_str());
+    }
 
     X_MMF_CONFIG_S cfg;
     X_MMF_DefaultConfig(&cfg);
@@ -176,6 +247,11 @@ void MediaRuntime::_init()
     cfg.vpss[1].chn_attr[1].stAspectRatio.u32BgColor     = COLOR_RGB_BLACK;
 
     // ── VO ──────────────────────────────────────────────────────────────────
+#ifdef PLATFORM_ZONHOR
+    /* Zonhor uses framebuffer display (/dev/fb0); skip MIPI VO bring-up. */
+    cfg.vo.enable = CVI_FALSE;
+    printf("[MediaRuntime] zonhor: VO disabled (FB display)\n");
+#else
     cfg.vo.enable = CVI_TRUE;
     cfg.vo.vo_layer = VO_LAYER_ID;
     cfg.vo.vo_chn   = VO_CHN_ID;
@@ -200,11 +276,20 @@ void MediaRuntime::_init()
         vo_cfg.enVoMode                     = VO_MODE_1MUX;
         cfg.vo.vo_cfg = vo_cfg;
     }
+#endif
 
     CVI_S32 ret = X_MMF_Init(&s_ctx, &cfg);
     if (ret != CVI_SUCCESS) {
         printf("[MediaRuntime] X_MMF_Init failed: 0x%x\n", ret);
+        s_sensor_ini_active.clear();
         return;
+    }
+
+    s_sensor_ini_active = s_sensor_ini_pending;
+    if (s_sensor_ini_active.empty()) {
+        const char *p = X_MMF_GetSensorIniPath();
+        if (p && p[0])
+            s_sensor_ini_active = p;
     }
 
     // Bind VI to camera VPSS group 1
@@ -213,30 +298,35 @@ void MediaRuntime::_init()
         printf("[MediaRuntime] X_MMF_BindVIToVPSS failed: 0x%x\n", ret);
     }
 
-    // Bind display VPSS group 0, chn 0 → VO
-    ret = X_MMF_BindVPSSToVO(DISP_VPSS_GRP, DISP_VPSS_CHN, VO_LAYER_ID, VO_CHN_ID);
-    if (ret != CVI_SUCCESS) {
-        printf("[MediaRuntime] X_MMF_BindVPSSToVO failed: 0x%x\n", ret);
-    }
-
-    CVI_VO_EnableChn(VO_LAYER_ID, VO_CHN_ID);
-
-    /* Prime VPSS→VO with black before ShowChn to avoid a brief garbage / green flash
-     * from uninitialized scanout buffers (VO was enabled with no valid frame yet). */
     if (s_ctx.cfg.vo.enable) {
-        std::lock_guard<std::mutex> disp_lk(s_disp_vpss0_send_mutex);
-        for (int i = 0; i < 2; ++i) {
-            ret = _vpss_send_display_black_prime();
-            if (ret != CVI_SUCCESS) {
-                printf("[MediaRuntime] display black prime frame %d failed: 0x%x\n", i, ret);
-                break;
+        // Bind display VPSS group 0, chn 0 → VO
+        ret = X_MMF_BindVPSSToVO(DISP_VPSS_GRP, DISP_VPSS_CHN, VO_LAYER_ID, VO_CHN_ID);
+        if (ret != CVI_SUCCESS) {
+            printf("[MediaRuntime] X_MMF_BindVPSSToVO failed: 0x%x\n", ret);
+        }
+
+        CVI_VO_EnableChn(VO_LAYER_ID, VO_CHN_ID);
+
+        /* Prime VPSS→VO with black before ShowChn to avoid a brief garbage / green flash
+         * from uninitialized scanout buffers (VO was enabled with no valid frame yet). */
+        {
+            std::lock_guard<std::mutex> disp_lk(s_disp_vpss0_send_mutex);
+            for (int i = 0; i < 2; ++i) {
+                ret = _vpss_send_display_black_prime();
+                if (ret != CVI_SUCCESS) {
+                    printf("[MediaRuntime] display black prime frame %d failed: 0x%x\n", i, ret);
+                    break;
+                }
             }
         }
+
+        CVI_VO_ShowChn(VO_LAYER_ID, VO_CHN_ID);
     }
 
-    CVI_VO_ShowChn(VO_LAYER_ID, VO_CHN_ID);
-
-    printf("[MediaRuntime] init ok\n");
+    printf("[MediaRuntime] init ok (sensor_ini=%s vi=%ux%u vo=%d)\n",
+           s_sensor_ini_active.empty() ? "(default)" : s_sensor_ini_active.c_str(),
+           s_ctx.vi_size.u32Width, s_ctx.vi_size.u32Height,
+           (int)s_ctx.cfg.vo.enable);
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -260,13 +350,15 @@ void MediaRuntime::_deinit()
         }
     }
 
-    CVI_VO_HideChn(VO_LAYER_ID, VO_CHN_ID);
-    CVI_VO_DisableChn(VO_LAYER_ID, VO_CHN_ID);
-
-    X_MMF_UnbindVPSSToVO(DISP_VPSS_GRP, DISP_VPSS_CHN, VO_LAYER_ID, VO_CHN_ID);
+    if (s_ctx.cfg.vo.enable) {
+        CVI_VO_HideChn(VO_LAYER_ID, VO_CHN_ID);
+        CVI_VO_DisableChn(VO_LAYER_ID, VO_CHN_ID);
+        X_MMF_UnbindVPSSToVO(DISP_VPSS_GRP, DISP_VPSS_CHN, VO_LAYER_ID, VO_CHN_ID);
+    }
     X_MMF_UnbindVIFromVPSS(&s_ctx, CAM_VPSS_GRP);
 
     X_MMF_Deinit(&s_ctx);
+    s_sensor_ini_active.clear();
     printf("[MediaRuntime] deinit ok\n");
 }
 
@@ -289,6 +381,10 @@ void MediaRuntime::acquire()
     std::lock_guard<std::mutex> lock(s_mutex);
     if (s_refcount++ == 0) {
         _init();
+        if (!s_ctx.inited) {
+            /* Init failed: do not leave a dangling holder ref. */
+            s_refcount = 0;
+        }
     }
 }
 

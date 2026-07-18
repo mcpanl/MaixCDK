@@ -1,0 +1,7 @@
+id: zonhor_hw_preview
+name: Zonhor HW Preview
+name[zh]: Zonhor 硬件预览
+version: 1.0.0
+author: Sipeed Ltd
+desc: IMX678 HW preview via zonhor_mmf (sample_sensor_lcd pipeline) to /dev/fb0
+desc[zh]: 通过 zonhor_mmf（sample_sensor_lcd 管线）将 IMX678 硬件预览输出到 /dev/fb0

@@ -10,12 +10,25 @@
 #include <stdio.h>
 #include <unistd.h>
 
-#if __cplusplus < 201703L
+#if defined(__cpp_lib_filesystem)
+#include <filesystem>
+namespace fs_sys = std::filesystem;
+#elif defined(__cpp_lib_experimental_filesystem)
+#include <experimental/filesystem>
+namespace fs_sys = std::experimental::filesystem;
+#elif defined(__has_include)
+#if __has_include(<filesystem>)
+#include <filesystem>
+namespace fs_sys = std::filesystem;
+#elif __has_include(<experimental/filesystem>)
 #include <experimental/filesystem>
 namespace fs_sys = std::experimental::filesystem;
 #else
-#include <filesystem>
-namespace fs_sys = std::filesystem;
+#error "No filesystem support"
+#endif
+#else
+#include <experimental/filesystem>
+namespace fs_sys = std::experimental::filesystem;
 #endif
 
 namespace maix::fs

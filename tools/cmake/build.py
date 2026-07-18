@@ -22,7 +22,7 @@ from file_downloader import download_extract_files
 thread_num = cpu_count()
 
 def execute_component_py_func(py_path : str, func : str, *args, **kwargs):
-    g = {}
+    g = {"__file__": py_path, "__name__": "component"}
     with open(py_path, "r", encoding="utf-8") as f:
         exec(f.read(), g)
         if func not in g:
@@ -230,6 +230,9 @@ def rebuild(build_path, configs, toolchain_info, verbose):
     with open(path, "w", encoding="utf-8") as f:
         code = "#ifndef __GLOBAL_CONFIG_PLATFORM_H__\n#define __GLOBAL_CONFIG_PLATFORM_H__\n"
         code += "#define PLATFORM_{} 1\n".format(configs["PLATFORM"].upper())
+        # zonhor reuses maixcam component ports; also define PLATFORM_MAIXCAM for #ifdefs
+        if configs["PLATFORM"] == "zonhor":
+            code += "#define PLATFORM_MAIXCAM 1\n"
         code += "#define PLATFORM \"{}\"\n".format(configs["PLATFORM"])
         code += "#define PROJECT_ID \"{}\"\n".format(configs["PROJECT_ID"])
         if maix_arch:

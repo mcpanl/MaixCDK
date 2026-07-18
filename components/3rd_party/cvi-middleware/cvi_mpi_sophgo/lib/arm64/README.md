@@ -1,9 +1,25 @@
-# Arch-specific placeholder
+# arm64 middleware libs (optional local override)
 
-This directory is reserved for MaixCAM architecture-specific sources or prebuilt libs
-that differ significantly from the shared `port/maixcam` / common implementation.
+Place aarch64 `.so` / `.a` here to override the default cache.
 
-- Directory name: riscv64 | arm64 (do not use aarch64 as dir name)
-- Prefer sharing code in the parent directory; only place large diffs here.
-- Until real sources/libs exist, keep this README so the layout stays stable.
+If this directory has no real libs (e.g. only this README), CMake falls back to:
 
+```text
+<repo>/MaixArm64Lib/arm64-glibc/cvi_mpi/lib
+```
+
+Populate the cache with:
+
+```bash
+./scripts/sync_maixcam_arm64_sdk.sh --libs-only
+```
+
+Optional: copy or symlink from the cache into this directory:
+
+```bash
+LIB_ROOT="$(pwd)/MaixArm64Lib/arm64-glibc"
+cp -a "${LIB_ROOT}/cvi_mpi/lib/." \
+  MaixCDK/components/3rd_party/cvi-middleware/cvi_mpi_sophgo/lib/arm64/
+```
+
+Do not mix riscv64 binaries into this folder.

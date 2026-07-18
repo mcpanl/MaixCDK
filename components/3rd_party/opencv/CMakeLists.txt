@@ -43,7 +43,7 @@ if((PLATFORM_MAIXCAM OR PLATFORM_MAIXCAM2) AND NOT CONFIG_OPENCV_COMPILE_FROM_SO
         if (PLATFORM_MAIXCAM)
             if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/opencv4_lib_maixcam")
                 set(opencv_lib_dir "${CMAKE_CURRENT_LIST_DIR}/opencv4_lib_maixcam")
-            elseif(EXISTS "${CMAKE_CURRENT_LIST_DIR}/lib/${MAIX_ARCH}")
+            elseif(EXISTS "${CMAKE_CURRENT_LIST_DIR}/lib/${MAIX_ARCH}/include/opencv4/opencv2/core.hpp")
                 set(opencv_lib_dir "${CMAKE_CURRENT_LIST_DIR}/lib/${MAIX_ARCH}")
             elseif(MAIX_ARCH STREQUAL "riscv64" AND CONFIG_TOOLCHAIN_PATH MATCHES "musl")
                 set(opencv_lib_dir "${DL_EXTRACTED_PATH}/opencv/opencv4/opencv4_lib_maixcam_musl_${version_str}")

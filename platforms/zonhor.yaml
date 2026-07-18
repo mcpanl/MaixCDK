@@ -1,0 +1,21 @@
+# Zonhor (SG2000 arm64 glibc) — MaixCAM-compatible board alias.
+# Most components reuse PLATFORM_MAIXCAM ports; vision display/camera differ.
+toolchain:
+  - name: GLIBC aarch64 toolchain (Linaro 7.3.1, MaixArm64Host)
+    id: arm64_glibc_linaro73
+    arch: arm64
+    libc: glibc
+    default: true
+    url:
+    urls:
+    sites:
+      - https://www.linaro.org/downloads/
+    sha256sum:
+    filename:
+    path:
+    # Resolved relative to repository root (parent of MaixCDK/), not dl/extracted
+    path_base: repo_root
+    bin_path: MaixArm64Host/toolchain/gcc-linaro-7.3.1-2018.05-x86_64_aarch64-linux-gnu/bin
+    prefix: aarch64-linux-gnu-
+    c_flags: ""
+    cxx_flags: ""

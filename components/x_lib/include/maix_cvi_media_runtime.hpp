@@ -3,6 +3,7 @@
 
 #include "x_mmf.h"
 #include <mutex>
+#include <string>
 
 namespace maix::cvi {
 
@@ -19,14 +20,35 @@ namespace maix::cvi {
  *
  * After init the singleton also:
  *   - binds VI to VPSS group 1
- *   - binds VPSS group 0 chn 0 to VO
- *   - enables / shows the VO channel with 90° rotation
+ *   - binds VPSS group 0 chn 0 to VO (skipped on PLATFORM_ZONHOR — FB display)
+ *   - enables / shows the VO channel with 90° rotation (MaixCam only)
  */
 class MediaRuntime {
 public:
     static void acquire();
     static void release();
     static X_MMF_CTX_S *ctx();
+    static bool is_inited();
+
+    /**
+     * Set sensor_cfg.ini path applied on the next (or current) X_MMF init.
+     * Also forwards to X_MMF_SetSensorIniPath. Call before acquire() when
+     * the desired VI mode depends on resolution (e.g. Zonhor IMX678).
+     *
+     * If the runtime is already initialized with a different path, call
+     * reconfigure_sensor() after ensuring other users have released (refcount 0),
+     * or close()/open() the camera so release() tears down first.
+     */
+    static void set_sensor_ini_path(const char *path);
+    static const char *sensor_ini_path();
+
+    /**
+     * If pending sensor ini differs from the one used at last init, tear down
+     * and re-init. Requires s_refcount == 0 (no live users) OR the caller has
+     * already released and will re-acquire. Returns CVI_SUCCESS on success /
+     * no-op, CVI_FAILURE if other users still hold the runtime.
+     */
+    static CVI_S32 reconfigure_sensor_if_needed();
 
     /**
      * Resize / reformat VPSS display path group 0 **source** attributes (u32MaxW/H,
@@ -54,6 +76,8 @@ private:
     static std::mutex  s_disp_vpss0_send_mutex;
     static int         s_refcount;
     static X_MMF_CTX_S s_ctx;
+    static std::string s_sensor_ini_pending;
+    static std::string s_sensor_ini_active;
 
     static void _init();
     static void _deinit();

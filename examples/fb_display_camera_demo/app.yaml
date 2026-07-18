@@ -1,0 +1,7 @@
+id: fb_display_camera_demo
+name: FB Display Camera Demo
+name[zh]: Framebuffer 显示摄像头测试
+version: 1.0.0
+author: Sipeed Ltd
+desc: Test z_display output via Linux framebuffer /dev/fb0 (172x320)
+desc[zh]: 通过 Linux framebuffer /dev/fb0 测试 z_display 输出（172x320）

@@ -6,6 +6,8 @@
 static X_MMF_LOG_LEVEL_E g_x_mmf_log_level = X_MMF_LOG_INFO;
 /* -1: use default (12 for VI path); else 4..24 passed to X_MMF_SetVbBlkCntHint */
 static int g_x_mmf_vb_blk_cnt_hint = -1;
+/* Programmatic sensor_cfg.ini override (see X_MMF_SetSensorIniPath). */
+static char g_x_mmf_sensor_ini_path[256] = {0};
 
 void X_MMF_SetVbBlkCntHint(CVI_U32 blk_cnt)
 {
@@ -13,6 +15,21 @@ void X_MMF_SetVbBlkCntHint(CVI_U32 blk_cnt)
         g_x_mmf_vb_blk_cnt_hint = -1;
     else
         g_x_mmf_vb_blk_cnt_hint = (int)blk_cnt;
+}
+
+void X_MMF_SetSensorIniPath(const char *ini_path)
+{
+    if (!ini_path || ini_path[0] == '\0') {
+        g_x_mmf_sensor_ini_path[0] = '\0';
+        return;
+    }
+    strncpy(g_x_mmf_sensor_ini_path, ini_path, sizeof(g_x_mmf_sensor_ini_path) - 1);
+    g_x_mmf_sensor_ini_path[sizeof(g_x_mmf_sensor_ini_path) - 1] = '\0';
+}
+
+const char *X_MMF_GetSensorIniPath(void)
+{
+    return g_x_mmf_sensor_ini_path[0] ? g_x_mmf_sensor_ini_path : NULL;
 }
 
 const char *x_mmf_log_level_name(X_MMF_LOG_LEVEL_E level)

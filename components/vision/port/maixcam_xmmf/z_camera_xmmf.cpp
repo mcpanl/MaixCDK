@@ -17,6 +17,9 @@
 #include "z_camera.hpp"
 #include "maix_basic.hpp"
 #include "maix_cvi_media_runtime.hpp"
+#ifdef PLATFORM_ZONHOR
+#include "z_zonhor_sensor.hpp"
+#endif
 
 extern "C" {
 #include "x_mmf.h"
@@ -38,6 +41,9 @@ using namespace maix;
 namespace maix::camera {
 
     static bool s_regs_flag = false;
+#ifdef PLATFORM_ZONHOR
+    static zonhor::Imx678Mode s_active_imx678_mode = zonhor::Imx678Mode::Binning1080p;
+#endif
 
     std::vector<std::string> list_devices()
     {
@@ -47,7 +53,14 @@ namespace maix::camera {
 
     void set_regs_enable(bool enable) { s_regs_flag = enable; }
 
-    std::string get_device_name() { return "gc2083"; }
+    std::string get_device_name()
+    {
+#ifdef PLATFORM_ZONHOR
+        return zonhor::device_name();
+#else
+        return "gc2083";
+#endif
+    }
 
     err::Err Camera::show_colorbar(bool enable)
     {
@@ -74,14 +87,34 @@ namespace maix::camera {
 
     static void _config_sensor_env(double fps)
     {
+#ifdef PLATFORM_ZONHOR
+        if (!getenv(MMF_SENSOR_NAME))
+            setenv(MMF_SENSOR_NAME, zonhor::device_name(), 0);
+#else
         if (!getenv(MMF_SENSOR_NAME))
             setenv(MMF_SENSOR_NAME, "gc2083", 0);
+#endif
         if (!getenv(MAIX_SENSOR_FPS)) {
             char buf[16];
             snprintf(buf, sizeof(buf), "%d", (int)fps);
             setenv(MAIX_SENSOR_FPS, buf, 0);
         }
     }
+
+#ifdef PLATFORM_ZONHOR
+    /** Select IMX678 sensor_cfg.ini from requested resolution and apply before MMF init. */
+    static void _zonhor_prepare_sensor_mode(int width, int height)
+    {
+        /* Env MAIX_SENSOR_CFG_INI wins inside x_mmf_vi_prepare; still set programmatic path. */
+        zonhor::Imx678Mode mode = zonhor::mode_from_resolution(width, height);
+        const char *ini = zonhor::ini_path_for_mode(mode);
+        s_active_imx678_mode = mode;
+        maix::cvi::MediaRuntime::set_sensor_ini_path(ini);
+        log::info("zonhor IMX678 mode=%s (%dx%d) ini=%s",
+                  (mode == zonhor::Imx678Mode::Mode5MP) ? "5MP" : "1080p_bin",
+                  width, height, ini);
+    }
+#endif
 
     /* Resize a VPSS channel while keeping other channels running. */
     static CVI_S32 _vpss_resize_chn(VPSS_GRP grp, VPSS_CHN chn,
@@ -248,6 +281,10 @@ namespace maix::camera {
 
         err::check_bool_raise(_check_format(fmt), "Format not supported");
 
+#ifdef PLATFORM_ZONHOR
+        zonhor::clamp_resolution(w, h);
+#endif
+
         _width  = w;
         _height = h;
         _fps    = f;
@@ -255,7 +292,17 @@ namespace maix::camera {
         _format_impl = fmt;
 
         _config_sensor_env(_fps);
+#ifdef PLATFORM_ZONHOR
+        _zonhor_prepare_sensor_mode(_width, _height);
+        /* If a previous session left MMF inited with another ini and no holders,
+         * rebuild now; normal close()/open() already deinits via release(). */
+        (void)maix::cvi::MediaRuntime::reconfigure_sensor_if_needed();
+#endif
         maix::cvi::MediaRuntime::acquire();
+        if (!maix::cvi::MediaRuntime::is_inited()) {
+            log::error("Camera open failed: MMF/VI init failed (check sensor ini / libsns)");
+            return err::ERR_RUNTIME;
+        }
 
         /* Resize the VPSS camera channel to the requested resolution. */
         CVI_S32 ret = _vpss_resize_chn(CAM_GRP, (VPSS_CHN)_ch,
@@ -368,6 +415,18 @@ namespace maix::camera {
     err::Err Camera::set_resolution(int width, int height)
     {
         if (!_is_opened) return err::ERR_NOT_OPEN;
+
+#ifdef PLATFORM_ZONHOR
+        zonhor::clamp_resolution(width, height);
+        zonhor::Imx678Mode new_mode = zonhor::mode_from_resolution(width, height);
+        if (new_mode != s_active_imx678_mode) {
+            /* Cross-mode switch requires VI re-init with a different sensor_cfg.ini. */
+            log::info("zonhor set_resolution cross-mode %dx%d → rebuild MMF", width, height);
+            close();
+            return open(width, height, _format, _fps, _buff_num);
+        }
+#endif
+
         CVI_S32 ret = _vpss_resize_chn(CAM_GRP, (VPSS_CHN)_ch,
                                         (CVI_U32)width, (CVI_U32)height,
                                         PIXEL_FORMAT_RGB_888,
@@ -458,7 +517,15 @@ namespace maix::camera {
 
     std::vector<int> Camera::get_sensor_size()
     {
+        X_MMF_CTX_S *ctx = maix::cvi::MediaRuntime::ctx();
+        if (ctx && ctx->inited && ctx->vi_size.u32Width > 0 && ctx->vi_size.u32Height > 0) {
+            return {(int)ctx->vi_size.u32Width, (int)ctx->vi_size.u32Height};
+        }
+#ifdef PLATFORM_ZONHOR
+        return zonhor::sensor_size_for_mode(s_active_imx678_mode);
+#else
         return {1920, 1080};
+#endif
     }
 
     err::Err Camera::write_reg(int addr, int data, int bit_width)

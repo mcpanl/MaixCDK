@@ -159,6 +159,20 @@ X_MMF_LOG_LEVEL_E X_MMF_GetLogLevel(void);
  */
 void X_MMF_SetVbBlkCntHint(CVI_U32 blk_cnt);
 
+/**
+ * Override sensor_cfg.ini path used by SAMPLE_COMM_VI_ParseIni during X_MMF VI prepare.
+ * Call before X_MMF_Init / MediaRuntime::acquire.
+ *
+ * Priority (highest first):
+ *   1) env MAIX_SENSOR_CFG_INI (always wins if set)
+ *   2) path passed to this function
+ *   3) middleware defaults (/mnt/data/sensor_cfg.ini, then /mnt/system/usr/bin/sensor_cfg.ini)
+ *
+ * Pass NULL or "" to clear the programmatic override.
+ */
+void X_MMF_SetSensorIniPath(const char *ini_path);
+const char *X_MMF_GetSensorIniPath(void);
+
 #if X_MMF_ENABLE_VI
 CVI_S32 X_MMF_VI_GetFrame(X_MMF_CTX_S *ctx, VIDEO_FRAME_INFO_S *frame, CVI_S32 timeout_ms);
 CVI_S32 X_MMF_VI_ReleaseFrame(X_MMF_CTX_S *ctx, VIDEO_FRAME_INFO_S *frame);

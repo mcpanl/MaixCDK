@@ -149,7 +149,6 @@ CVI_S32 SAMPLE_COMM_SNS_GetSize(SAMPLE_SNS_TYPE_E enMode, PIC_SIZE_E *penSize)
 	case SMS_SC1346_1L_SLAVE_MIPI_1M_30FPS_10BIT:
 	case SMS_SC1346_1L_SLAVE_MIPI_1M_60FPS_10BIT:
 	case SOI_H65_MIPI_1M_30FPS_10BIT:
-	case SOI_H65_MIPI_1M_30FPS_10BIT_WDR2TO1:
 	case SONY_IMX290_MIPI_1M_30FPS_12BIT:
 	case TECHPOINT_TP2863_MIPI_1M_25FPS_8BIT:
 	case TECHPOINT_TP2863_MIPI_1M_30FPS_8BIT:
@@ -272,8 +271,6 @@ CVI_S32 SAMPLE_COMM_SNS_GetSize(SAMPLE_SNS_TYPE_E enMode, PIC_SIZE_E *penSize)
 	case SMS_SC4210_MIPI_4M_30FPS_10BIT_WDR2TO1:
 	case SMS_SC4336_MIPI_4M_30FPS_10BIT:
 	case SMS_SC4336P_MIPI_4M_30FPS_10BIT:
-	case SMS_SC4336P_1L_MIPI_4M_20FPS_10BIT:
-	case SMS_SC4336P1_1L_MIPI_4M_20FPS_10BIT:
 	case SOI_K06_MIPI_4M_25FPS_10BIT:
 	case SOI_K306_MIPI_4M_25FPS_10BIT:
 	case SONY_IMX335_MIPI_4M_30FPS_12BIT:
@@ -354,15 +351,18 @@ CVI_S32 SAMPLE_COMM_SNS_GetSize(SAMPLE_SNS_TYPE_E enMode, PIC_SIZE_E *penSize)
 	case SMS_SC8238_MIPI_8M_15FPS_10BIT_WDR2TO1:
 	case SONY_IMX334_MIPI_8M_30FPS_12BIT:
 	case SONY_IMX334_MIPI_8M_30FPS_12BIT_WDR2TO1:
-		*penSize = PIC_3840x2160;
+	case SONY_IMX678_MIPI_8M_30FPS_12BIT:
+		*penSize = PIC_2880x1620;
+		break;
+	case SONY_IMX678_MIPI_2M_30FPS_12BIT:
+	case SONY_IMX678_MIPI_2M_30FPS_10BIT_BIN:
+		*penSize = PIC_1080P;
 		break;
 	case OV_OV7251_MIPI_480P_120FPS_10BIT:
 	case SMS_SC035GS_MIPI_480P_120FPS_12BIT:
 	case SMS_SC035GS_1L_MIPI_480P_120FPS_10BIT:
 	case SMS_SC035HGS_MIPI_480P_120FPS_12BIT:
 	case SMS_SC035HGS_1L_MIPI_480P_120FPS_10BIT:
-	case SMS_SC231HAI_MIPI_480P_60FPS_10BIT:
-	case SMS_SC231HAI_MIPI_480P_60FPS_10BIT_WDR2TO1:
 	case GCORE_GC0308_MIPI_480P_30FPS_8BIT:
 	case GCORE_GC0312_MIPI_480P_20FPS_8BIT:
 	case GCORE_GC0329_MIPI_480P_10FPS_8BIT:
@@ -379,7 +379,6 @@ CVI_S32 SAMPLE_COMM_SNS_GetSize(SAMPLE_SNS_TYPE_E enMode, PIC_SIZE_E *penSize)
 		break;
 	case PIXELPLUS_PR2100_2M_2CH_25FPS_8BIT:
 	case PIXELPLUS_PR2100_2M_4CH_25FPS_8BIT:
-	case SMS_SC231HAI_MIPI_1080P_60FPS_10BIT:
 		*penSize = PIC_1080P;
 		break;
 	default:
@@ -730,6 +729,9 @@ CVI_S32 SAMPLE_COMM_SNS_GetDevAttr(SAMPLE_SNS_TYPE_E enSnsType, VI_DEV_ATTR_S *p
 	case SONY_IMX385_MIPI_2M_30FPS_12BIT_WDR2TO1:
 	case SONY_IMX675_MIPI_5M_30FPS_12BIT:
 	case SONY_IMX675_MIPI_5M_25FPS_12BIT_WDR2TO1:
+	case SONY_IMX678_MIPI_8M_30FPS_12BIT:
+	case SONY_IMX678_MIPI_2M_30FPS_12BIT:
+	case SONY_IMX678_MIPI_2M_30FPS_10BIT_BIN:
 	// GalaxyCore
 	case GCORE_GC02M1_MIPI_2M_30FPS_10BIT:
 	case GCORE_GC1054_MIPI_1M_30FPS_10BIT:
@@ -762,8 +764,6 @@ CVI_S32 SAMPLE_COMM_SNS_GetDevAttr(SAMPLE_SNS_TYPE_E enSnsType, VI_DEV_ATTR_S *p
 	case GCORE_GC2385_1L_MIPI_2M_30FPS_10BIT:
 	case SMS_SC4336_MIPI_4M_30FPS_10BIT:
 	case SMS_SC4336P_MIPI_4M_30FPS_10BIT:
-	case SMS_SC4336P_1L_MIPI_4M_20FPS_10BIT:
-	case SMS_SC4336P1_1L_MIPI_4M_20FPS_10BIT:
 	case SOI_K306_MIPI_4M_25FPS_10BIT:
 		pstViDevAttr->enBayerFormat = BAYER_FORMAT_BG;
 		break;
@@ -817,6 +817,9 @@ CVI_S32 SAMPLE_COMM_SNS_GetDevAttr(SAMPLE_SNS_TYPE_E enSnsType, VI_DEV_ATTR_S *p
 		case GCORE_GC4653_MIPI_4M_30FPS_10BIT:
 		case SONY_IMX675_MIPI_5M_30FPS_12BIT:
 		case SONY_IMX675_MIPI_5M_25FPS_12BIT_WDR2TO1:
+		case SONY_IMX678_MIPI_8M_30FPS_12BIT:
+		case SONY_IMX678_MIPI_2M_30FPS_12BIT:
+		case SONY_IMX678_MIPI_2M_30FPS_10BIT_BIN:
 			pstViDevAttr->disEnableSbm = 1;
 			break;
 		default:
@@ -885,6 +888,12 @@ CVI_S32 SAMPLE_COMM_SNS_GetIspAttrBySns(SAMPLE_SNS_TYPE_E enSnsType, ISP_PUB_ATT
 	pstPubAttr->stWndRect.u32Width = stSize.u32Width;
 	pstPubAttr->stWndRect.u32Height = stSize.u32Height;
 
+	/* IMX678 1080p: u8SnsMode 0=crop, 1=2x2 binning (same 1920x1080 size) */
+	if (enSnsType == SONY_IMX678_MIPI_2M_30FPS_10BIT_BIN)
+		pstPubAttr->u8SnsMode = 1;
+	else
+		pstPubAttr->u8SnsMode = 0;
+
 	// WDR mode
 	if (enSnsType >= SAMPLE_SNS_TYPE_LINEAR_BUTT)
 		pstPubAttr->enWDRMode = WDR_MODE_2To1_LINE;
@@ -918,9 +927,6 @@ CVI_S32 SAMPLE_COMM_SNS_GetIspAttrBySns(SAMPLE_SNS_TYPE_E enSnsType, ISP_PUB_ATT
 	case GCORE_GC2093_MIPI_2M_60FPS_10BIT:
 	case SMS_SC132GS_MIPI_1080P_60FPS_10BIT:
 	case SMS_SC132GS_SLAVE_MIPI_1080P_60FPS_10BIT:
-	case SMS_SC231HAI_MIPI_480P_60FPS_10BIT:
-	case SMS_SC231HAI_MIPI_480P_60FPS_10BIT_WDR2TO1:
-	case SMS_SC231HAI_MIPI_1080P_60FPS_10BIT:
 		pstPubAttr->f32FrameRate = 60;
 		break;
 	case TECHPOINT_TP2850_MIPI_2M_30FPS_8BIT:
@@ -957,8 +963,6 @@ CVI_S32 SAMPLE_COMM_SNS_GetIspAttrBySns(SAMPLE_SNS_TYPE_E enSnsType, ISP_PUB_ATT
 	case SOI_F352_MIPI_2M_30FPS_10BIT:
 	case SOI_F352_MIPI_2M_30FPS_10BIT_WDR2TO1:
 	case SOI_K306_MIPI_4M_25FPS_10BIT:
-	case SOI_H65_MIPI_1M_30FPS_10BIT:
-	case SOI_H65_MIPI_1M_30FPS_10BIT_WDR2TO1:
 	case SONY_IMX675_MIPI_5M_30FPS_12BIT:
 	case CVSENS_CV4002_MIPI_1M_720P_30FPS_10BIT:
 		pstPubAttr->f32FrameRate = 30;
@@ -968,9 +972,12 @@ CVI_S32 SAMPLE_COMM_SNS_GetIspAttrBySns(SAMPLE_SNS_TYPE_E enSnsType, ISP_PUB_ATT
 		break;
 	case GCORE_GC0312_MIPI_480P_20FPS_8BIT:
 	case SMS_SC3336_1L_MIPI_3M_20FPS_10BIT:
-	case SMS_SC4336P_1L_MIPI_4M_20FPS_10BIT:
-	case SMS_SC4336P1_1L_MIPI_4M_20FPS_10BIT:
 		pstPubAttr->f32FrameRate = 20;
+		break;
+	case SONY_IMX678_MIPI_8M_30FPS_12BIT:
+	case SONY_IMX678_MIPI_2M_30FPS_12BIT:
+	case SONY_IMX678_MIPI_2M_30FPS_10BIT_BIN:
+		pstPubAttr->f32FrameRate = 30;
 		break;
 	case GCORE_GC0329_MIPI_480P_10FPS_8BIT:
 		pstPubAttr->f32FrameRate = 10;
@@ -1047,6 +1054,9 @@ CVI_S32 SAMPLE_COMM_SNS_GetIspAttrBySns(SAMPLE_SNS_TYPE_E enSnsType, ISP_PUB_ATT
 	case SONY_IMX385_MIPI_2M_30FPS_12BIT_WDR2TO1:
 	case SONY_IMX675_MIPI_5M_30FPS_12BIT:
 	case SONY_IMX675_MIPI_5M_25FPS_12BIT_WDR2TO1:
+	case SONY_IMX678_MIPI_8M_30FPS_12BIT:
+	case SONY_IMX678_MIPI_2M_30FPS_12BIT:
+	case SONY_IMX678_MIPI_2M_30FPS_10BIT_BIN:
 	// GalaxyCore
 	case GCORE_GC02M1_MIPI_2M_30FPS_10BIT:
 	case GCORE_GC1054_MIPI_1M_30FPS_10BIT:
@@ -1440,13 +1450,6 @@ CVI_VOID *SAMPLE_COMM_SNS_GetSnsObj(SAMPLE_SNS_TYPE_E enSnsType)
 		pSnsObj = &stSnsSC230AI_2L_SLAVE_Obj;
 		break;
 #endif
-#if defined(SENSOR_SMS_SC231HAI)
-	case SMS_SC231HAI_MIPI_480P_60FPS_10BIT:
-	case SMS_SC231HAI_MIPI_480P_60FPS_10BIT_WDR2TO1:
-	case SMS_SC231HAI_MIPI_1080P_60FPS_10BIT:
-		pSnsObj = &stSnsSC231HAI_Obj;
-		break;
-#endif
 #if defined(SENSOR_SMS_SC301IOT)
 	case SMS_SC301IOT_MIPI_3M_30FPS_10BIT:
 		pSnsObj = &stSnsSC301IOT_Obj;
@@ -1583,16 +1586,6 @@ CVI_VOID *SAMPLE_COMM_SNS_GetSnsObj(SAMPLE_SNS_TYPE_E enSnsType)
 		pSnsObj = &stSnsSC4336P_Obj;
 		break;
 #endif
-#if defined(SENSOR_SMS_SC4336P_1L)
-	case SMS_SC4336P_1L_MIPI_4M_20FPS_10BIT:
-		pSnsObj = &stSnsSC4336P_1L_Obj;
-		break;
-#endif
-#if defined(SENSOR_SMS_SC4336P1_1L)
-	case SMS_SC4336P1_1L_MIPI_4M_20FPS_10BIT:
-		pSnsObj = &stSnsSC4336P1_1L_Obj;
-		break;
-#endif
 #if defined(SENSOR_SMS_SC5336_2L)
 	case SMS_SC5336_2L_MIPI_5M_30FPS_10BIT:
 		pSnsObj = &stSnsSC5336_2L_Obj;
@@ -1628,7 +1621,6 @@ CVI_VOID *SAMPLE_COMM_SNS_GetSnsObj(SAMPLE_SNS_TYPE_E enSnsType)
 #endif
 #if defined(SENSOR_SOI_H65)
 	case SOI_H65_MIPI_1M_30FPS_10BIT:
-	case SOI_H65_MIPI_1M_30FPS_10BIT_WDR2TO1:
 		pSnsObj = &stSnsH65_Obj;
 		break;
 #endif
@@ -1762,6 +1754,13 @@ CVI_VOID *SAMPLE_COMM_SNS_GetSnsObj(SAMPLE_SNS_TYPE_E enSnsType)
 	case SONY_IMX675_MIPI_5M_30FPS_12BIT:
 	case SONY_IMX675_MIPI_5M_25FPS_12BIT_WDR2TO1:
 		pSnsObj = &stSnsImx675_Obj;
+		break;
+#endif
+#if defined(SENSOR_SONY_IMX678)
+	case SONY_IMX678_MIPI_8M_30FPS_12BIT:
+	case SONY_IMX678_MIPI_2M_30FPS_12BIT:
+	case SONY_IMX678_MIPI_2M_30FPS_10BIT_BIN:
+		pSnsObj = &stSnsImx678_Obj;
 		break;
 #endif
 #if defined(SENSOR_TECHPOINT_TP2850)
@@ -2274,3 +2273,108 @@ CVI_S32 SAMPLE_COMM_SNS_ParseIni(SAMPLE_INI_CFG_S *pstIniCfg)
 
 	return CVI_SUCCESS;
 }
+
+CVI_BOOL SAMPLE_COMM_SNS_IsImx678(SAMPLE_SNS_TYPE_E enSnsType)
+{
+	return (enSnsType == SONY_IMX678_MIPI_8M_30FPS_12BIT ||
+		enSnsType == SONY_IMX678_MIPI_2M_30FPS_12BIT ||
+		enSnsType == SONY_IMX678_MIPI_2M_30FPS_10BIT_BIN)
+		? CVI_TRUE : CVI_FALSE;
+}
+
+CVI_S32 SAMPLE_COMM_SNS_GetModeInfo(SAMPLE_SNS_TYPE_E enSnsType,
+				    SAMPLE_SNS_MODE_INFO_S *pstInfo)
+{
+	PIC_SIZE_E enPicSize;
+	SIZE_S stSize;
+	CVI_S32 s32Ret;
+
+	if (!pstInfo)
+		return CVI_FAILURE;
+
+	memset(pstInfo, 0, sizeof(*pstInfo));
+	pstInfo->enSnsType = enSnsType;
+	pstInfo->enImx678Mode = SAMPLE_IMX678_MODE_OTHER;
+	pstInfo->u8SnsMode = 0;
+	pstInfo->u8RawBitDepth = 12;
+	pstInfo->enViBitWidth = DATA_BITWIDTH_12;
+	pstInfo->enViPixFmt = PIXEL_FORMAT_RGB_BAYER_12BPP;
+	pstInfo->pszModeName = "other";
+	pstInfo->pszIspBinPath = NULL;
+
+	s32Ret = SAMPLE_COMM_SNS_GetSize(enSnsType, &enPicSize);
+	if (s32Ret != CVI_SUCCESS)
+		return s32Ret;
+	s32Ret = SAMPLE_COMM_SNS_GetPicSize(enPicSize, &stSize);
+	if (s32Ret != CVI_SUCCESS)
+		return s32Ret;
+	pstInfo->stSize = stSize;
+
+	switch (enSnsType) {
+	case SONY_IMX678_MIPI_8M_30FPS_12BIT:
+		pstInfo->enImx678Mode = SAMPLE_IMX678_MODE_5M;
+		pstInfo->u8SnsMode = 0;
+		pstInfo->u8RawBitDepth = 12;
+		pstInfo->enViBitWidth = DATA_BITWIDTH_12;
+		pstInfo->enViPixFmt = PIXEL_FORMAT_RGB_BAYER_12BPP;
+		pstInfo->pszModeName = "5m";
+		pstInfo->pszIspBinPath = SAMPLE_ISP_BIN_IMX678_5M;
+		break;
+	case SONY_IMX678_MIPI_2M_30FPS_10BIT_BIN:
+		pstInfo->enImx678Mode = SAMPLE_IMX678_MODE_1080P_BIN;
+		pstInfo->u8SnsMode = 1;
+		pstInfo->u8RawBitDepth = 10;
+		pstInfo->enViBitWidth = DATA_BITWIDTH_10;
+		pstInfo->enViPixFmt = PIXEL_FORMAT_RGB_BAYER_10BPP;
+		pstInfo->pszModeName = "1080p_bin";
+		pstInfo->pszIspBinPath = SAMPLE_ISP_BIN_IMX678_1080P_BIN;
+		break;
+	case SONY_IMX678_MIPI_2M_30FPS_12BIT:
+		pstInfo->enImx678Mode = SAMPLE_IMX678_MODE_1080P_CROP;
+		pstInfo->u8SnsMode = 0;
+		pstInfo->u8RawBitDepth = 12;
+		pstInfo->enViBitWidth = DATA_BITWIDTH_12;
+		pstInfo->enViPixFmt = PIXEL_FORMAT_RGB_BAYER_12BPP;
+		pstInfo->pszModeName = "1080p_crop";
+		/* Crop shares 5M PQ bin placeholder until dedicated tuning exists. */
+		pstInfo->pszIspBinPath = SAMPLE_ISP_BIN_IMX678_5M;
+		break;
+	default:
+		break;
+	}
+
+	return CVI_SUCCESS;
+}
+
+CVI_S32 SAMPLE_COMM_SNS_QueryActiveMode(const SAMPLE_INI_CFG_S *pstIniCfg,
+					SAMPLE_SNS_MODE_INFO_S *pstInfo)
+{
+	if (!pstIniCfg || !pstInfo)
+		return CVI_FAILURE;
+
+	return SAMPLE_COMM_SNS_GetModeInfo(pstIniCfg->enSnsType[0], pstInfo);
+}
+
+CVI_S32 SAMPLE_COMM_SNS_QueryRuntimeMode(VI_PIPE ViPipe,
+					 SAMPLE_SNS_MODE_INFO_S *pstInfo)
+{
+	ISP_PUB_ATTR_S stPubAttr;
+	CVI_S32 s32Ret;
+
+	if (!pstInfo)
+		return CVI_FAILURE;
+
+	s32Ret = CVI_ISP_GetPubAttr(ViPipe, &stPubAttr);
+	if (s32Ret != CVI_SUCCESS)
+		return s32Ret;
+
+	/* Refresh size / snsMode from live ISP attr (keeps enum-derived fields). */
+	pstInfo->stSize.u32Width = stPubAttr.stWndRect.u32Width ?
+		stPubAttr.stWndRect.u32Width : stPubAttr.stSnsSize.u32Width;
+	pstInfo->stSize.u32Height = stPubAttr.stWndRect.u32Height ?
+		stPubAttr.stWndRect.u32Height : stPubAttr.stSnsSize.u32Height;
+	pstInfo->u8SnsMode = stPubAttr.u8SnsMode;
+
+	return CVI_SUCCESS;
+}
+ 

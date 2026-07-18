@@ -1,5 +1,7 @@
 #include "x_mmf_priv.h"
 
+#include <stdlib.h>
+
 #if X_MMF_ENABLE_VI
 
 static void x_mmf_vi_default_ini(SAMPLE_INI_CFG_S *ini)
@@ -13,11 +15,33 @@ static void x_mmf_vi_default_ini(SAMPLE_INI_CFG_S *ini)
     ini->MipiDev[0] = 0xff;
 }
 
+/**
+ * Apply optional sensor ini path before ParseIni.
+ * Env MAIX_SENSOR_CFG_INI wins over X_MMF_SetSensorIniPath.
+ */
+static void x_mmf_vi_apply_ini_path_override(void)
+{
+    const char *path = getenv("MAIX_SENSOR_CFG_INI");
+    if (!path || path[0] == '\0')
+        path = X_MMF_GetSensorIniPath();
+    if (!path || path[0] == '\0')
+        return;
+
+    CVI_S32 ret = SAMPLE_COMM_VI_SetIniPath(path);
+    if (ret != CVI_SUCCESS) {
+        XLOGE("SAMPLE_COMM_VI_SetIniPath(%s) failed: 0x%x", path, ret);
+    } else {
+        XLOGI("VI sensor ini path override: %s", path);
+    }
+}
+
 CVI_S32 x_mmf_vi_prepare(X_MMF_CTX_S *ctx)
 {
     CVI_S32 ret;
     PIC_SIZE_E pic_size;
     SAMPLE_INI_CFG_S ini;
+
+    x_mmf_vi_apply_ini_path_override();
 
     if (ctx->cfg.vi.use_default_ini) {
         x_mmf_vi_default_ini(&ini);

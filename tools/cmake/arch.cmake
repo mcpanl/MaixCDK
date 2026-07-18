@@ -4,7 +4,7 @@
 
 if(NOT DEFINED MAIX_ARCH OR MAIX_ARCH STREQUAL "")
     # Infer from known platforms if not injected by project.py
-    if(PLATFORM_MAIXCAM2 OR PLATFORM_RK3566)
+    if(PLATFORM_MAIXCAM2 OR PLATFORM_RK3566 OR PLATFORM_ZONHOR)
         set(MAIX_ARCH "arm64")
     elseif(PLATFORM_MAIXCAM)
         set(MAIX_ARCH "riscv64")
