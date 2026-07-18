@@ -19,7 +19,8 @@ const float __atanf_lut[4] = {
     +0.9997878412794807f     //p1
 };
 
-#if (__ARM_ARCH < 7)
+/* Cortex-M VFP inline asm below is invalid on AArch64 Linux (e.g. RK3566 cross). */
+#if (__ARM_ARCH < 7) || defined(__aarch64__)
 #include <math.h>
 float OMV_ATTR_ALWAYS_INLINE fast_sqrtf(float x) {
     return sqrtf(x);

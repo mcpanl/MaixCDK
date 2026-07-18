@@ -360,6 +360,9 @@ namespace maix::peripheral::key
 
     Key::~Key()
     {
+
+        log::info("== MaixCDK == Key::~Key");
+
         close();
         if (this->_data)
         {

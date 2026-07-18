@@ -25,7 +25,12 @@ using namespace maix;
 static int hres = 640;
 static int vres = 480;
 static uint64_t last_present_ms = 0;
-static constexpr uint32_t present_interval_ms = 33;
+static constexpr uint32_t present_interval_ms = 16;  // ~60fps for smoother scrolling
+
+// FPS logging
+static uint64_t fps_frame_count = 0;
+static uint64_t fps_last_log_ms = 0;
+static constexpr uint32_t fps_log_interval_ms = 5000; // Log every 5 seconds
 
 static inline void copy_bgr888_to_rgb888(uint8_t *dest, const uint8_t *src, uint32_t pixel_count)
 {
@@ -101,6 +106,18 @@ void monitor_flush(lv_display_t *disp_drv, const lv_area_t * area, uint8_t *px_m
 
         z_display->show(*z_image, image::FIT_FILL);
         last_present_ms = time::ticks_ms();
+
+        // FPS logging
+        fps_frame_count++;
+        if (fps_last_log_ms == 0) {
+            fps_last_log_ms = now;
+        } else if (now - fps_last_log_ms >= fps_log_interval_ms) {
+            uint64_t elapsed = now - fps_last_log_ms;
+            float fps = (float)fps_frame_count * 1000.0f / (float)elapsed;
+            log::info("[LVGL FPS] avg: %.1f (%lu frames in %lu ms)", fps, (unsigned long)fps_frame_count, (unsigned long)elapsed);
+            fps_frame_count = 0;
+            fps_last_log_ms = now;
+        }
     }
 
     lv_disp_flush_ready(disp_drv);
