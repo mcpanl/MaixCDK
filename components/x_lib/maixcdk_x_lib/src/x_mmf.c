@@ -1,259 +1,339 @@
-#include <stdio.h>
+#include <stdarg.h>
 #include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
-#include <pthread.h>
-#include <errno.h>
-#include <sys/time.h>
-#include <sys/prctl.h>
 
-#include "cvi_buffer.h"
-#include "cvi_ae_comm.h"
-#include "cvi_awb_comm.h"
-#include "cvi_comm_isp.h"
-#include <inttypes.h>
-#include "x_mmf.h"
-#include <time.h>  // 新增：用于计时
+#include "x_mmf_priv.h"
 
-#ifndef ALIGN_UP
-#define ALIGN_UP(x, a)    (((x) + ((a) - 1)) & ~((a) - 1))
-#endif
+static X_MMF_LOG_LEVEL_E g_x_mmf_log_level = X_MMF_LOG_INFO;
+/* -1: use default (12 for VI path); else 4..24 passed to X_MMF_SetVbBlkCntHint */
+static int g_x_mmf_vb_blk_cnt_hint = -1;
 
-#ifndef ALIGN
-#define ALIGN(x, a)  (((x) + ((a) - 1)) & ~((a) - 1))
-#endif
-
-#ifndef LOGE
-#define LOGE(fmt, ...)  SAMPLE_PRT("[ERR] " fmt, ##__VA_ARGS__)
-#endif
-#ifndef LOGI
-#define LOGI(fmt, ...)  SAMPLE_PRT("[INF] " fmt, ##__VA_ARGS__)
-#endif
-#ifndef LOGW
-#define LOGW(fmt, ...)  SAMPLE_PRT("[WRN] " fmt, ##__VA_ARGS__)
-#endif
-
-// 把像素格式打印成人类可读
-static const char* _pf2s(PIXEL_FORMAT_E pf) {
-    switch (pf) {
-        case PIXEL_FORMAT_RGB_888: return "RGB888";
-        case PIXEL_FORMAT_RGB_888_PLANAR: return "RGB888_PLANAR";
-        case PIXEL_FORMAT_YUV_PLANAR_420: return "420";
-        case PIXEL_FORMAT_YUV_PLANAR_422: return "422";
-            // 按需再补
-        default: return "UNKNOWN";
-    }
-}
-
-// 打印解析后的 ini 配置，便于确认实际生效的参数
-static void _dump_ini_cfg(const SAMPLE_INI_CFG_S *cfg) {
-    if (!cfg) {
-        LOGW("[INI] cfg is NULL, skip dump");
-        return;
-    }
-
-    LOGI("[INI] enSource=%d devNum=%d", cfg->enSource, cfg->devNum);
-
-    int num = cfg->devNum;
-    if (num <= 0) {
-        LOGW("[INI] devNum <= 0");
-        return;
-    }
-
-    // 为安全起见，限制最多打印前 4 个通道/设备
-    int maxPrint = (num > 4) ? 4 : num;
-    for (int i = 0; i < maxPrint; ++i) {
-        LOGI("[INI] idx=%d snsType=%d wdrMode=%d busId=%d mipiDev=0x%x",
-             i,
-             cfg->enSnsType[i],
-             cfg->enWDRMode[i],
-             cfg->s32BusId[i],
-             (unsigned int)cfg->MipiDev[i]);
-    }
-    if (num > maxPrint) {
-        LOGI("[INI] ... (total %d, printed %d)", num, maxPrint);
-    }
-}
-
-typedef struct {
-    CVI_U64 phyAddr;
-    CVI_VOID *virAddr;
-    CVI_U32 frameSize;
-} Z_RGB_FRAME_PRIV;
-
-static void dump_rgb_edge(const CVI_U8 *p, CVI_U32 w, CVI_U32 h) {
-    // 打印前后 4 像素，避免刷屏
-    printf("[DBG] RGB head/tail dump (w=%u,h=%u):\n", w, h);
-    for (int i = 0; i < 4; ++i) {
-        int idx = i * 3;
-        printf("  head px[%d]: R=%u G=%u B=%u\n", i, p[idx], p[idx+1], p[idx+2]);
-    }
-    CVI_U32 totalPx = w * h;
-    for (int i = (int)totalPx - 4; i < (int)totalPx; ++i) {
-        int idx = i * 3;
-        printf("  tail px[%d]: R=%u G=%u B=%u\n", i, p[idx], p[idx+1], p[idx+2]);
-    }
-}
-
-
-CVI_S32 X_VI_INIT(X_VI_CTX_S *pstViCtx)
+void X_MMF_SetVbBlkCntHint(CVI_U32 blk_cnt)
 {
-    SAMPLE_COMM_SYS_Exit();
+    if (blk_cnt == 0 || blk_cnt < 4 || blk_cnt > 24)
+        g_x_mmf_vb_blk_cnt_hint = -1;
+    else
+        g_x_mmf_vb_blk_cnt_hint = (int)blk_cnt;
+}
 
-    CVI_S32 s32Ret = CVI_SUCCESS;
-    COMPRESS_MODE_E enCompressMode = COMPRESS_MODE_NONE;
-    PIC_SIZE_E enPicSize;
-    CVI_U32 u32BlkSize;
+const char *x_mmf_log_level_name(X_MMF_LOG_LEVEL_E level)
+{
+    switch (level) {
+        case X_MMF_LOG_ERROR: return "ERR";
+        case X_MMF_LOG_WARN: return "WRN";
+        case X_MMF_LOG_INFO: return "INF";
+        case X_MMF_LOG_DEBUG: return "DBG";
+        default: return "UNK";
+    }
+}
 
-    SAMPLE_INI_CFG_S stIniCfg = {0};
-    stIniCfg = (SAMPLE_INI_CFG_S) {
-            .enSource  = VI_PIPE_FRAME_SOURCE_DEV,
-            .devNum    = 1,
-            .enSnsType[0] = SONY_IMX327_2L_MIPI_2M_30FPS_12BIT,
-            .enWDRMode[0] = WDR_MODE_NONE,
-            .s32BusId[0]  = 3,
-            .MipiDev[0]   = 0xff,
-    };
+void x_mmf_log_write(X_MMF_LOG_LEVEL_E level, const char *func, int line, const char *fmt, ...)
+{
+    va_list ap;
 
-    /* 1. 解析ini */
-    s32Ret = SAMPLE_COMM_VI_ParseIni(&stIniCfg);
-    if (s32Ret != CVI_SUCCESS) {
-        SAMPLE_PRT("Parse ini fail\n");
-        return s32Ret;
+    if (level > g_x_mmf_log_level) {
+        return;
     }
 
-    // 详细打印解析后的 ini 结果
-    _dump_ini_cfg(&stIniCfg);
+    printf("[X_MMF][%s][%s:%d] ", x_mmf_log_level_name(level), func, line);
+    va_start(ap, fmt);
+    vprintf(fmt, ap);
+    va_end(ap);
+    printf("\n");
+}
 
-    CVI_VI_SetDevNum(stIniCfg.devNum);
-    s32Ret = SAMPLE_COMM_VI_IniToViCfg(&stIniCfg, &pstViCtx->stViConfig);
-    if (s32Ret != CVI_SUCCESS) return s32Ret;
+void X_MMF_SetLogLevel(X_MMF_LOG_LEVEL_E level)
+{
+    g_x_mmf_log_level = level;
+}
 
-    // 打印转换后的 VI 配置关键字段（以 0 号为例）
-    LOGI("[VI CFG] snsType=%d compressMode=%d",
-         pstViCtx->stViConfig.astViInfo[0].stSnsInfo.enSnsType,
-         pstViCtx->stViConfig.astViInfo[0].stChnInfo.enCompressMode);
+X_MMF_LOG_LEVEL_E X_MMF_GetLogLevel(void)
+{
+    return g_x_mmf_log_level;
+}
 
-    /* 2. 获取图像尺寸 */
-    s32Ret = SAMPLE_COMM_VI_GetSizeBySensor(
-            pstViCtx->stViConfig.astViInfo[0].stSnsInfo.enSnsType, &enPicSize);
-    if (s32Ret != CVI_SUCCESS) return s32Ret;
+void X_MMF_DefaultConfig(X_MMF_CONFIG_S *cfg)
+{
+    if (!cfg) {
+        return;
+    }
 
-    s32Ret = SAMPLE_COMM_SYS_GetPicSize(enPicSize, &pstViCtx->stSize);
-    if (s32Ret != CVI_SUCCESS) return s32Ret;
+    memset(cfg, 0, sizeof(*cfg));
+    cfg->log_level = X_MMF_LOG_INFO;
+    cfg->sys.use_default_vb = CVI_TRUE;
 
-        LOGI("[SIZE] parsed image size: %ux%u",
-         pstViCtx->stSize.u32Width, pstViCtx->stSize.u32Height);
+#if X_MMF_ENABLE_VI
+    cfg->vi.enable = CVI_TRUE;
+    cfg->vi.use_default_ini = CVI_TRUE;
+    cfg->vi.vi_dev = 0;
+    cfg->vi.vi_pipe = 0;
+    cfg->vi.vi_chn = 0;
+    cfg->vi.pipe_attr.bYuvSkip = CVI_FALSE;
+    cfg->vi.pipe_attr.enPixFmt = PIXEL_FORMAT_RGB_BAYER_12BPP;
+    cfg->vi.pipe_attr.enBitWidth = DATA_BITWIDTH_12;
+    cfg->vi.pipe_attr.bNrEn = CVI_TRUE;
+    cfg->vi.pipe_attr.bYuvBypassPath = CVI_FALSE;
+    cfg->vi.pipe_attr.stFrameRate.s32SrcFrameRate = -1;
+    cfg->vi.pipe_attr.stFrameRate.s32DstFrameRate = -1;
+#endif
 
-    /* 3. 初始化系统 VB */
-    memset(&pstViCtx->stVbConf, 0, sizeof(VB_CONFIG_S));
-    pstViCtx->stVbConf.u32MaxPoolCnt = 1;
+#if X_MMF_ENABLE_VPSS
+    cfg->vpss_grp_count = 1;
+    cfg->vpss[0].grp_enable = CVI_TRUE;
+    cfg->vpss[0].grp = 0;
+    cfg->vpss[0].grp_attr.stFrameRate.s32SrcFrameRate = -1;
+    cfg->vpss[0].grp_attr.stFrameRate.s32DstFrameRate = -1;
+    cfg->vpss[0].grp_attr.enPixelFormat = SAMPLE_PIXEL_FORMAT;
+    cfg->vpss[0].grp_attr.u32MaxW = 1920;
+    cfg->vpss[0].grp_attr.u32MaxH = 1080;
+    cfg->vpss[0].grp_attr.u8VpssDev = 0;
+    cfg->vpss[0].chn_enable[0] = CVI_TRUE;
+    cfg->vpss[0].chn_attr[0].u32Width = 640;
+    cfg->vpss[0].chn_attr[0].u32Height = 480;
+    cfg->vpss[0].chn_attr[0].enVideoFormat = VIDEO_FORMAT_LINEAR;
+    cfg->vpss[0].chn_attr[0].enPixelFormat = PIXEL_FORMAT_RGB_888;
+    cfg->vpss[0].chn_attr[0].stFrameRate.s32SrcFrameRate = -1;
+    cfg->vpss[0].chn_attr[0].stFrameRate.s32DstFrameRate = -1;
+    cfg->vpss[0].chn_attr[0].u32Depth = 1;
+    cfg->vpss[0].chn_attr[0].stAspectRatio.enMode = ASPECT_RATIO_AUTO;
+    cfg->vpss[0].chn_attr[0].stAspectRatio.bEnableBgColor = CVI_TRUE;
+    cfg->vpss[0].chn_attr[0].stAspectRatio.u32BgColor = COLOR_RGB_BLACK;
+#endif
 
-    u32BlkSize = COMMON_GetPicBufferSize(
-            pstViCtx->stSize.u32Width, pstViCtx->stSize.u32Height,
-            SAMPLE_PIXEL_FORMAT, DATA_BITWIDTH_8, enCompressMode, DEFAULT_ALIGN
-    );
+#if X_MMF_ENABLE_VO
+    cfg->vo.enable = CVI_FALSE;
+    cfg->vo.vo_layer = 0;
+    cfg->vo.vo_chn = 0;
+    cfg->vo.set_rotation = CVI_FALSE;
+    cfg->vo.rotation = ROTATION_0;
+#endif
+}
 
-        LOGI("[VB] blockSize=%u (fmt=%d bitwidth=%d compress=%d align=%d)",
-         u32BlkSize,
-         SAMPLE_PIXEL_FORMAT,
-         DATA_BITWIDTH_8,
-         enCompressMode,
-         DEFAULT_ALIGN);
+CVI_S32 x_mmf_sys_init(X_MMF_CTX_S *ctx)
+{
+    CVI_S32 ret;
+    VB_CONFIG_S vb_cfg;
+    CVI_U32 blk_size = 1920 * 1080 * 3 / 2;
+    CVI_U32 blk_cnt = 10;
 
-    pstViCtx->stVbConf.astCommPool[0].u32BlkSize = u32BlkSize;
-    pstViCtx->stVbConf.astCommPool[0].u32BlkCnt  = 4;
+    memset(&vb_cfg, 0, sizeof(vb_cfg));
+    if (ctx->cfg.sys.use_default_vb) {
+#if X_MMF_ENABLE_VI
+        if (ctx->cfg.vi.enable && ctx->vi_size.u32Width > 0 && ctx->vi_size.u32Height > 0) {
+            blk_size = COMMON_GetPicBufferSize(
+                ctx->vi_size.u32Width,
+                ctx->vi_size.u32Height,
+                SAMPLE_PIXEL_FORMAT,
+                DATA_BITWIDTH_8,
+                COMPRESS_MODE_NONE,
+                DEFAULT_ALIGN
+            );
+            /* Keep enough free blocks for VI/VPSS/VO pipeline buffering. */
+            blk_cnt = 12;
+            const char *env_bc = getenv("MAIX_MMF_VB_BLK_CNT");
+            if (env_bc && env_bc[0] != '\0') {
+                long v = strtol(env_bc, NULL, 10);
+                if (v >= 4 && v <= 24)
+                    blk_cnt = (CVI_U32)v;
+            } else if (g_x_mmf_vb_blk_cnt_hint >= 4 && g_x_mmf_vb_blk_cnt_hint <= 24) {
+                blk_cnt = (CVI_U32)g_x_mmf_vb_blk_cnt_hint;
+            }
+        }
+#endif
+        vb_cfg.u32MaxPoolCnt = 1;
+        vb_cfg.astCommPool[0].u32BlkSize = blk_size;
+        vb_cfg.astCommPool[0].u32BlkCnt = blk_cnt;
+        XLOGI("SYS default VB: blk_size=%u blk_cnt=%u", blk_size, blk_cnt);
+    } else {
+        memcpy(&vb_cfg, &ctx->cfg.sys.vb_cfg, sizeof(vb_cfg));
+    }
 
-    // pstViCtx->stVbConf.astCommPool[1].u32BlkSize = u32BlkSize;
-    // pstViCtx->stVbConf.astCommPool[1].u32BlkCnt  = 8;
+    SAMPLE_COMM_SYS_Exit();
+    ret = SAMPLE_COMM_SYS_Init(&vb_cfg);
+    if (ret != CVI_SUCCESS) {
+        XLOGE("SAMPLE_COMM_SYS_Init failed: 0x%x", ret);
+        return ret;
+    }
 
-    printf("<<< init system\n");
+    XLOGI("SYS set log level to DEBUG");
 
+    LOG_LEVEL_CONF_S log_conf = {
+		.enModId = CVI_ID_VPSS,       /* 要调哪个模块就写哪个，例如 VPSS */
+		.s32Level = CVI_DBG_DEBUG,  /* 即 7，最详细 */
+	};
+	if (CVI_LOG_SetLevelConf(&log_conf) != CVI_SUCCESS) {
+		/* 处理失败 */
+        XLOGE("SYS set log level to DEBUG failed");
+	}
 
-    s32Ret = SAMPLE_COMM_SYS_Init(&pstViCtx->stVbConf);
-    if (s32Ret != CVI_SUCCESS) return s32Ret;
-
-    printf("<<< start vi\n");
-
-    /* 4. 启动 VI */
-    s32Ret = SAMPLE_COMM_VI_StartSensor(&pstViCtx->stViConfig);
-    if (s32Ret != CVI_SUCCESS) return s32Ret;
-
-    s32Ret = SAMPLE_COMM_VI_StartDev(&pstViCtx->stViConfig.astViInfo[0]);
-    if (s32Ret != CVI_SUCCESS) return s32Ret;
-
-    s32Ret = SAMPLE_COMM_VI_StartMIPI(&pstViCtx->stViConfig);
-    if (s32Ret != CVI_SUCCESS) return s32Ret;
-
-    /* 创建 pipe */
-    VI_PIPE_ATTR_S stPipeAttr;
-    stPipeAttr.bYuvSkip = CVI_FALSE;
-    stPipeAttr.u32MaxW = pstViCtx->stSize.u32Width;
-    stPipeAttr.u32MaxH = pstViCtx->stSize.u32Height;
-    stPipeAttr.enPixFmt = PIXEL_FORMAT_RGB_BAYER_12BPP;
-    stPipeAttr.enBitWidth = DATA_BITWIDTH_12;
-    stPipeAttr.stFrameRate.s32SrcFrameRate = -1;
-    stPipeAttr.stFrameRate.s32DstFrameRate = -1;
-    stPipeAttr.bNrEn = CVI_TRUE;
-    stPipeAttr.bYuvBypassPath = CVI_FALSE;
-    stPipeAttr.enCompressMode = pstViCtx->stViConfig.astViInfo[0].stChnInfo.enCompressMode;
-
-    pstViCtx->ViPipe = 0;
-    pstViCtx->ViChn = 0;
-    pstViCtx->ViDev = 0;
-
-    s32Ret = CVI_VI_CreatePipe(pstViCtx->ViPipe, &stPipeAttr);
-    if (s32Ret != CVI_SUCCESS) return s32Ret;
-
-    s32Ret = CVI_VI_StartPipe(pstViCtx->ViPipe);
-    if (s32Ret != CVI_SUCCESS) return s32Ret;
-
-    s32Ret = SAMPLE_COMM_VI_CreateIsp(&pstViCtx->stViConfig);
-    if (s32Ret != CVI_SUCCESS) return s32Ret;
-
-    s32Ret = SAMPLE_COMM_VI_StartViChn(&pstViCtx->stViConfig);
-    if (s32Ret != CVI_SUCCESS) return s32Ret;
-
-    SAMPLE_PRT("[X_VI_INIT] success. width=%d height=%d\n",
-               pstViCtx->stSize.u32Width, pstViCtx->stSize.u32Height);
-
+    XLOGI("SYS init ok");
     return CVI_SUCCESS;
 }
 
-CVI_S32 X_VI_TAKE_FRAME(X_VI_CTX_S *pstViCtx, VIDEO_FRAME_INFO_S *pstFrameInfo, CVI_S32 s32MilliSec)
+CVI_S32 x_mmf_sys_deinit(X_MMF_CTX_S *ctx)
 {
-    CVI_S32 s32Ret;
-    s32Ret = CVI_VI_GetChnFrame(pstViCtx->ViPipe, pstViCtx->ViChn, pstFrameInfo, s32MilliSec);
-    if (s32Ret != CVI_SUCCESS) {
-        SAMPLE_PRT("[X_VI_TAKE_FRAME] failed: 0x%x\n", s32Ret);
-    }
-    return s32Ret;
+    (void)ctx;
+    SAMPLE_COMM_SYS_Exit();
+    XLOGI("SYS exit done");
+    return CVI_SUCCESS;
 }
 
-CVI_S32 X_VI_RELEASE_FRAME(X_VI_CTX_S *pstViCtx, VIDEO_FRAME_INFO_S *pstFrameInfo)
+/*
+ * Best-effort recovery when the previous process died (e.g. kill -9) without X_MMF_Deinit:
+ * bring up SYS+VB, tear down VPSS/VI/VO in a safe order, exit SYS/VB, then the caller runs
+ * a normal x_mmf_sys_init. This cannot reclaim ION held solely by CVI NPU runtime in another
+ * dead process; it targets MMF (VI/VPSS/VO/VB) carveout pressure.
+ */
+static void x_mmf_orphan_media_precleanup(X_MMF_CTX_S *ctx)
 {
-    CVI_S32 s32Ret;
-    s32Ret = CVI_VI_ReleaseChnFrame(pstViCtx->ViPipe, pstViCtx->ViChn, pstFrameInfo);
-    if (s32Ret != CVI_SUCCESS) {
-        SAMPLE_PRT("[X_VI_RELEASE_FRAME] failed: 0x%x\n", s32Ret);
+    CVI_S32 ret;
+    const char *skip = getenv("MAIX_MMF_SKIP_ORPHAN_PRECLEANUP");
+
+    if (skip && skip[0] == '1') {
+        return;
     }
-    return s32Ret;
-}
 
-
-CVI_S32 X_VI_DEINIT(X_VI_CTX_S *pstViCtx)
-{
-    VO_CHN VoChn = 0;
-    VPSS_GRP	   VpssGrp	  = 1;
-    VPSS_GRP	   VpssGrp1	  = 0;
-    CVI_BOOL           abChnEnable[VPSS_MAX_PHY_CHN_NUM] = {1, 1};
-    CVI_BOOL           abChnEnable1[VPSS_MAX_PHY_CHN_NUM] = {1};
-    CVI_S32            ret = CVI_SUCCESS;
-;
-    SAMPLE_COMM_VI_DestroyIsp(&pstViCtx->stViConfig);
-    SAMPLE_COMM_VI_DestroyVi(&pstViCtx->stViConfig);
+    XLOGI("orphan precleanup: recover MMF state after possible unclean exit");
 
     SAMPLE_COMM_SYS_Exit();
-    SAMPLE_PRT("[X_VI_DEINIT] done\n");
+
+    ret = x_mmf_sys_init(ctx);
+    if (ret != CVI_SUCCESS) {
+        XLOGW("orphan precleanup: bootstrap SYS init failed 0x%x (continuing)", ret);
+    }
+
+#if X_MMF_ENABLE_VPSS
+    x_mmf_vpss_precleanup_hard();
+#endif
+
+#if X_MMF_ENABLE_VI
+    if (ctx->cfg.vi.enable) {
+        (void)SAMPLE_COMM_VI_DestroyIsp(&ctx->vi_runtime_cfg);
+        (void)SAMPLE_COMM_VI_DestroyVi(&ctx->vi_runtime_cfg);
+    }
+#endif
+
+#if X_MMF_ENABLE_VO
+    SAMPLE_COMM_VO_Exit();
+#endif
+
+    SAMPLE_COMM_SYS_Exit();
+    XLOGI("orphan precleanup done, SYS/VB released for re-init");
+}
+
+CVI_S32 X_MMF_Init(X_MMF_CTX_S *ctx, const X_MMF_CONFIG_S *cfg)
+{
+    CVI_S32 ret;
+
+    if (!ctx || !cfg) {
+        return CVI_FAILURE;
+    }
+
+    memset(ctx, 0, sizeof(*ctx));
+    memcpy(&ctx->cfg, cfg, sizeof(*cfg));
+    X_MMF_SetLogLevel(ctx->cfg.log_level);
+
+#if X_MMF_ENABLE_VI
+    if (ctx->cfg.vi.enable) {
+        ret = x_mmf_vi_prepare(ctx);
+        if (ret != CVI_SUCCESS) {
+            return ret;
+        }
+    }
+#endif
+
+    x_mmf_orphan_media_precleanup(ctx);
+
+    ret = x_mmf_sys_init(ctx);
+    if (ret != CVI_SUCCESS) {
+        return ret;
+    }
+
+#if X_MMF_ENABLE_VPSS
+    /* 再清一次：orphan 路径失败或驱动在 SYS_Exit 后仍残留时，与 z_lib 行为一致 */
+    x_mmf_vpss_precleanup_hard();
+#endif
+
+#if X_MMF_ENABLE_VI
+    if (ctx->cfg.vi.enable) {
+        ret = x_mmf_vi_init(ctx);
+        if (ret != CVI_SUCCESS) {
+            X_MMF_Deinit(ctx);
+            return ret;
+        }
+    }
+#endif
+
+#if X_MMF_ENABLE_VPSS
+    ret = x_mmf_vpss_init(ctx);
+    if (ret != CVI_SUCCESS) {
+        X_MMF_Deinit(ctx);
+        return ret;
+    }
+#endif
+
+#if X_MMF_ENABLE_VO
+    if (ctx->cfg.vo.enable) {
+        ret = x_mmf_vo_init(ctx);
+        if (ret != CVI_SUCCESS) {
+            X_MMF_Deinit(ctx);
+            return ret;
+        }
+    }
+#endif
+
+#if X_MMF_ENABLE_VENC
+    ret = x_mmf_venc_init(ctx);
+    if (ret != CVI_SUCCESS) {
+        X_MMF_Deinit(ctx);
+        return ret;
+    }
+#endif
+
+#if X_MMF_ENABLE_VDEC
+    ret = x_mmf_vdec_init(ctx);
+    if (ret != CVI_SUCCESS) {
+        X_MMF_Deinit(ctx);
+        return ret;
+    }
+#endif
+
+    ctx->inited = CVI_TRUE;
+    XLOGI("X_MMF init done");
+    return CVI_SUCCESS;
+}
+
+CVI_S32 X_MMF_Deinit(X_MMF_CTX_S *ctx)
+{
+    if (!ctx) {
+        return CVI_FAILURE;
+    }
+
+#if X_MMF_ENABLE_REGION
+    /* REGION object lifecycle is managed by explicit API. */
+#endif
+
+#if X_MMF_ENABLE_VDEC
+    x_mmf_vdec_deinit(ctx);
+#endif
+
+#if X_MMF_ENABLE_VENC
+    x_mmf_venc_deinit(ctx);
+#endif
+
+#if X_MMF_ENABLE_VO
+    x_mmf_vo_deinit(ctx);
+#endif
+
+#if X_MMF_ENABLE_VPSS
+    x_mmf_vpss_deinit(ctx);
+#endif
+
+#if X_MMF_ENABLE_VI
+    x_mmf_vi_deinit(ctx);
+#endif
+
+    x_mmf_sys_deinit(ctx);
+    ctx->inited = CVI_FALSE;
+    XLOGI("X_MMF deinit done");
     return CVI_SUCCESS;
 }

@@ -4,53 +4,55 @@ list(APPEND ADD_INCLUDE "include")
 
 message("[X_LIB]")
 
+set(X_MMF_ENABLE_VI 1 CACHE STRING "Enable X_MMF VI module")
+set(X_MMF_ENABLE_VPSS 1 CACHE STRING "Enable X_MMF VPSS module")
+set(X_MMF_ENABLE_VO 1 CACHE STRING "Enable X_MMF VO module")
+set(X_MMF_ENABLE_VENC 1 CACHE STRING "Enable X_MMF VENC module")
+set(X_MMF_ENABLE_VDEC 1 CACHE STRING "Enable X_MMF VDEC module")
+set(X_MMF_ENABLE_REGION 1 CACHE STRING "Enable X_MMF REGION module")
+
 if(PLATFORM_MAIXCAM)
     message(STATUS "PLATFORM_MAIXCAM")
-    # cvi-middleware
-    set(middleware_src_path "${CMAKE_CURRENT_SOURCE_DIR}/../3rd_party/cvi-middleware/cvi_mpi")
     set(source_dir "maixcdk_x_lib/src")
 
-    append_srcs_dir(ADD_SRCS "${source_dir}")
     list(APPEND ADD_REQUIREMENTS cvi-middleware)
-    set_property(SOURCE ${middleware_src_dir} PROPERTY GENERATED 1)
+
+    list(APPEND ADD_SRCS "${source_dir}/x_mmf.c")
+
+    if(X_MMF_ENABLE_VI)
+        list(APPEND ADD_SRCS "${source_dir}/x_mmf_vi.c")
+    endif()
+    if(X_MMF_ENABLE_VPSS)
+        list(APPEND ADD_SRCS "${source_dir}/x_mmf_vpss.c")
+    endif()
+    if(X_MMF_ENABLE_VO)
+        list(APPEND ADD_SRCS "${source_dir}/x_mmf_vo.c")
+    endif()
+    if(X_MMF_ENABLE_VENC)
+        list(APPEND ADD_SRCS "${source_dir}/x_mmf_venc.c")
+    endif()
+    if(X_MMF_ENABLE_VDEC)
+        list(APPEND ADD_SRCS "${source_dir}/x_mmf_vdec.c")
+    endif()
+    if(X_MMF_ENABLE_REGION)
+        list(APPEND ADD_SRCS "${source_dir}/x_mmf_region.c")
+    endif()
+
+    # C++ singleton that wraps X_MMF_Init/Deinit for vision + nn shared lifecycle
+    list(APPEND ADD_SRCS "${source_dir}/maix_cvi_media_runtime.cpp")
+
+    list(APPEND ADD_DEFINITIONS
+        -DX_MMF_ENABLE_VI=${X_MMF_ENABLE_VI}
+        -DX_MMF_ENABLE_VPSS=${X_MMF_ENABLE_VPSS}
+        -DX_MMF_ENABLE_VO=${X_MMF_ENABLE_VO}
+        -DX_MMF_ENABLE_VENC=${X_MMF_ENABLE_VENC}
+        -DX_MMF_ENABLE_VDEC=${X_MMF_ENABLE_VDEC}
+        -DX_MMF_ENABLE_REGION=${X_MMF_ENABLE_REGION}
+    )
     list(APPEND ADD_DEFINITIONS_PRIVATE -Wl,--exclude-libs,ALL)
 
     register_component()
-
-#    append_srcs_dir(ADD_SRCS "${source_dir}")
-#    register_component()
-#    if(CONFIG_MAIXCAM_LIB_COMPILE_FROM_SOURCE)
-#        set(source_dir "maixcdk_maixcam_lib")
-#        append_srcs_dir(ADD_SRCS "${source_dir}")
-#        # nn
-#        list(APPEND ADD_INCLUDE "../nn/include")
-#        list(APPEND ADD_INCLUDE "../vision/include")
-#        append_srcs_dir(ADD_SRCS "${source_dir}/nn")
-#        list(APPEND ADD_REQUIREMENTS cvi_tpu)
-#
-#        # media_server
-#        append_srcs_dir(ADD_SRCS "${source_dir}/media_server")
-#        list(APPEND ADD_REQUIREMENTS media_server)
-#
-#        # middleware
-#        list(APPEND ADD_SRCS        "${source_dir}/middleware/sophgo_middleware.cpp")
-#        set_property(SOURCE ${middleware_src_dir} PROPERTY GENERATED 1)
-#
-#        list(APPEND ADD_REQUIREMENTS sophgo-middleware)
-#        list(APPEND ADD_DEFINITIONS_PRIVATE -Wl,--exclude-libs,ALL)
-#
-#        register_component(DYNAMIC)
-#    else()
-#        list(APPEND ADD_DYNAMIC_LIB "lib/libmaixcam_lib.so")
-#        list(APPEND ADD_DIST_LIB_IGNORE "lib/libmaixcam_lib.so")
-#        list(APPEND ADD_REQUIREMENTS sophgo-middleware)
-#
-#        register_component()
-#    endif()
 elseif(PLATFORM_MAIXCAM2)
-    # ax630c
-    # list(APPEND ADD_REQUIREMENTS ax620e_msp)
-
     list(APPEND ADD_INCLUDE "../vision/include")
     set(source_dir "maixcdk_maixcam_lib/maixcam2")
 
@@ -62,6 +64,9 @@ elseif(PLATFORM_MAIXCAM2)
         list(APPEND ADD_DIST_LIB_IGNORE "lib/libmaixcam2_lib.so")
         register_component()
     endif()
+elseif(PLATFORM_RK3566)
+    message(STATUS "PLATFORM_RK3566: x_lib multimedia not implemented (stub)")
+    register_component()
 endif()
 
 # Config enable component2 or not in Kconfig
