@@ -1,6 +1,5 @@
 #include "maix_basic.hpp"
 #include "main.h"
-#include "z_lib.hpp"
 #include "z_vision_demo.hpp"
 #include <stdlib.h>
 #include <time.h>
@@ -37,6 +36,16 @@ void cb(int a, int b)
 int _main(int argc, char* argv[])
 {
     log::info("Program start\n");
+
+    /* 编译期宏：由 vision 的 CMake 以 PUBLIC 传给依赖 vision 的目标。
+     * 若始终为 0，多半是 CMakeCache 里仍保留 MAIXCAM_VISION_BACKEND=z_lib，需重新配置：
+     *   cmake .. -DMAIXCAM_VISION_BACKEND=x_mmf
+     * 或删掉 build 目录下 CMakeCache.txt 后再配置。 */
+#if MAIXCAM_VISION_USE_X_MMF
+    log::info("vision: x_mmf backend (MAIXCAM_VISION_USE_X_MMF=1)\n");
+#else
+    log::info("vision: z_lib backend (MAIXCAM_VISION_USE_X_MMF=0)\n");
+#endif
 
     key::Key key(cb);
 
@@ -114,7 +123,11 @@ int _main(int argc, char* argv[])
 
     log::info("loop end\n");
 
-    z_lib_deinit();
+    // z_lib_deinit();
+
+
+    delete cam;
+    delete disp;
 
     log::info("Program end\n");
     return 0;
