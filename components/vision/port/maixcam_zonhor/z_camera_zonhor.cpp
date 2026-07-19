@@ -1,9 +1,12 @@
 /**
- * Camera implementation for PLATFORM_ZONHOR using zonhor_mmf.
+ * Camera implementation for PLATFORM_ZONHOR using zonhor graph runtime.
  *
- * Pipeline (all rotation in VPSS GDC, no CPU rotate):
- *   VI → VPSS0 chn0 NV21+ROT90 → VPSS2 CSC RGB888 → Camera::read
- *   VI → VPSS0 chn1 NV21+ROT90 → VPSS1 CSC RGB888 → HW LCD preview
+ * Pipeline (profile-driven):
+ *   VI → Group0 ROT90 YUV → Group2
+ *     ChA display_preview RGB888 172x320 / buffer 192x320
+ *     ChB main_rgb        RGB888 (Camera::read)
+ *     ChC half → Group3 reserved
+ *   Group1 MEM create-only
  *
  * User width/height follow product orientation (portrait: 1080x1920).
  */
@@ -85,10 +88,16 @@ static void _prepare_sensor_mode(int width, int height)
 		  width, height, ini);
 }
 
+/**
+ * Copy RGB888 from MAIN_RGB endpoint, cropping to logical/valid extent
+ * so buffer padding (64-align) does not leak into the Image.
+ */
 static image::Image *_read_rgb888_frame(int want_w, int want_h, int block_ms)
 {
 	VIDEO_FRAME_INFO_S frame;
+	z_camera_output_desc_t desc;
 	memset(&frame, 0, sizeof(frame));
+	memset(&desc, 0, sizeof(desc));
 
 	CVI_S32 ret = ZONHOR_MMF_CamGetFrame(&frame, (CVI_S32)block_ms);
 	if (ret != CVI_SUCCESS) {
@@ -104,6 +113,18 @@ static image::Image *_read_rgb888_frame(int want_w, int want_h, int block_ms)
 		return nullptr;
 	}
 
+	uint32_t vx = 0, vy = 0, vw = fw, vh = fh;
+	if (ZONHOR_MMF_GetOutputDesc(Z_CAMERA_OUTPUT_MAIN_RGB, &desc) == CVI_SUCCESS) {
+		vx = desc.extent.valid_x;
+		vy = desc.extent.valid_y;
+		vw = desc.extent.valid_width ? desc.extent.valid_width : desc.extent.logical_width;
+		vh = desc.extent.valid_height ? desc.extent.valid_height : desc.extent.logical_height;
+		if (vx + vw > fw)
+			vw = fw - vx;
+		if (vy + vh > fh)
+			vh = fh - vy;
+	}
+
 	CVI_BOOL need_unmap = CVI_FALSE;
 	uint8_t *src = vf->pu8VirAddr[0];
 	if (!src) {
@@ -113,17 +134,17 @@ static image::Image *_read_rgb888_frame(int want_w, int want_h, int block_ms)
 	if (src)
 		CVI_SYS_IonInvalidateCache(vf->u64PhyAddr[0], src, vf->u32Length[0]);
 
-	int out_w = (want_w > 0) ? want_w : (int)fw;
-	int out_h = (want_h > 0) ? want_h : (int)fh;
+	int out_w = (want_w > 0) ? want_w : (int)vw;
+	int out_h = (want_h > 0) ? want_h : (int)vh;
 
 	image::Image *img = new image::Image(out_w, out_h, image::FMT_RGB888);
 	if (img && src) {
 		uint8_t *dst = (uint8_t *)img->data();
 		const uint32_t stride = vf->u32Stride[0];
-		const uint32_t row_bytes = (uint32_t)std::min(out_w * 3, (int)(fw * 3));
-		for (int y = 0; y < out_h && (uint32_t)y < fh; ++y) {
+		const uint32_t row_bytes = (uint32_t)std::min(out_w * 3, (int)(vw * 3));
+		for (int y = 0; y < out_h && (uint32_t)y < vh; ++y) {
 			memcpy(dst + (size_t)y * out_w * 3,
-			       src + (size_t)y * stride,
+			       src + (size_t)(vy + (uint32_t)y) * stride + (size_t)vx * 3,
 			       row_bytes);
 		}
 	}
@@ -202,12 +223,11 @@ err::Err Camera::open(int width, int height, image::Format format,
 	_config_sensor_env(_fps);
 	_prepare_sensor_mode(_width, _height);
 
-	/* User coords; zonhor_mmf applies VPSS GDC ROT90 internally when portrait. */
 	(void)maix::zonhor::MediaRuntime::set_cam_size((CVI_U32)_width, (CVI_U32)_height, (CVI_S32)_fps);
 	(void)maix::zonhor::MediaRuntime::reconfigure_sensor_if_needed();
 	maix::zonhor::MediaRuntime::acquire();
 	if (!maix::zonhor::MediaRuntime::is_inited()) {
-		log::error("Camera open failed: zonhor_mmf / VI init failed");
+		log::error("Camera open failed: zonhor graph / VI init failed");
 		return err::ERR_RUNTIME;
 	}
 
@@ -215,6 +235,21 @@ err::Err Camera::open(int width, int height, image::Format format,
 		(CVI_U32)_width, (CVI_U32)_height, (CVI_S32)_fps);
 	if (ret != CVI_SUCCESS)
 		log::warn("SetCamSize failed 0x%x — using init size", ret);
+
+	{
+		z_camera_output_desc_t d;
+		if (ZONHOR_MMF_GetOutputDesc(Z_CAMERA_OUTPUT_MAIN_RGB, &d) == CVI_SUCCESS) {
+			log::info("zonhor endpoint main_rgb logical=%ux%u buffer=%ux%u",
+				  d.extent.logical_width, d.extent.logical_height,
+				  d.extent.buffer_width, d.extent.buffer_height);
+		}
+		if (ZONHOR_MMF_GetOutputDesc(Z_CAMERA_OUTPUT_DISPLAY, &d) == CVI_SUCCESS) {
+			log::info("zonhor endpoint display logical=%ux%u buffer=%ux%u valid=%ux%u",
+				  d.extent.logical_width, d.extent.logical_height,
+				  d.extent.buffer_width, d.extent.buffer_height,
+				  d.extent.valid_width, d.extent.valid_height);
+		}
+	}
 
 	_is_opened = true;
 	return err::ERR_NONE;
@@ -277,13 +312,30 @@ bool Camera::is_opened() { return _is_opened; }
 Camera *Camera::add_channel(int width, int height, image::Format format,
 			    double fps, int buff_num, bool open)
 {
-	(void)width;
-	(void)height;
-	(void)format;
 	(void)fps;
 	(void)buff_num;
 	(void)open;
-	log::error("add_channel not supported on zonhor_mmf (VPSS0 chn1 used for LCD ROT)");
+
+	/*
+	 * Map secondary channel requests onto named graph endpoints when possible.
+	 * Full multi-Camera objects sharing one graph are not supported yet;
+	 * display_preview and sub_pipeline are reserved for enable_output.
+	 */
+	z_camera_output_desc_t d;
+	if (width > 0 && height > 0 &&
+	    width <= (int)ZONHOR_DISP_LOGICAL_W + 32 &&
+	    height <= (int)ZONHOR_DISP_LOGICAL_H + 32 &&
+	    ZONHOR_MMF_GetOutputDesc(Z_CAMERA_OUTPUT_DISPLAY, &d) == CVI_SUCCESS) {
+		log::info("add_channel: use display_preview endpoint (%ux%u buffer %ux%u); "
+			  "return nullptr — read via Display/HW preview path",
+			  d.extent.logical_width, d.extent.logical_height,
+			  d.extent.buffer_width, d.extent.buffer_height);
+		(void)format;
+		return nullptr;
+	}
+
+	log::warn("add_channel: reserved endpoints (sub_venc/sub_npu/user_mem) "
+		  "are create-only; enable via zonhor_graph_enable_output()");
 	return nullptr;
 }
 
@@ -295,7 +347,7 @@ err::Err Camera::set_resolution(int width, int height)
 	zonhor::clamp_resolution(width, height);
 	zonhor::Imx678Mode new_mode = zonhor::mode_from_resolution(width, height);
 	if (new_mode != s_active_imx678_mode) {
-		log::info("zonhor set_resolution cross-mode %dx%d → rebuild MMF", width, height);
+		log::info("zonhor set_resolution cross-mode %dx%d → rebuild graph", width, height);
 		close();
 		return open(width, height, _format, _fps, _buff_num);
 	}

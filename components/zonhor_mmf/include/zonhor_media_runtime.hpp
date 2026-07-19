@@ -1,5 +1,6 @@
 /**
- * Process-wide refcounted wrapper around ZONHOR_MMF_Init/Deinit.
+ * Process-wide refcounted wrapper around ZONHOR_MMF_Init/Deinit
+ * (profile-driven graph runtime).
  * Replaces maix::cvi::MediaRuntime for PLATFORM_ZONHOR vision path.
  */
 #pragma once

@@ -42,7 +42,8 @@ namespace maix::display
         _device = device;
 
 #ifdef PLATFORM_ZONHOR
-        /* Zonhor panel is a 172x320 framebuffer; default empty device → /dev/fb0. */
+        /* Zonhor panel is a 172x320 framebuffer; display_preview endpoint
+         * allocates 192x320 (64-align) with valid 172x320 — apps use logical size. */
         static constexpr int kZonhorPanelW = 172;
         static constexpr int kZonhorPanelH = 320;
         static constexpr const char *kZonhorFb = "/dev/fb0";

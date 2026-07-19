@@ -92,31 +92,52 @@ void ZONHOR_FB_Clear(ZONHOR_FB_LCD_S *fb, uint16_t color)
 
 void ZONHOR_FB_DrawRgb565(ZONHOR_FB_LCD_S *fb, const uint16_t *src, int src_w, int src_h)
 {
+	/* Legacy: treat full buffer as content; center-crop if larger than panel. */
+	ZONHOR_FB_DrawRgb565Extent(fb, src, src_w, src_h, 0, 0, src_w, src_h);
+}
+
+void ZONHOR_FB_DrawRgb565Extent(ZONHOR_FB_LCD_S *fb, const uint16_t *src,
+				int buffer_w, int buffer_h,
+				int valid_x, int valid_y, int valid_w, int valid_h)
+{
 	int x, y;
-	int crop_x = 0, crop_y = 0;
 	int draw_w, draw_h, off_x, off_y;
+	int src_x0, src_y0;
 
-	if (!fb || !fb->fb || !src || src_w <= 0 || src_h <= 0)
+	if (!fb || !fb->fb || !src || buffer_w <= 0 || buffer_h <= 0)
 		return;
+	if (valid_w <= 0 || valid_h <= 0)
+		return;
+	if (valid_x < 0)
+		valid_x = 0;
+	if (valid_y < 0)
+		valid_y = 0;
+	if (valid_x + valid_w > buffer_w)
+		valid_w = buffer_w - valid_x;
+	if (valid_y + valid_h > buffer_h)
+		valid_h = buffer_h - valid_y;
 
-	draw_w = src_w;
-	draw_h = src_h;
+	draw_w = valid_w;
+	draw_h = valid_h;
+	src_x0 = valid_x;
+	src_y0 = valid_y;
+
+	/* If valid region still larger than panel, center-crop inside valid rect. */
 	if (draw_w > fb->width) {
-		crop_x = (draw_w - fb->width) / 2;
+		src_x0 += (draw_w - fb->width) / 2;
 		draw_w = fb->width;
 	}
 	if (draw_h > fb->height) {
-		crop_y = (draw_h - fb->height) / 2;
+		src_y0 += (draw_h - fb->height) / 2;
 		draw_h = fb->height;
 	}
 	off_x = (fb->width - draw_w) / 2;
 	off_y = (fb->height - draw_h) / 2;
 
 	for (y = 0; y < draw_h; y++) {
-		int src_y = crop_y + y;
-		// int dst_y = fb->height - 1 - (off_y + y);
+		int src_y = src_y0 + y;
 		int dst_y = off_y + y;
-		const uint16_t *src_row = src + src_y * src_w + crop_x;
+		const uint16_t *src_row = src + src_y * buffer_w + src_x0;
 		uint16_t *dst_row = (uint16_t *)((uint8_t *)fb->fb + dst_y * fb->line_length);
 
 		for (x = 0; x < draw_w; x++)
@@ -250,30 +271,46 @@ void ZONHOR_FB_DrawStatusHud(ZONHOR_FB_LCD_S *fb, int bat_valid, int bat_pct,
 
 int ZONHOR_RGB888_ToRgb565(const VIDEO_FRAME_S *frame, uint16_t *dst)
 {
-	const uint8_t *src;
-	CVI_U32 w, h, stride;
-	int x, y;
+	z_frame_extent_t ext;
 
-	if (!frame || !dst)
+	if (!frame)
+		return -1;
+	z_frame_layout_calc(frame->u32Width, frame->u32Height, &ext);
+	return ZONHOR_RGB888_ToRgb565Extent(frame, &ext, dst);
+}
+
+int ZONHOR_RGB888_ToRgb565Extent(const VIDEO_FRAME_S *frame, const z_frame_extent_t *extent,
+				 uint16_t *dst)
+{
+	const uint8_t *src;
+	CVI_U32 stride;
+	int x, y;
+	uint32_t vx, vy, vw, vh;
+
+	if (!frame || !dst || !extent)
 		return -1;
 	if (frame->enPixelFormat != PIXEL_FORMAT_RGB_888)
 		return -1;
 	if (!frame->pu8VirAddr[0])
 		return -1;
 
-	w = frame->u32Width;
-	h = frame->u32Height;
-	if (w == 0 || h == 0)
+	vx = extent->valid_x;
+	vy = extent->valid_y;
+	vw = extent->valid_width;
+	vh = extent->valid_height;
+	if (vw == 0 || vh == 0)
+		return -1;
+	if (vx + vw > frame->u32Width || vy + vh > frame->u32Height)
 		return -1;
 
 	stride = frame->u32Stride[0];
 	src = frame->pu8VirAddr[0];
 
-	for (y = 0; y < (int)h; y++) {
-		const uint8_t *src_row = src + y * (int)stride;
-		uint16_t *dst_row = dst + y * (int)w;
+	for (y = 0; y < (int)vh; y++) {
+		const uint8_t *src_row = src + (int)(vy + (uint32_t)y) * (int)stride + (int)vx * 3;
+		uint16_t *dst_row = dst + y * (int)vw;
 
-		for (x = 0; x < (int)w; x++) {
+		for (x = 0; x < (int)vw; x++) {
 			uint8_t R = src_row[x * 3 + 0];
 			uint8_t G = src_row[x * 3 + 1];
 			uint8_t B = src_row[x * 3 + 2];
@@ -317,13 +354,22 @@ int ZONHOR_FB_BlitPreview(ZONHOR_FB_LCD_S *fb, uint16_t *rgb565_scratch,
 			  size_t scratch_pixels, CVI_S32 timeout_ms)
 {
 	VIDEO_FRAME_INFO_S stFrame;
+	z_camera_output_desc_t desc;
+	z_frame_extent_t extent;
 	void *vir = NULL;
 	size_t map_size = 0;
 	CVI_S32 ret;
 	CVI_U32 fw, fh;
+	uint32_t out_w, out_h;
 
 	if (!fb || !rgb565_scratch)
 		return -1;
+
+	memset(&desc, 0, sizeof(desc));
+	if (ZONHOR_MMF_GetOutputDesc(Z_CAMERA_OUTPUT_DISPLAY, &desc) == CVI_SUCCESS)
+		extent = desc.extent;
+	else
+		z_frame_layout_calc(ZONHOR_DISP_LOGICAL_W, ZONHOR_DISP_LOGICAL_H, &extent);
 
 	memset(&stFrame, 0, sizeof(stFrame));
 	ret = ZONHOR_MMF_PreviewGetFrame(&stFrame, timeout_ms);
@@ -332,9 +378,22 @@ int ZONHOR_FB_BlitPreview(ZONHOR_FB_LCD_S *fb, uint16_t *rgb565_scratch,
 
 	fw = stFrame.stVFrame.u32Width;
 	fh = stFrame.stVFrame.u32Height;
-	if (fw == 0 || fh == 0 || (size_t)fw * fh > scratch_pixels) {
+	/* Prefer profile valid size for scratch; fall back to full frame. */
+	out_w = extent.valid_width ? extent.valid_width : fw;
+	out_h = extent.valid_height ? extent.valid_height : fh;
+	if (fw == 0 || fh == 0 || (size_t)out_w * out_h > scratch_pixels) {
 		ZONHOR_MMF_PreviewReleaseFrame(&stFrame);
 		return -3;
+	}
+
+	/* Clamp valid rect to actual frame if HW returned different size. */
+	if (extent.valid_x + extent.valid_width > fw ||
+	    extent.valid_y + extent.valid_height > fh) {
+		z_apply_padding(&extent, 0, 0,
+				fw < ZONHOR_DISP_LOGICAL_W ? fw : ZONHOR_DISP_LOGICAL_W,
+				fh < ZONHOR_DISP_LOGICAL_H ? fh : ZONHOR_DISP_LOGICAL_H);
+		out_w = extent.valid_width;
+		out_h = extent.valid_height;
 	}
 
 	if (map_frame(&stFrame, &vir, &map_size) != CVI_SUCCESS) {
@@ -342,9 +401,10 @@ int ZONHOR_FB_BlitPreview(ZONHOR_FB_LCD_S *fb, uint16_t *rgb565_scratch,
 		return -4;
 	}
 
-	if (ZONHOR_RGB888_ToRgb565(&stFrame.stVFrame, rgb565_scratch) == 0) {
-		ZONHOR_FB_DrawRgb565(fb, rgb565_scratch, (int)fw, (int)fh);
-		/* Optional HUD overlay is drawn by caller after BlitPreview. */
+	if (ZONHOR_RGB888_ToRgb565Extent(&stFrame.stVFrame, &extent, rgb565_scratch) == 0) {
+		ZONHOR_FB_DrawRgb565Extent(fb, rgb565_scratch,
+					   (int)out_w, (int)out_h,
+					   0, 0, (int)out_w, (int)out_h);
 	}
 
 	CVI_SYS_Munmap(vir, map_size);

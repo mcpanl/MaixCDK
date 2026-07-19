@@ -1,12 +1,12 @@
 /**
- * Zonhor-specific MMF pipeline (IMX678 + JD9853 FB LCD).
+ * Zonhor MMF public API — thin facade over the profile-driven graph runtime.
  *
- * Topology:
- *   VI (NV21)
- *     → VPSS0 chn0  NV21 WxH + ROT90 (portrait) → VPSS2 CSC RGB888 → Camera::read
- *     → VPSS0 chn1  NV21 320x192 ROT90          → VPSS1 CSC RGB888 → HW LCD preview
- *
- * GDC rotation requires NV21 (not RGB888). No VO. VPSS groups use VpssDev 0.
+ * Topology (see 000_zonhor_mmf_camera_refactor_plan.md):
+ *   VI -> Group0(Dev0) ROT90 YUV
+ *       -> Group2(Dev1) ChA display RGB 172x320/192x320
+ *                     ChB main RGB (Camera::read)
+ *                     ChC half YUV -> Group3 reserved
+ *   Group1(Dev0) MEM create-only
  */
 #ifndef __ZONHOR_MMF_H__
 #define __ZONHOR_MMF_H__
@@ -15,6 +15,9 @@
 #include <stdint.h>
 
 #include "sample_comm.h"
+#include "zonhor_frame_layout.h"
+#include "zonhor_graph_profile.h"
+#include "zonhor_graph_runtime.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -24,26 +27,30 @@ extern "C" {
 #define ZONHOR_MMF_VPSS_ALIGN_UP(x) \
 	((((x) + ZONHOR_MMF_VPSS_ALIGN - 1) / ZONHOR_MMF_VPSS_ALIGN) * ZONHOR_MMF_VPSS_ALIGN)
 
+#define ZONHOR_FB_LCD_WIDTH       172
+#define ZONHOR_FB_LCD_HEIGHT      320
+#define ZONHOR_FB_LCD_DEV         "/dev/fb0"
+
+/* Legacy preview buffer macros (logical 172, buffer 192). */
 #define ZONHOR_MMF_PRE_W          320
 #define ZONHOR_MMF_PRE_H          ZONHOR_MMF_VPSS_ALIGN_UP(172) /* 192 */
 #define ZONHOR_MMF_DISP_W         ZONHOR_MMF_PRE_H              /* 192 */
 #define ZONHOR_MMF_DISP_H         ZONHOR_MMF_PRE_W              /* 320 */
 
-#define ZONHOR_MMF_GRP_CAM        0 /* VI → dual-chn */
-#define ZONHOR_MMF_GRP_CSC        1 /* preview NV21 → RGB888 */
-#define ZONHOR_MMF_GRP_CAM_CSC    2 /* camera NV21+ROT → RGB888 */
+/* Legacy group id aliases mapped onto the new graph. */
+#define ZONHOR_MMF_GRP_CAM        0 /* Group0 */
+#define ZONHOR_MMF_GRP_CSC        2 /* Group2 (display lives on ChA) */
+#define ZONHOR_MMF_GRP_CAM_CSC    2 /* Group2 (main RGB on ChB) */
 #define ZONHOR_MMF_CHN_CAM        0
-#define ZONHOR_MMF_CHN_ROT        1
-
-#define ZONHOR_FB_LCD_WIDTH       172
-#define ZONHOR_FB_LCD_HEIGHT      320
-#define ZONHOR_FB_LCD_DEV         "/dev/fb0"
+#define ZONHOR_MMF_CHN_ROT        0
+#define ZONHOR_MMF_CHN_DISP       0
+#define ZONHOR_MMF_CHN_MAIN       1
 
 typedef struct {
 	CVI_U32 cam_w;          /* Camera RGB output width (user coords, default 1080) */
 	CVI_U32 cam_h;          /* Camera RGB output height (user coords, default 1920) */
 	CVI_S32 cam_fps;        /* Channel frame rate, -1 = unlimited */
-	CVI_BOOL mirror;        /* Applied on ROT chn (and cam chn) */
+	CVI_BOOL mirror;        /* Applied on Group0 rotate channel */
 	CVI_BOOL flip;
 	const char *sensor_ini; /* Optional; env MAIX_SENSOR_CFG_INI wins */
 } ZONHOR_MMF_CFG_S;
@@ -61,7 +68,7 @@ CVI_BOOL ZONHOR_MMF_IsInited(void);
 void ZONHOR_MMF_GetSensorSize(CVI_U32 *w, CVI_U32 *h);
 void ZONHOR_MMF_GetCamSize(CVI_U32 *w, CVI_U32 *h);
 
-/** Resize camera RGB output (user coords); VPSS applies ROT90 when portrait. */
+/** Resize camera RGB output (user coords); Group2-ChB. */
 CVI_S32 ZONHOR_MMF_SetCamSize(CVI_U32 w, CVI_U32 h, CVI_S32 fps);
 
 CVI_S32 ZONHOR_MMF_SetMirrorFlip(CVI_BOOL mirror, CVI_BOOL flip);
@@ -71,6 +78,9 @@ CVI_S32 ZONHOR_MMF_CamReleaseFrame(VIDEO_FRAME_INFO_S *frame);
 
 CVI_S32 ZONHOR_MMF_PreviewGetFrame(VIDEO_FRAME_INFO_S *frame, CVI_S32 timeout_ms);
 CVI_S32 ZONHOR_MMF_PreviewReleaseFrame(VIDEO_FRAME_INFO_S *frame);
+
+/** Query named output extent (logical/buffer/valid). */
+CVI_S32 ZONHOR_MMF_GetOutputDesc(z_camera_output_id_t id, z_camera_output_desc_t *desc);
 
 /* ── Framebuffer helpers (optional HW preview path) ─────────────────────── */
 
@@ -87,14 +97,28 @@ int ZONHOR_FB_Open(ZONHOR_FB_LCD_S *fb, const char *dev);
 void ZONHOR_FB_Close(ZONHOR_FB_LCD_S *fb);
 void ZONHOR_FB_Clear(ZONHOR_FB_LCD_S *fb, uint16_t color);
 void ZONHOR_FB_DrawRgb565(ZONHOR_FB_LCD_S *fb, const uint16_t *src, int src_w, int src_h);
+/**
+ * Blit RGB565 using valid extent inside a padded buffer
+ * (e.g. buffer 192x320, valid 172x320 at valid_x/valid_y).
+ */
+void ZONHOR_FB_DrawRgb565Extent(ZONHOR_FB_LCD_S *fb, const uint16_t *src,
+				int buffer_w, int buffer_h,
+				int valid_x, int valid_y, int valid_w, int valid_h);
 void ZONHOR_FB_DrawStatusHud(ZONHOR_FB_LCD_S *fb, int bat_valid, int bat_pct,
 			     int temp_valid, int temp_c);
 
-/** Packed RGB888 VIDEO_FRAME → RGB565 (1:1, uses stride). */
+/** Packed RGB888 VIDEO_FRAME → RGB565 (1:1, uses stride); full buffer width. */
 int ZONHOR_RGB888_ToRgb565(const VIDEO_FRAME_S *frame, uint16_t *dst);
 
 /**
- * One-shot: PreviewGetFrame → RGB565 → center-crop blit → Release.
+ * RGB888 frame → RGB565 using only the valid logical region described by extent.
+ * dst is sized valid_w * valid_h.
+ */
+int ZONHOR_RGB888_ToRgb565Extent(const VIDEO_FRAME_S *frame, const z_frame_extent_t *extent,
+				 uint16_t *dst);
+
+/**
+ * One-shot: PreviewGetFrame → crop valid 172x320 from 192 buffer → RGB565 → blit.
  * Returns 0 on success, negative on failure / timeout skip.
  */
 int ZONHOR_FB_BlitPreview(ZONHOR_FB_LCD_S *fb, uint16_t *rgb565_scratch,

@@ -115,7 +115,7 @@ int _main(int argc, char *argv[])
 	}
 	ZONHOR_FB_Clear(&fb, 0x0000);
 
-	const size_t scratch_n = (size_t)ZONHOR_MMF_DISP_W * ZONHOR_MMF_DISP_H;
+	const size_t scratch_n = (size_t)ZONHOR_MMF_DISP_W * ZONHOR_MMF_DISP_H; /* 192x320 buffer; blit uses valid 172x320 */
 	uint16_t *scratch = (uint16_t *)calloc(scratch_n, sizeof(uint16_t));
 	if (!scratch) {
 		ZONHOR_FB_Close(&fb);

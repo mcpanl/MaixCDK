@@ -1,44 +1,57 @@
 # zonhor_mmf
 
-Zonhor-only media pipeline for **IMX678** + **JD9853** framebuffer LCD (`/dev/fb0`, 172×320 RGB565).  
-Derived from SDK `sample_sensor_lcd`, extended for `maix.camera.Camera::read`.
+Zonhor-only media graph for **IMX678** + **JD9853** framebuffer LCD (`/dev/fb0`, 172×320 RGB565).
 
-详细踩坑记录见仓库根目录 [MaixArm64Doc/modules/zonhor_mmf.md](../../../MaixArm64Doc/modules/zonhor_mmf.md)。
+Built from the greenfield design in `000_zonhor_mmf_camera_refactor_plan.md`
+(profile + graph runtime; not a patch of the old three-group sample).
+
+详细踩坑记录见 [MaixArm64Doc/modules/zonhor_mmf.md](../../../MaixArm64Doc/modules/zonhor_mmf.md)。
 
 ## Pipeline
 
 ```
-VI (NV21 1920×1080)
-  ├─ VPSS0 chn0  NV21 pre 1920×1088 + ROT90  →  VPSS2 (GRP_CAM_CSC)  →  RGB888 1080×1920  →  Camera::read
-  └─ VPSS0 chn1  NV21 320×192 + ROT90        →  VPSS1 (GRP_CSC)       →  RGB888 192×320    →  HW preview blit
+Sensor/VI
+  -> Group0 / Device0 / VI input
+      -> Ch0: ROT90 YUV (rotated_main_yuv), width 64-aligned after rotate
+          -> Group2 / Device1
+              -> ChA: RGB888 display_preview  logical 172x320 / buffer 192x320
+              -> ChB: RGB888 main_rgb         Camera::read / main_venc_input
+              -> ChC: half-size YUV           -> Group3 / Device1 (reserved)
+  Group1 / Device0 / MEM                     create-only (user_mem_pipeline)
 ```
 
-| VPSS group | ID | Role |
-|------------|-----|------|
-| `ZONHOR_MMF_GRP_CAM` | 0 | VI in; dual chn (camera + LCD preview) |
-| `ZONHOR_MMF_GRP_CSC` | 1 | Preview NV21 → RGB888 |
-| `ZONHOR_MMF_GRP_CAM_CSC` | 2 | Camera NV21(+ROT) → RGB888 |
+| Group | Dev | Role | Default |
+|-------|-----|------|---------|
+| 0 | 0 | VI → rotate main YUV | enabled |
+| 1 | 0 | MEM→MEM reserve | **create only** |
+| 2 | 1 | Distribute display / main / half | enabled |
+| 3 | 1 | Low-res sub VENC / NPU / reserved | bound, channels **reserved** |
 
-No VO. All groups use `VpssDev=0`.
+VPSS **Dual** mode, **VI ONLINE + VPSS OFFLINE**.
 
-### Why NV21 + ROT, not RGB888?
+### Alignment rules
 
-GDC (`CVI_VPSS_SetChnRotation`) only supports **NV12/NV21**.  
-`ROTATION_90 + RGB888` fails with `CVI_ERR_VPSS_ILLEGAL_PARAM` (`0xc0068003`).  
-Do **not** rotate in CPU (`cv::rotate`) on the hot path.
+All outputs go through `z_frame_layout_calc` / `z_rotate_extent`:
 
-### GDC 64-pixel alignment
+- `buffer_width = align_up(logical_width, 64)`
+- After 90° rotate, width alignment is **re-checked** (sensor H becomes output W)
 
-Both width and height of the **pre-rotation** channel size must be multiples of 64.
+| User request | Sensor | Group0 post-rot buffer | Display buffer |
+|--------------|--------|------------------------|----------------|
+| 1080×1920 | 1920×1080 | 1088×1920 | 192×320 (valid 172×320 @ x=10) |
 
-| User request | Pre-rot NV21 | After ROT90 | RGB out |
-|--------------|--------------|-------------|---------|
-| 1080×1920 (portrait) | 1920×**1088** | 1088×1920 | 1080×1920 |
-| 1920×1080 (landscape) | 1920×1088 | — ROT0 — | 1920×1080 |
+### Modules
 
-`1088 = ZONHOR_MMF_VPSS_ALIGN_UP(1080)`.
+| File | Layer |
+|------|-------|
+| `zonhor_frame_layout.*` | extent / align / rotate / half |
+| `zonhor_graph_profile.*` | `Group0~3` profile builder + dump |
+| `zonhor_graph_runtime.*` | create / bind / start / stop / endpoints |
+| `zonhor_mmf.*` | compatible C facade (`Init` / `CamGetFrame` / …) |
+| `zonhor_fb_lcd.*` | FB blit with `valid_*` extent |
 
-VB pool [1] sizes NV21 blocks to `max(pre_rot, post_rot)`; `blk_cnt=5` for dual GDC channels.
+Named endpoints: `display_preview`, `main_venc_input` / `main_rgb`,
+`sub_pipeline_input`, `sub_venc_input`, `sub_npu_input`, `user_mem_pipeline`.
 
 ## User vs ISP coordinates
 
@@ -47,16 +60,11 @@ VB pool [1] sizes NV21 blocks to `max(pre_rot, post_rot)`; `blk_cnt=5` for dual 
 | User API (`Camera(w,h)`) | 1080 × 1920 |
 | ISP sensor | 1920 × 1080 |
 | `ZONHOR_MMF_SetCamSize` | accepts **user** w×h |
-| `get_sensor_size()` (camera) | returns **user** {1080, 1920} |
-
-On MaixCam, users typically pass `Camera(1920, 1080)` because the display path rotates 90°.  
-On Zonhor, screen and camera share product orientation — pass `Camera(1080, 1920)`.
+| `get_sensor_size()` | returns **user** {1080, 1920} |
 
 ## Vision backend
 
 `PLATFORM_ZONHOR` defaults to `MAIXCAM_VISION_BACKEND=zonhor_mmf`.
-
-Override: `-DMAIXCAM_VISION_BACKEND=x_mmf` (legacy MaixCam topology).
 
 Implementation: `components/vision/port/maixcam_zonhor/`.
 
@@ -64,32 +72,25 @@ Implementation: `components/vision/port/maixcam_zonhor/`.
 
 ```c
 ZONHOR_MMF_CFG_S cfg;
-ZONHOR_MMF_DefaultConfig(&cfg);   // cam 1080×1920, 30fps
+ZONHOR_MMF_DefaultConfig(&cfg);
 cfg.sensor_ini = "/mnt/system/usr/bin/sensor_cfg.ini.imx678_1080p_bin";
-ZONHOR_MMF_Init(&cfg);
+ZONHOR_MMF_Init(&cfg);   // builds profile, Dual VPSS, Group0~3
 
-ZONHOR_MMF_SetCamSize(1080, 1920, 30);  // user coords; portrait → ROT90 inside
+z_camera_output_desc_t d;
+ZONHOR_MMF_GetOutputDesc(Z_CAMERA_OUTPUT_DISPLAY, &d); // 172/192 extents
 
 VIDEO_FRAME_INFO_S frame;
-ZONHOR_MMF_CamGetFrame(&frame, 1000);   // RGB888 from VPSS2
-ZONHOR_MMF_CamReleaseFrame(&frame);
+ZONHOR_MMF_CamGetFrame(&frame, 1000);      // Group2-ChB RGB
+ZONHOR_MMF_PreviewGetFrame(&frame, 1000);  // Group2-ChA RGB
+
+zonhor_graph_enable_output(Z_CAMERA_OUTPUT_SUB_VENC); // reserved → enabled
 ```
 
 ## HW preview
 
-`ZONHOR_FB_BlitPreview()` — full-screen path matching `sample_sensor_lcd`.  
-App composition can use `display::Display` + `FB_Display::show` instead.
-
-## Troubleshooting
-
-| Log / error | Fix |
-|-------------|-----|
-| `requires 64 alignments` | Use `ZONHOR_MMF_VPSS_ALIGN_UP` on pre-rot dims |
-| `Can't acquire VB BLK` | Increase NV21 pool size/count; check ION |
-| `CamGetFrame 0xc006800e` | `CVI_ERR_VPSS_BUF_EMPTY` — usually alignment or VB |
-| Wrong motion direction | Ensure chn0 NV21 + ROT90, not RGB direct |
+`ZONHOR_FB_BlitPreview()` crops `valid_*` from the 192-wide buffer then blits to 172×320.
 
 ## Reference
 
-- `reference/sample_sensor_lcd.c` — SDK host sync
-- `reference/sample_sensor_lcd_readme.md` — original LCD sample notes
+- `reference/sample_sensor_lcd.c` — historical SDK sample (old topology)
+- Repo plan: `000_zonhor_mmf_camera_refactor_plan.md`

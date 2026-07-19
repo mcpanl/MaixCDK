@@ -7,7 +7,7 @@
  *
  * User / API coordinates follow the product orientation (portrait panel).
  * Example: full 1080p preview is Camera(1080, 1920).
- * ISP still outputs landscape 1920x1080 — zonhor_mmf VPSS GDC rotates to user size.
+ * ISP still outputs landscape 1920x1080 — zonhor graph Group0 GDC rotates to user size.
  *
  * Selection is driven by Camera open()/set_resolution() request size.
  * Override with env MAIX_SENSOR_CFG_INI for a fixed path.

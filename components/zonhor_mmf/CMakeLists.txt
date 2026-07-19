@@ -8,6 +8,9 @@ if(PLATFORM_ZONHOR)
 
     list(APPEND ADD_REQUIREMENTS basic cvi-middleware)
     list(APPEND ADD_SRCS
+        "src/zonhor_frame_layout.c"
+        "src/zonhor_graph_profile.c"
+        "src/zonhor_graph_runtime.c"
         "src/zonhor_mmf.c"
         "src/zonhor_fb_lcd.c"
         "src/zonhor_media_runtime.cpp"
