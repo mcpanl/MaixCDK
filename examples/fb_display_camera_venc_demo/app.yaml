@@ -1,0 +1,7 @@
+id: fb_display_camera_venc_demo
+name: FB Display Camera VENC Demo
+name[zh]: Framebuffer 显示 + Group3 取帧测试
+version: 1.0.0
+author: Sipeed Ltd
+desc: Simple FB preview loop; probe Group3-Ch0 frame (VENC prep, no encode yet)
+desc[zh]: 精简 FB 预览循环；探测 Group3-Ch0 取帧（为后续 VENC 铺路，暂不编码）
