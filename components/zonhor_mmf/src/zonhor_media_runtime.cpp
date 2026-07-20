@@ -3,6 +3,7 @@
  */
 
 #include "zonhor_media_runtime.hpp"
+#include "zonhor_sensor_mode.h"
 #include <cstdio>
 #include <cstdlib>
 
@@ -14,8 +15,8 @@ bool MediaRuntime::s_inited = false;
 bool MediaRuntime::s_atexit_registered = false;
 std::string MediaRuntime::s_sensor_ini_pending;
 std::string MediaRuntime::s_sensor_ini_active;
-CVI_U32 MediaRuntime::s_cam_w = 1080;
-CVI_U32 MediaRuntime::s_cam_h = 1920;
+CVI_U32 MediaRuntime::s_cam_w = ZONHOR_SNS_DEFAULT_USER_W;
+CVI_U32 MediaRuntime::s_cam_h = ZONHOR_SNS_DEFAULT_USER_H;
 CVI_S32 MediaRuntime::s_cam_fps = 30;
 
 void MediaRuntime::set_sensor_ini_path(const char *path)
@@ -47,10 +48,11 @@ void MediaRuntime::_init()
 	cfg.cam_w = s_cam_w;
 	cfg.cam_h = s_cam_h;
 	cfg.cam_fps = s_cam_fps;
-	if (!s_sensor_ini_pending.empty()) {
-		cfg.sensor_ini = s_sensor_ini_pending.c_str();
-		ZONHOR_MMF_SetSensorIniPath(s_sensor_ini_pending.c_str());
-	}
+	/* Prefer 2x2 binning for ≤1080p envelope when caller left ini unset. */
+	if (s_sensor_ini_pending.empty())
+		s_sensor_ini_pending = zonhor_sns_ini_for_size(s_cam_w, s_cam_h);
+	cfg.sensor_ini = s_sensor_ini_pending.c_str();
+	ZONHOR_MMF_SetSensorIniPath(s_sensor_ini_pending.c_str());
 
 	CVI_S32 ret = ZONHOR_MMF_Init(&cfg);
 	s_inited = (ret == CVI_SUCCESS) && ZONHOR_MMF_IsInited();

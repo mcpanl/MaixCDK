@@ -46,6 +46,7 @@ typedef struct {
 	bool create_only;
 	bool enabled_by_default;
 	z_rotation_e rotation; /* applied on this channel (GDC), usually 0 except Group0 */
+	bool use_pre_rotation_attr_size; /* only true for Group0 GDC attr sizing */
 } z_channel_profile_t;
 
 typedef struct {

@@ -54,6 +54,33 @@ void z_rotate_extent(uint32_t in_w, uint32_t in_h, z_rotation_e rot, z_frame_ext
 	z_frame_layout_calc(lw, lh, out);
 }
 
+void z_gdc_rot90_extent(uint32_t sensor_w, uint32_t sensor_h,
+			z_pad_mode_e pad, z_frame_extent_t *out)
+{
+	uint32_t pad_x = 0;
+
+	if (!out)
+		return;
+
+	/*
+	 * User wants portrait (sensor_h x sensor_w), e.g. 1080x1920.
+	 * GDC stores align64(sensor_h) x sensor_w, e.g. 1088x1920.
+	 * Pre-rot SetChnAttr is (sensor_w, align64(sensor_h)) + ASPECT_RATIO_AUTO
+	 * so content letterboxes into that canvas; after ROT90 the pad is on X.
+	 */
+	z_rotate_extent(sensor_w, sensor_h, Z_ROTATION_90, out);
+
+	if (out->buffer_width <= out->logical_width)
+		return;
+
+	if (pad == Z_PAD_LEFT_TOP)
+		pad_x = 0;
+	else
+		pad_x = (out->buffer_width - out->logical_width) / 2u;
+
+	z_apply_padding(out, pad_x, 0, out->logical_width, out->logical_height);
+}
+
 void z_scale_extent(uint32_t src_w, uint32_t src_h,
 		    uint32_t dst_logical_w, uint32_t dst_logical_h,
 		    bool letterbox, z_frame_extent_t *out)
@@ -109,6 +136,17 @@ void z_apply_padding(z_frame_extent_t *extent, uint32_t valid_x, uint32_t valid_
 	extent->valid_y = valid_y;
 	extent->valid_width = valid_w;
 	extent->valid_height = valid_h;
+}
+
+bool z_extent_needs_crop(const z_frame_extent_t *extent)
+{
+	if (!extent || extent->valid_width == 0 || extent->valid_height == 0)
+		return false;
+	if (extent->valid_width == extent->buffer_width &&
+	    extent->valid_height == extent->buffer_height &&
+	    extent->valid_x == 0 && extent->valid_y == 0)
+		return false;
+	return true;
 }
 
 void z_half_extent(const z_frame_extent_t *src, z_frame_extent_t *out)

@@ -300,10 +300,23 @@ int ZONHOR_RGB888_ToRgb565Extent(const VIDEO_FRAME_S *frame, const z_frame_exten
 	vh = extent->valid_height;
 	if (vw == 0 || vh == 0)
 		return -1;
-	if (vx + vw > frame->u32Width || vy + vh > frame->u32Height)
-		return -1;
 
 	stride = frame->u32Stride[0];
+	/*
+	 * u32Width is the logical/channel size; stride may be larger due to
+	 * 64-align storage. Allow the valid rect to sit inside stride capacity.
+	 */
+	{
+		uint32_t max_w = frame->u32Width;
+		if (stride >= 3) {
+			uint32_t stride_w = stride / 3u;
+			if (stride_w > max_w)
+				max_w = stride_w;
+		}
+		if (vx + vw > max_w || vy + vh > frame->u32Height)
+			return -1;
+	}
+
 	src = frame->pu8VirAddr[0];
 
 	for (y = 0; y < (int)vh; y++) {
@@ -386,14 +399,33 @@ int ZONHOR_FB_BlitPreview(ZONHOR_FB_LCD_S *fb, uint16_t *rgb565_scratch,
 		return -3;
 	}
 
-	/* Clamp valid rect to actual frame if HW returned different size. */
-	if (extent.valid_x + extent.valid_width > fw ||
-	    extent.valid_y + extent.valid_height > fh) {
-		z_apply_padding(&extent, 0, 0,
-				fw < ZONHOR_DISP_LOGICAL_W ? fw : ZONHOR_DISP_LOGICAL_W,
-				fh < ZONHOR_DISP_LOGICAL_H ? fh : ZONHOR_DISP_LOGICAL_H);
-		out_w = extent.valid_width;
-		out_h = extent.valid_height;
+	/*
+	 * After logical SetChnAttr, frames usually report u32Width=logical.
+	 * If HW reports a larger storage width, keep left-aligned logical crop
+	 * (do not re-center — that was only valid for the old 192-wide attr).
+	 */
+	{
+		uint32_t max_w = fw;
+		uint32_t stride = stFrame.stVFrame.u32Stride[0];
+		if (stride >= 3) {
+			uint32_t stride_w = stride / 3u;
+			if (stride_w > max_w)
+				max_w = stride_w;
+		}
+		if (extent.valid_x + extent.valid_width > max_w ||
+		    extent.valid_y + extent.valid_height > fh) {
+			uint32_t crop_w = extent.logical_width ? extent.logical_width
+							      : ZONHOR_DISP_LOGICAL_W;
+			uint32_t crop_h = extent.logical_height ? extent.logical_height
+							       : ZONHOR_DISP_LOGICAL_H;
+			if (crop_w > max_w)
+				crop_w = max_w;
+			if (crop_h > fh)
+				crop_h = fh;
+			z_apply_padding(&extent, 0, 0, crop_w, crop_h);
+			out_w = extent.valid_width;
+			out_h = extent.valid_height;
+		}
 	}
 
 	if (map_frame(&stFrame, &vir, &map_size) != CVI_SUCCESS) {

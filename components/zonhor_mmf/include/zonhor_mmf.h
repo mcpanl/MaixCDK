@@ -1,9 +1,16 @@
 /**
  * Zonhor MMF public API — thin facade over the profile-driven graph runtime.
  *
- * Topology (see 000_zonhor_mmf_camera_refactor_plan.md):
+ * Size contract (see zonhor_frame_layout.h / 000_zonhor_vpss_portrait_nv21_rgb_csc_investigation.md):
+ *   User / Camera API     : logical  e.g. 1080x1920
+ *   G0 GDC storage        : buffer   e.g. 1088x1920  (width 64-align)
+ *   G2 GrpAttr MaxW/H     : = G0 buffer (never lift to landscape sensor_w)
+ *   G2 SetGrpCrop         : valid_* crop of logical inside that buffer
+ *   G2 SetChnAttr (RGB)   : logical size (never write buffer_* as output size)
+ *
+ * Topology:
  *   VI -> Group0(Dev0) ROT90 YUV
- *       -> Group2(Dev1) ChA display RGB 172x320/192x320
+ *       -> Group2(Dev1) ChA display RGB 172x320
  *                     ChB main RGB (Camera::read)
  *                     ChC half YUV -> Group3 reserved
  *   Group1(Dev0) MEM create-only
@@ -52,7 +59,12 @@ typedef struct {
 	CVI_S32 cam_fps;        /* Channel frame rate, -1 = unlimited */
 	CVI_BOOL mirror;        /* Applied on Group0 rotate channel */
 	CVI_BOOL flip;
-	const char *sensor_ini; /* Optional; env MAIX_SENSOR_CFG_INI wins */
+	/*
+	 * Optional sensor_cfg.ini. Priority: env MAIX_SENSOR_CFG_INI >
+	 * this field / SetSensorIniPath > size-based auto
+	 * (≤1080p envelope → 2x2 binning, else 5MP crop).
+	 */
+	const char *sensor_ini;
 } ZONHOR_MMF_CFG_S;
 
 void ZONHOR_MMF_DefaultConfig(ZONHOR_MMF_CFG_S *cfg);
@@ -82,6 +94,14 @@ CVI_S32 ZONHOR_MMF_PreviewReleaseFrame(VIDEO_FRAME_INFO_S *frame);
 /** Query named output extent (logical/buffer/valid). */
 CVI_S32 ZONHOR_MMF_GetOutputDesc(z_camera_output_id_t id, z_camera_output_desc_t *desc);
 
+/** Enable/disable reserved graph output (e.g. SUB_VENC before VPSS bind). */
+CVI_S32 ZONHOR_MMF_EnableOutput(z_camera_output_id_t id);
+CVI_S32 ZONHOR_MMF_DisableOutput(z_camera_output_id_t id);
+
+/** Map encoder output id to VPSS grp/chn for SAMPLE_COMM_VPSS_Bind_VENC. */
+CVI_S32 ZONHOR_MMF_GetVencBindInfo(z_camera_output_id_t id, VPSS_GRP *grp,
+				   VPSS_CHN *chn, z_camera_output_desc_t *desc);
+
 /* ── Framebuffer helpers (optional HW preview path) ─────────────────────── */
 
 typedef struct {
@@ -98,8 +118,9 @@ void ZONHOR_FB_Close(ZONHOR_FB_LCD_S *fb);
 void ZONHOR_FB_Clear(ZONHOR_FB_LCD_S *fb, uint16_t color);
 void ZONHOR_FB_DrawRgb565(ZONHOR_FB_LCD_S *fb, const uint16_t *src, int src_w, int src_h);
 /**
- * Blit RGB565 using valid extent inside a padded buffer
- * (e.g. buffer 192x320, valid 172x320 at valid_x/valid_y).
+ * Blit RGB565 using valid extent inside a possibly stride-padded buffer.
+ * For display_preview, SetChnAttr is logical 172x320; storage/stride may be
+ * wider, with content left-aligned at valid_x=0.
  */
 void ZONHOR_FB_DrawRgb565Extent(ZONHOR_FB_LCD_S *fb, const uint16_t *src,
 				int buffer_w, int buffer_h,
@@ -118,7 +139,7 @@ int ZONHOR_RGB888_ToRgb565Extent(const VIDEO_FRAME_S *frame, const z_frame_exten
 				 uint16_t *dst);
 
 /**
- * One-shot: PreviewGetFrame → crop valid 172x320 from 192 buffer → RGB565 → blit.
+ * One-shot: PreviewGetFrame → crop valid logical region → RGB565 → blit.
  * Returns 0 on success, negative on failure / timeout skip.
  */
 int ZONHOR_FB_BlitPreview(ZONHOR_FB_LCD_S *fb, uint16_t *rgb565_scratch,

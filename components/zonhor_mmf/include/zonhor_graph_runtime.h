@@ -5,6 +5,7 @@
 #define __ZONHOR_GRAPH_RUNTIME_H__
 
 #include "zonhor_graph_profile.h"
+#include "zonhor_sensor_mode.h"
 #include "sample_comm.h"
 
 #ifdef __cplusplus

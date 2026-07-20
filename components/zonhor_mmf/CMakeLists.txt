@@ -13,6 +13,7 @@ if(PLATFORM_ZONHOR)
         "src/zonhor_graph_runtime.c"
         "src/zonhor_mmf.c"
         "src/zonhor_fb_lcd.c"
+        "src/zonhor_sensor_mode.c"
         "src/zonhor_media_runtime.cpp"
     )
     list(APPEND ADD_DEFINITIONS_PRIVATE -Wl,--exclude-libs,ALL)
