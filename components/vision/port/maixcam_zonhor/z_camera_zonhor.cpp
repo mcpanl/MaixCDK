@@ -83,7 +83,7 @@ static void _prepare_sensor_mode(int width, int height)
 	const char *ini = zonhor::ini_path_for_mode(mode);
 	s_active_imx678_mode = mode;
 	maix::zonhor::MediaRuntime::set_sensor_ini_path(ini);
-	log::info("zonhor IMX678 mode=%s (%dx%d) ini=%s",
+	log::info("zonhor IMX678 mode=%s req=%dx%d (envelope-agnostic) ini=%s",
 		  (mode == zonhor::Imx678Mode::Mode5MP) ? "5MP" : "1080p_bin",
 		  width, height, ini);
 }
@@ -108,26 +108,38 @@ static image::Image *_read_rgb888_frame(int want_w, int want_h, int block_ms)
 	VIDEO_FRAME_S *vf = &frame.stVFrame;
 	const uint32_t fw = vf->u32Width;
 	const uint32_t fh = vf->u32Height;
+	const uint32_t stride = vf->u32Stride[0];
 	if (fw == 0 || fh == 0) {
 		ZONHOR_MMF_CamReleaseFrame(&frame);
 		return nullptr;
 	}
 
 	uint32_t vx = 0, vy = 0, vw = fw, vh = fh;
+	uint32_t max_w = fw;
+	if (stride >= 3) {
+		uint32_t stride_w = stride / 3u;
+		if (stride_w > max_w)
+			max_w = stride_w;
+	}
 	if (ZONHOR_MMF_GetOutputDesc(Z_CAMERA_OUTPUT_MAIN_RGB, &desc) == CVI_SUCCESS) {
 		vx = desc.extent.valid_x;
 		vy = desc.extent.valid_y;
 		vw = desc.extent.valid_width ? desc.extent.valid_width : desc.extent.logical_width;
 		vh = desc.extent.valid_height ? desc.extent.valid_height : desc.extent.logical_height;
-		if (vx + vw > fw)
-			vw = fw - vx;
+		if (vx + vw > max_w)
+			vw = (max_w > vx) ? (max_w - vx) : 0;
 		if (vy + vh > fh)
-			vh = fh - vy;
+			vh = (fh > vy) ? (fh - vy) : 0;
 	}
 
 	CVI_BOOL need_unmap = CVI_FALSE;
-	uint8_t *src = vf->pu8VirAddr[0];
-	if (!src) {
+	/*
+	 * Do NOT trust vf->pu8VirAddr[0] from GetChnFrame: it can be a stale
+	 * non-NULL pointer (same VA across different phy frames). Always map
+	 * from phy, matching zonhor_fb_lcd / sample_sensor_lcd.
+	 */
+	uint8_t *src = nullptr;
+	if (vf->u64PhyAddr[0] && vf->u32Length[0]) {
 		src = (uint8_t *)CVI_SYS_MmapCache(vf->u64PhyAddr[0], vf->u32Length[0]);
 		need_unmap = CVI_TRUE;
 	}
@@ -137,10 +149,62 @@ static image::Image *_read_rgb888_frame(int want_w, int want_h, int block_ms)
 	int out_w = (want_w > 0) ? want_w : (int)vw;
 	int out_h = (want_h > 0) ? want_h : (int)vh;
 
+	/* One-shot dump: isolate whether MAIN_RGB metadata matches packed RGB888. */
+	{
+		static int s_meta_dumps = 0;
+		if (s_meta_dumps < 3) {
+			++s_meta_dumps;
+			log::info("MAIN_RGB meta#%d fmt=%d wh=%ux%u stride=%u/%u/%u "
+				  "len=%u/%u/%u phy=0x%llx get_vir=%p map_vir=%p want=%dx%d "
+				  "valid=(%u,%u %ux%u) desc_logic=%ux%u desc_buf=%ux%u",
+				  s_meta_dumps, (int)vf->enPixelFormat, fw, fh,
+				  vf->u32Stride[0], vf->u32Stride[1], vf->u32Stride[2],
+				  vf->u32Length[0], vf->u32Length[1], vf->u32Length[2],
+				  (unsigned long long)vf->u64PhyAddr[0],
+				  (void *)vf->pu8VirAddr[0], (void *)src,
+				  out_w, out_h, vx, vy, vw, vh,
+				  desc.extent.logical_width, desc.extent.logical_height,
+				  desc.extent.buffer_width, desc.extent.buffer_height);
+			if (src) {
+				log::info("MAIN_RGB head bytes: "
+					  "%02x %02x %02x %02x %02x %02x %02x %02x "
+					  "%02x %02x %02x %02x %02x %02x %02x %02x",
+					  src[0], src[1], src[2], src[3],
+					  src[4], src[5], src[6], src[7],
+					  src[8], src[9], src[10], src[11],
+					  src[12], src[13], src[14], src[15]);
+			}
+			const uint32_t expect_rgb_stride_logical = (uint32_t)out_w * 3u;
+			const uint32_t expect_rgb_stride_buffer =
+				desc.extent.buffer_width ? desc.extent.buffer_width * 3u
+							 : expect_rgb_stride_logical;
+			const uint32_t expect_rgb_stride_align64 =
+				(expect_rgb_stride_logical + 63u) & ~63u;
+			if (stride != expect_rgb_stride_logical &&
+			    stride != expect_rgb_stride_buffer &&
+			    stride != expect_rgb_stride_align64) {
+				log::warn("MAIN_RGB stride mismatch: got=%u expect_logical=%u "
+					  "expect_buffer=%u expect_align64_bytes=%u",
+					  stride, expect_rgb_stride_logical,
+					  expect_rgb_stride_buffer, expect_rgb_stride_align64);
+			} else if (stride == expect_rgb_stride_align64 &&
+				   stride != expect_rgb_stride_buffer) {
+				log::info("MAIN_RGB stride=%u matches align(w*3,64); "
+					  "profile buffer_width*3=%u is NOT the HW stride",
+					  stride, expect_rgb_stride_buffer);
+			}
+			/* PIXEL_FORMAT_RGB_888 == 0 in cvi_comm_video.h */
+			if ((int)vf->enPixelFormat != 0) {
+				log::warn("MAIN_RGB enPixelFormat=%d — expected PIXEL_FORMAT_RGB_888(0); "
+					  "buffer may not be packed RGB",
+					  (int)vf->enPixelFormat);
+			}
+		}
+	}
+
 	image::Image *img = new image::Image(out_w, out_h, image::FMT_RGB888);
-	if (img && src) {
+	if (img && src && vw > 0 && vh > 0) {
 		uint8_t *dst = (uint8_t *)img->data();
-		const uint32_t stride = vf->u32Stride[0];
 		const uint32_t row_bytes = (uint32_t)std::min(out_w * 3, (int)(vw * 3));
 		for (int y = 0; y < out_h && (uint32_t)y < vh; ++y) {
 			memcpy(dst + (size_t)y * out_w * 3,
@@ -149,7 +213,7 @@ static image::Image *_read_rgb888_frame(int want_w, int want_h, int block_ms)
 		}
 	}
 
-	if (need_unmap)
+	if (need_unmap && src)
 		CVI_SYS_Munmap(src, vf->u32Length[0]);
 	ZONHOR_MMF_CamReleaseFrame(&frame);
 	return img;

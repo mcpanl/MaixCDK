@@ -110,7 +110,7 @@ namespace maix::camera {
         const char *ini = zonhor::ini_path_for_mode(mode);
         s_active_imx678_mode = mode;
         maix::cvi::MediaRuntime::set_sensor_ini_path(ini);
-        log::info("zonhor IMX678 mode=%s (%dx%d) ini=%s",
+        log::info("zonhor IMX678 mode=%s req=%dx%d (envelope-agnostic) ini=%s",
                   (mode == zonhor::Imx678Mode::Mode5MP) ? "5MP" : "1080p_bin",
                   width, height, ini);
     }

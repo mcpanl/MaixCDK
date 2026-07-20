@@ -1,22 +1,21 @@
 /**
- * Zonhor (IMX678) sensor mode selection helpers.
+ * Zonhor (IMX678) sensor mode helpers for Camera.
  *
- * Board provides two sensor_cfg.ini variants under /mnt/system/usr/bin/:
- *   - sensor_cfg.ini.imx678_1080p_bin  → 2x2 hardware binning 1920x1080
- *   - sensor_cfg.ini.imx678_5m         → 5MP (up to 2848x1602)
+ * Policy lives in zonhor_mmf (zonhor_sensor_mode.h):
+ *   - ≤1080p envelope (1920x1080 or 1080x1920) → 2x2 binning
+ *   - larger → 4K crop 5MP
  *
- * User / API coordinates follow the product orientation (portrait panel).
+ * User / API coordinates follow product orientation (portrait panel).
  * Example: full 1080p preview is Camera(1080, 1920).
- * ISP still outputs landscape 1920x1080 — zonhor graph Group0 GDC rotates to user size.
+ * ISP still outputs landscape 1920x1080 — graph Group0 GDC rotates to user size.
  *
- * Selection is driven by Camera open()/set_resolution() request size.
  * Override with env MAIX_SENSOR_CFG_INI for a fixed path.
  */
 #pragma once
 
+#include "zonhor_sensor_mode.h"
+
 #include <algorithm>
-#include <cstring>
-#include <string>
 #include <vector>
 
 namespace maix::camera::zonhor {
@@ -26,33 +25,31 @@ enum class Imx678Mode {
     Mode5MP      = 1,
 };
 
-static constexpr int kBinningMaxW = 1920;
-static constexpr int kBinningMaxH = 1080;
-static constexpr int k5mpMaxW     = 2848;
-static constexpr int k5mpMaxH     = 1602;
+static constexpr int kBinningMaxW = (int)ZONHOR_SNS_BIN_MAX_W;
+static constexpr int kBinningMaxH = (int)ZONHOR_SNS_BIN_MAX_H;
+static constexpr int k5mpMaxW     = (int)ZONHOR_SNS_5MP_MAX_W;
+static constexpr int k5mpMaxH     = (int)ZONHOR_SNS_5MP_MAX_H;
 
 /** Default Camera() resolution in user (portrait) coordinates. */
-static constexpr int kDefaultUserW = kBinningMaxH; /* 1080 */
-static constexpr int kDefaultUserH = kBinningMaxW; /* 1920 */
+static constexpr int kDefaultUserW = (int)ZONHOR_SNS_DEFAULT_USER_W;
+static constexpr int kDefaultUserH = (int)ZONHOR_SNS_DEFAULT_USER_H;
 
-static constexpr const char *kIni1080p =
-    "/mnt/system/usr/bin/sensor_cfg.ini.imx678_1080p_bin";
-static constexpr const char *kIni5mp =
-    "/mnt/system/usr/bin/sensor_cfg.ini.imx678_5m";
+static constexpr const char *kIni1080p = ZONHOR_SNS_INI_1080P_BIN;
+static constexpr const char *kIni5mp   = ZONHOR_SNS_INI_5MP;
 
 inline Imx678Mode mode_from_resolution(int width, int height)
 {
-    const int long_side  = std::max(width, height);
-    const int short_side = std::min(width, height);
-    /* Compare envelope sides — portrait Camera(1080,1920) must stay 1080p. */
-    if (long_side <= kBinningMaxW && short_side <= kBinningMaxH)
-        return Imx678Mode::Binning1080p;
-    return Imx678Mode::Mode5MP;
+    zonhor_sns_mode_e m = zonhor_sns_mode_from_size(
+        (uint32_t)std::max(1, width), (uint32_t)std::max(1, height));
+    return (m == ZONHOR_SNS_MODE_5MP) ? Imx678Mode::Mode5MP
+                                      : Imx678Mode::Binning1080p;
 }
 
 inline const char *ini_path_for_mode(Imx678Mode mode)
 {
-    return (mode == Imx678Mode::Mode5MP) ? kIni5mp : kIni1080p;
+    return zonhor_sns_ini_for_mode(
+        (mode == Imx678Mode::Mode5MP) ? ZONHOR_SNS_MODE_5MP
+                                      : ZONHOR_SNS_MODE_1080P_BIN);
 }
 
 inline const char *ini_path_for_resolution(int width, int height)
