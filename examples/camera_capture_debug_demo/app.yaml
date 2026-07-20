@@ -1,0 +1,7 @@
+id: camera_capture_debug_demo
+name: Camera Capture Debug Demo
+name[zh]: 摄像头取图落盘调试
+version: 1.0.0
+author: Sipeed Ltd
+desc: Minimal Zonhor camera capture — read frames for >=1s, save last RGB frame to disk
+desc[zh]: 最小摄像头取图调试：连续取图至少1秒，将最后一帧RGB写入磁盘
