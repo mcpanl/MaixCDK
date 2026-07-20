@@ -30,6 +30,7 @@ extern "C" {
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <chrono>
 
 using namespace maix;
 
@@ -48,8 +49,10 @@ static constexpr VENC_CHN kVencChn = 0;
 static constexpr int kDefaultStep = 4;
 static constexpr int kStep2SendCount = 10;
 static constexpr int kStep4GetCount = 15;
+static constexpr int kStep4PerfMs = 3000;
 static constexpr CVI_S32 kVencSendTimeoutMs = 2000;
-static constexpr CVI_S32 kVencGetStreamTimeoutMs = 1000;
+static constexpr CVI_S32 kVencGetStreamTimeoutMs = 200;
+static constexpr CVI_U32 kVencPackSlotMax = 16;
 
 /* Private VENC ref-frame pool (VB_SOURCE_USER). Invalid until create. */
 static VB_POOL g_venc_pic_pool = VB_INVALID_POOLID;
@@ -599,7 +602,8 @@ static int venc_drain_stream(VENC_CHN chn, CVI_S32 timeout_ms, bool verbose,
 			     VencStreamStats *st, int max_gets)
 {
 	int drained = 0;
-	CVI_S32 deadline_slice = timeout_ms > 0 ? timeout_ms : 1000;
+	CVI_S32 deadline_slice = timeout_ms > 0 ? timeout_ms : 200;
+	VENC_PACK_S pack_slots[kVencPackSlotMax];
 
 	for (int n = 0; n < max_gets; ++n) {
 		VENC_CHN_STATUS_S status;
@@ -608,7 +612,7 @@ static int venc_drain_stream(VENC_CHN chn, CVI_S32 timeout_ms, bool verbose,
 		int waited = 0;
 
 		/*
-		 * Sophgo MPI: QueryStatus → malloc(pstPack × CurPacks) → GetStream.
+		 * Sophgo MPI: QueryStatus → pstPack slots → GetStream.
 		 * Calling GetStream with pstPack=NULL always fails / times out.
 		 */
 		memset(&status, 0, sizeof(status));
@@ -620,15 +624,14 @@ static int venc_drain_stream(VENC_CHN chn, CVI_S32 timeout_ms, bool verbose,
 					++st->get_timeout;
 				return drained;
 			}
-			/* Prefer LeftStreamFrames; CurPacks alone can be stale junk. */
 			if (status.u32LeftStreamFrames > 0 ||
 			    (status.u32CurPacks > 0 && status.u32CurPacks < 64 &&
 			     status.u32LeftStreamBytes > 0))
 				break;
 			if (deadline_slice == 0)
 				break;
-			time::sleep_ms(10);
-			waited += 10;
+			time::sleep_ms(1);
+			waited += 1;
 		}
 
 		if (!(status.u32LeftStreamFrames > 0 ||
@@ -640,39 +643,46 @@ static int venc_drain_stream(VENC_CHN chn, CVI_S32 timeout_ms, bool verbose,
 		}
 
 		CVI_U32 pack_n = status.u32CurPacks ? status.u32CurPacks : 8;
+		if (pack_n > kVencPackSlotMax)
+			pack_n = kVencPackSlotMax;
+
 		memset(&stream, 0, sizeof(stream));
-		stream.pstPack = (VENC_PACK_S *)malloc(sizeof(VENC_PACK_S) * pack_n);
-		if (!stream.pstPack) {
-			log::error("malloc VENC_PACK_S×%u failed\n", pack_n);
-			break;
-		}
+		memset(pack_slots, 0, sizeof(VENC_PACK_S) * pack_n);
+		stream.pstPack = pack_slots;
 
 		ret = CVI_VENC_GetStream(chn, &stream, deadline_slice);
 		if (ret != CVI_SUCCESS) {
-			/* CurPacks can lag; BUSY after a good get is normal — stop. */
-			if (ret == CVI_ERR_VENC_BUSY && drained > 0) {
-				free(stream.pstPack);
+			if (ret == CVI_ERR_VENC_BUSY && drained > 0)
 				break;
-			}
 			if (verbose)
 				log::warn("GetStream failed: 0x%x (CurPacks was %u)\n",
 					  ret, status.u32CurPacks);
 			if (st)
 				++st->get_timeout;
-			free(stream.pstPack);
 			break;
 		}
 
 		++drained;
 		if (st)
 			++st->get_ok;
-		if (verbose)
+		if (verbose) {
 			venc_log_stream("Step3", &stream, st);
+		} else if (st) {
+			for (CVI_U32 i = 0; i < stream.u32PackCount; ++i) {
+				H264E_NALU_TYPE_E nalu =
+					stream.pstPack[i].DataType.enH264EType;
+				++st->packs;
+				if (nalu == H264E_NALU_SPS) ++st->saw_sps;
+				else if (nalu == H264E_NALU_PPS) ++st->saw_pps;
+				else if (nalu == H264E_NALU_IDRSLICE) ++st->saw_idr;
+				else if (nalu == H264E_NALU_ISLICE) ++st->saw_i;
+				else if (nalu == H264E_NALU_PSLICE) ++st->saw_p;
+			}
+		}
 
 		ret = CVI_VENC_ReleaseStream(chn, &stream);
 		if (ret != CVI_SUCCESS)
 			log::warn("ReleaseStream: 0x%x\n", ret);
-		free(stream.pstPack);
 	}
 	return drained;
 }
@@ -763,15 +773,27 @@ static bool venc_send_from_g3(VENC_CHN chn, int send_count, bool verbose_stream)
  *
  * Sophgo sample order: Create → Bind → StartRecvFrame.
  * We already Start'd in Step1, so: StopRecv → Bind → StartRecv.
+ *
+ * Perf: keep draining Camera RGB (G2-Ch1 depth) or VPSS back-pressure
+ * throttles G3→VENC (~15fps). Quiet timed loop measures wall_fps.
  */
-static bool venc_bind_g3_and_get_stream(VENC_CHN chn, int get_count)
+static void drain_camera_rgb(camera::Camera *cam)
+{
+	if (!cam)
+		return;
+	image::Image *img = cam->read();
+	if (img)
+		delete img;
+}
+
+static bool venc_bind_g3_and_get_stream(VENC_CHN chn, int get_count,
+					camera::Camera *cam)
 {
 	VencStreamStats st = {};
-	int drained = 0;
 	VENC_RECV_PIC_PARAM_S recv;
 
-	log::info("=== Step4: Bind G3-Ch0 → VENC(%d), GetStream × ~%d (no Send) ===\n",
-		  chn, get_count);
+	log::info("=== Step4: Bind G3-Ch0 → VENC(%d) + perf GetStream (no Send) ===\n",
+		  chn);
 
 	if (set_g3_ch0_depth(0) != CVI_SUCCESS)
 		return false;
@@ -786,7 +808,6 @@ static bool venc_bind_g3_and_get_stream(VENC_CHN chn, int get_count)
 	ret = SAMPLE_COMM_VPSS_Bind_VENC(kG3, kG3Ch0, chn);
 	if (ret != CVI_SUCCESS) {
 		log::error("SAMPLE_COMM_VPSS_Bind_VENC(G3,0→%d) failed: 0x%x\n", chn, ret);
-		/* Try to restore recv so destroy path still works. */
 		memset(&recv, 0, sizeof(recv));
 		recv.s32RecvPicNum = -1;
 		CVI_VENC_StartRecvFrame(chn, &recv);
@@ -806,28 +827,61 @@ static bool venc_bind_g3_and_get_stream(VENC_CHN chn, int get_count)
 
 	dump_vpss_proc("after Bind+StartRecv G3→VENC");
 
-	/* Let VPSS push a few frames into VENC. */
-	time::sleep_ms(500);
-
-	for (int i = 0; i < get_count; ++i) {
-		int got = venc_drain_stream(chn, kVencGetStreamTimeoutMs, true, &st, 2);
-		drained += got;
-		if (got == 0)
-			log::warn("Step4[%d] no stream this round (ok=%d so far)\n", i, st.get_ok);
-		else
-			log::info("Step4[%d] got %d stream(s)\n", i, got);
+	for (int i = 0; i < 5; ++i) {
+		drain_camera_rgb(cam);
+		time::sleep_ms(20);
 	}
+	for (int i = 0; i < get_count && st.saw_sps == 0; ++i) {
+		drain_camera_rgb(cam);
+		venc_drain_stream(chn, kVencGetStreamTimeoutMs, true, &st, 4);
+	}
+	log::info("Step4 warmup: SPS=%d PPS=%d IDR=%d get_ok=%d\n",
+		  st.saw_sps, st.saw_pps, st.saw_idr, st.get_ok);
 
-	log::info("Step4 GetStream stats: ok=%d timeout≈%d packs=%d "
-		  "SPS=%d PPS=%d IDR=%d I=%d P=%d drained≈%d\n",
-		  st.get_ok, st.get_timeout, st.packs,
-		  st.saw_sps, st.saw_pps, st.saw_idr, st.saw_i, st.saw_p, drained);
+	VencStreamStats perf = {};
+	auto t0 = std::chrono::steady_clock::now();
+	int quiet_gets = 0;
+	int idle_spins = 0;
+	while (true) {
+		auto now = std::chrono::steady_clock::now();
+		auto elapsed_ms =
+			std::chrono::duration_cast<std::chrono::milliseconds>(now - t0)
+				.count();
+		if (elapsed_ms >= kStep4PerfMs)
+			break;
+
+		drain_camera_rgb(cam);
+		int got = venc_drain_stream(chn, 50, false, &perf, 8);
+		quiet_gets += got;
+		if (got == 0) {
+			++idle_spins;
+			time::sleep_ms(1);
+		}
+	}
+	auto t1 = std::chrono::steady_clock::now();
+	double secs = std::chrono::duration<double>(t1 - t0).count();
+	double wall_fps = secs > 0.0 ? (quiet_gets / secs) : 0.0;
+
+	log::info("Step4 PERF: quiet_gets=%d over %.3fs → wall_fps=%.2f "
+		  "(idle_spins=%d) P=%d\n",
+		  quiet_gets, secs, wall_fps, idle_spins, perf.saw_p);
+	log::info("Step4 totals: get_ok=%d packs=%d SPS=%d PPS=%d IDR=%d P=%d\n",
+		  st.get_ok + perf.get_ok, st.packs + perf.packs,
+		  st.saw_sps + perf.saw_sps, st.saw_pps + perf.saw_pps,
+		  st.saw_idr + perf.saw_idr, st.saw_p + perf.saw_p);
 	dump_venc_proc("after Step4 GetStream");
 	dump_vpss_proc("after Step4 GetStream");
 
-	bool stream_ok = st.get_ok >= 3 && st.packs >= 3 &&
-			 (st.saw_sps > 0 || st.saw_pps > 0 ||
-			  st.saw_idr > 0 || st.saw_i > 0);
+	bool stream_ok = (st.get_ok + perf.get_ok) >= 3 &&
+			 (st.saw_sps + perf.saw_sps > 0 ||
+			  st.saw_pps + perf.saw_pps > 0 ||
+			  st.saw_idr + perf.saw_idr > 0);
+	if (wall_fps < 20.0)
+		log::warn("Step4 wall_fps=%.2f looks low (expect ~30 on 1080p30)\n",
+			  wall_fps);
+	else
+		log::info("Step4 wall_fps=%.2f looks healthy\n", wall_fps);
+
 	return stream_ok;
 }
 
@@ -886,7 +940,7 @@ int _main(int argc, char *argv[])
 
 	bool step_ok = true;
 	if (step >= 4) {
-		step_ok = venc_bind_g3_and_get_stream(kVencChn, kStep4GetCount);
+		step_ok = venc_bind_g3_and_get_stream(kVencChn, kStep4GetCount, &cam);
 		if (step_ok)
 			log::info("Step4 SUCCESS: Bind path GetStream ok\n");
 		else
