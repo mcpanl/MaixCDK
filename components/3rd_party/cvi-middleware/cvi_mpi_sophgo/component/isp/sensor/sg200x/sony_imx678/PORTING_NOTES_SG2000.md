@@ -231,6 +231,10 @@ i2ctransfer -y 3 w2@0x1a 0x30 0x47 r1   # 0x04
 
 模式选择：sample 层 `ISP_PUB_ATTR.u8SnsMode=1` → `cmos_set_image_mode` 选 BIN。
 
+**踩坑（已修）**：`SAMPLE_COMM_ISP_SetSensorMode` 必须把 `stPubAttr.u8SnsMode`
+拷到 `ISP_CMOS_SENSOR_IMAGE_MODE_S.u8SnsMode`。只设 PubAttr、不转发 u8SnsMode 时，
+ini 虽是 `10BIT_BIN`，驱动仍会走 `12bit LINE(crop)`（FOV 变窄）。
+
 ### 7.3 板级启用
 
 ```bash

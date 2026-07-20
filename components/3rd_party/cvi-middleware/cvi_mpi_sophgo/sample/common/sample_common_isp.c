@@ -707,11 +707,15 @@ CVI_S32 SAMPLE_COMM_ISP_SetSensorMode(SAMPLE_VI_CONFIG_S *pstViConfig)
 			CVI_TRACE_LOG(CVI_DBG_ERR, "Can't get sns attr!\n");
 			return s32Ret;
 		}
+		memset(&stSnsrMode, 0, sizeof(stSnsrMode));
 		stSnsrMode.u16Width = stPubAttr.stSnsSize.u32Width;
 		stSnsrMode.u16Height = stPubAttr.stSnsSize.u32Height;
 		stSnsrMode.f32Fps = stPubAttr.f32FrameRate;
-		printf("stSnsrMode.u16Width %d stSnsrMode.u16Height %d %f wdrMode %d pstSnsObj %p\n",
-		       stSnsrMode.u16Width, stSnsrMode.u16Height, stSnsrMode.f32Fps, wdrMode, pstSnsObj);
+		/* IMX678 1080p: same WxH for crop vs 2x2 bin — must forward u8SnsMode. */
+		stSnsrMode.u8SnsMode = stPubAttr.u8SnsMode;
+		printf("stSnsrMode.u16Width %d stSnsrMode.u16Height %d %f wdrMode %d u8SnsMode %u pstSnsObj %p\n",
+		       stSnsrMode.u16Width, stSnsrMode.u16Height, stSnsrMode.f32Fps, wdrMode,
+		       stSnsrMode.u8SnsMode, pstSnsObj);
 		pstSnsObj->pfnExpSensorCb(&stSnsrSensorFunc);
 
 		if (stSnsrSensorFunc.pfn_cmos_set_image_mode) {
