@@ -103,3 +103,32 @@ CVI_S32 ZONHOR_MMF_GetOutputDesc(z_camera_output_id_t id, z_camera_output_desc_t
 {
 	return zonhor_graph_get_output_desc(id, desc);
 }
+
+CVI_S32 ZONHOR_MMF_EnableOutput(z_camera_output_id_t id)
+{
+	return zonhor_graph_enable_output(id);
+}
+
+CVI_S32 ZONHOR_MMF_DisableOutput(z_camera_output_id_t id)
+{
+	return zonhor_graph_disable_output(id);
+}
+
+CVI_S32 ZONHOR_MMF_GetVencBindInfo(z_camera_output_id_t id, VPSS_GRP *grp,
+				   VPSS_CHN *chn, z_camera_output_desc_t *desc)
+{
+	z_camera_output_desc_t local;
+	z_camera_output_desc_t *out = desc ? desc : &local;
+	CVI_S32 ret;
+
+	if (!grp || !chn)
+		return CVI_FAILURE;
+
+	ret = zonhor_graph_get_output_desc(id, out);
+	if (ret != CVI_SUCCESS)
+		return ret;
+
+	*grp = (VPSS_GRP)out->group_id;
+	*chn = (VPSS_CHN)out->channel_id;
+	return CVI_SUCCESS;
+}

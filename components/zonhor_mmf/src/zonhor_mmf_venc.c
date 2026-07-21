@@ -2,6 +2,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
 
 /* C facade over raw CVI VENC */
 #define ZLOGI(fmt, ...) printf("[zonhor_venc] " fmt "\n", ##__VA_ARGS__)
@@ -377,6 +378,8 @@ CVI_S32 ZONHOR_MMF_VencGetStream(VENC_CHN chn, ZONHOR_MMF_VENC_STREAM_S *out, CV
 	VENC_CHN_STATUS_S status;
 	CVI_S32 ret;
 	CVI_U32 pack_n;
+	CVI_S32 waited = 0;
+	CVI_S32 deadline = timeout_ms > 0 ? timeout_ms : 200;
 
 	if (!out)
 		return CVI_FAILURE;
@@ -388,22 +391,38 @@ CVI_S32 ZONHOR_MMF_VencGetStream(VENC_CHN chn, ZONHOR_MMF_VENC_STREAM_S *out, CV
 	memset(out, 0, sizeof(*out));
 	memset(&status, 0, sizeof(status));
 
-	ret = CVI_VENC_QueryStatus(chn, &status);
-	if (ret != CVI_SUCCESS)
-		return ret;
+	/*
+	 * Sophgo MPI: QueryStatus → pstPack slots → GetStream.
+	 * Poll until stream data is ready or timeout (matches fb_display demo).
+	 */
+	while (waited <= deadline) {
+		ret = CVI_VENC_QueryStatus(chn, &status);
+		if (ret != CVI_SUCCESS)
+			return ret;
+		if (status.u32LeftStreamFrames > 0 ||
+		    (status.u32CurPacks > 0 && status.u32CurPacks < 64 &&
+		     status.u32LeftStreamBytes > 0))
+			break;
+		if (deadline == 0)
+			break;
+		usleep(1000);
+		waited += 1;
+	}
 
-	/* Caller side uses this struct only; ensure our fixed packs buffer is enough. */
+	if (!(status.u32LeftStreamFrames > 0 ||
+	      (status.u32CurPacks > 0 && status.u32CurPacks < 64 &&
+	       status.u32LeftStreamBytes > 0)))
+		return CVI_ERR_VENC_BUSY;
+
 	pack_n = status.u32CurPacks ? status.u32CurPacks : 8;
 	if (pack_n > ZONHOR_MMF_VENC_MAX_PACKS)
 		pack_n = ZONHOR_MMF_VENC_MAX_PACKS;
 
 	memset(out->packs, 0, sizeof(VENC_PACK_S) * pack_n);
-
 	out->stream.pstPack = out->packs;
-	out->stream.u32PackCount = pack_n; /* best-effort input capacity hint */
 	out->stream.u32Seq = 0;
 
-	ret = CVI_VENC_GetStream(chn, &out->stream, timeout_ms);
+	ret = CVI_VENC_GetStream(chn, &out->stream, deadline);
 	return ret;
 }
 

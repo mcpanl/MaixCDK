@@ -52,11 +52,55 @@ static constexpr int kStep4GetCount = 15;
 static constexpr int kStep4PerfMs = 3000;
 static constexpr CVI_S32 kVencSendTimeoutMs = 2000;
 static constexpr CVI_S32 kVencGetStreamTimeoutMs = 200;
-static constexpr CVI_U32 kVencPackSlotMax = 16;
 
-/* Private VENC ref-frame pool (VB_SOURCE_USER). Invalid until create. */
-static VB_POOL g_venc_pic_pool = VB_INVALID_POOLID;
+/* Track bind state for logging; actual state lives in zonhor_mmf. */
 static bool g_venc_bound = false;
+
+static ZONHOR_MMF_VENC_CFG_S make_venc_cfg(VENC_CHN chn, CVI_U32 width, CVI_U32 height)
+{
+	ZONHOR_MMF_VENC_CFG_S cfg;
+	memset(&cfg, 0, sizeof(cfg));
+	cfg.chn = chn;
+	cfg.payload = PT_H264;
+	cfg.width = width;
+	cfg.height = height;
+	cfg.fps = 30;
+	cfg.gop = 30;
+	cfg.bitrate_kbps = 2000;
+	cfg.cbr = CVI_TRUE;
+	return cfg;
+}
+
+/** Step 1: Create + StartRecvFrame via zonhor_mmf wrapper. */
+static CVI_S32 venc_create_start(VENC_CHN chn, CVI_U32 width, CVI_U32 height)
+{
+	ZONHOR_MMF_VENC_CFG_S cfg = make_venc_cfg(chn, width, height);
+	CVI_S32 ret = ZONHOR_MMF_VencCreate(&cfg);
+	if (ret != CVI_SUCCESS) {
+		log::error("ZONHOR_MMF_VencCreate(%d) failed: 0x%x\n", chn, ret);
+		return ret;
+	}
+	log::info("ZONHOR_MMF_VencCreate(%d) ok H264 %ux%u\n", chn, width, height);
+	return CVI_SUCCESS;
+}
+
+static void venc_destroy(VENC_CHN chn)
+{
+	if (g_venc_bound) {
+		CVI_S32 ret = ZONHOR_MMF_VencUnbindInput(chn, Z_CAMERA_OUTPUT_SUB_VENC);
+		if (ret != CVI_SUCCESS)
+			log::warn("ZONHOR_MMF_VencUnbindInput(%d): 0x%x\n", chn, ret);
+		else
+			log::info("ZONHOR_MMF_VencUnbindInput(%d) ok\n", chn);
+		g_venc_bound = false;
+	}
+
+	CVI_S32 ret = ZONHOR_MMF_VencDestroy(chn);
+	if (ret != CVI_SUCCESS)
+		log::warn("ZONHOR_MMF_VencDestroy(%d): 0x%x\n", chn, ret);
+	else
+		log::info("ZONHOR_MMF_VencDestroy(%d) ok\n", chn);
+}
 
 static void print_usage(const char *prog)
 {
@@ -307,222 +351,6 @@ static bool probe_g3_bind_then_mem(CVI_U32 *g3_w, CVI_U32 *g3_h)
 }
 
 /**
- * Step 1: Create + StartRecvFrame only.
- * No Bind, no SendFrame, no GetStream.
- *
- * IMPORTANT: zonhor common VB pools have no block size matching
- * COMMON_GetVencFrameBufferSize(H264, 540, 960) (~0.95MB). Using
- * VB_SOURCE_COMMON makes SendFrame block forever waiting for VB.
- * Use VB_SOURCE_USER + private pool instead.
- */
-static CVI_S32 venc_create_start(VENC_CHN chn, CVI_U32 width, CVI_U32 height)
-{
-	VENC_CHN_ATTR_S attr;
-	VENC_RECV_PIC_PARAM_S recv;
-	VENC_PARAM_MOD_S mod;
-	VB_POOL_CONFIG_S pool_cfg;
-	VENC_CHN_POOL_S venc_pool;
-	CVI_U32 blk_size;
-	CVI_S32 ret;
-
-	if (width == 0 || height == 0) {
-		width = 540;
-		height = 960;
-	}
-	/* Even dimensions for H.264. */
-	width &= ~1u;
-	height &= ~1u;
-
-	blk_size = COMMON_GetVencFrameBufferSize(PT_H264, width, height);
-	if (blk_size == 0) {
-		log::error("COMMON_GetVencFrameBufferSize returned 0 for %ux%u\n",
-			   width, height);
-		return CVI_FAILURE;
-	}
-
-	memset(&pool_cfg, 0, sizeof(pool_cfg));
-	pool_cfg.u32BlkSize = blk_size;
-	pool_cfg.u32BlkCnt = 3;
-	pool_cfg.enRemapMode = VB_REMAP_MODE_NONE;
-	g_venc_pic_pool = CVI_VB_CreatePool(&pool_cfg);
-	if (g_venc_pic_pool == VB_INVALID_POOLID) {
-		log::error("CVI_VB_CreatePool venc ref failed size=%u cnt=3\n", blk_size);
-		return CVI_FAILURE;
-	}
-	log::info("VENC USER VB pool id=%u blk_size=%u cnt=3\n",
-		  g_venc_pic_pool, blk_size);
-
-	memset(&attr, 0, sizeof(attr));
-	attr.stVencAttr.enType = PT_H264;
-	attr.stVencAttr.u32MaxPicWidth = width;
-	attr.stVencAttr.u32MaxPicHeight = height;
-	attr.stVencAttr.u32PicWidth = width;
-	attr.stVencAttr.u32PicHeight = height;
-	/* ~0.5MB bitstream ring; enough for 540x960 substream. */
-	attr.stVencAttr.u32BufSize = 512 * 1024;
-	attr.stVencAttr.u32Profile = 0; /* baseline */
-	attr.stVencAttr.bByFrame = CVI_TRUE;
-	attr.stVencAttr.bEsBufQueueEn = CVI_TRUE;
-	attr.stVencAttr.stAttrH264e.bRcnRefShareBuf = CVI_TRUE;
-
-	attr.stRcAttr.enRcMode = VENC_RC_MODE_H264CBR;
-	attr.stRcAttr.stH264Cbr.u32Gop = 30;
-	attr.stRcAttr.stH264Cbr.u32StatTime = 2;
-	attr.stRcAttr.stH264Cbr.u32SrcFrameRate = 30;
-	attr.stRcAttr.stH264Cbr.fr32DstFrameRate = 30;
-	attr.stRcAttr.stH264Cbr.bVariFpsEn = CVI_FALSE;
-	attr.stRcAttr.stH264Cbr.u32BitRate = 2000; /* kbps */
-
-	attr.stGopAttr.enGopMode = VENC_GOPMODE_NORMALP;
-	attr.stGopAttr.stNormalP.s32IPQpDelta = 2;
-
-	/* Must set ModParam before CreateChn. */
-	memset(&mod, 0, sizeof(mod));
-	mod.enVencModType = MODTYPE_H264E;
-	ret = CVI_VENC_GetModParam(&mod);
-	if (ret != CVI_SUCCESS) {
-		log::error("CVI_VENC_GetModParam failed: 0x%x\n", ret);
-		goto fail_pool;
-	}
-	mod.stH264eModParam.enH264eVBSource = VB_SOURCE_USER;
-	ret = CVI_VENC_SetModParam(&mod);
-	if (ret != CVI_SUCCESS) {
-		log::error("CVI_VENC_SetModParam USER failed: 0x%x\n", ret);
-		goto fail_pool;
-	}
-	log::info("VENC H264e VB source = USER\n");
-
-	log::info("VENC CreateChn(%d) H264 %ux%u CBR %ukbps gop=%u buf=%u\n",
-		  chn, width, height,
-		  attr.stRcAttr.stH264Cbr.u32BitRate,
-		  attr.stRcAttr.stH264Cbr.u32Gop,
-		  attr.stVencAttr.u32BufSize);
-
-	/* Stale chn from unclean exit makes CreateChn hang — clear first. */
-	{
-		VENC_CHN_ATTR_S existing;
-		memset(&existing, 0, sizeof(existing));
-		if (CVI_VENC_GetChnAttr(chn, &existing) == CVI_SUCCESS) {
-			log::warn("VENC chn %d already exists — Stop/Detach/Destroy before recreate\n",
-				  chn);
-			CVI_VENC_StopRecvFrame(chn);
-			CVI_VENC_DetachVbPool(chn);
-			CVI_VENC_DestroyChn(chn);
-		}
-	}
-
-	ret = CVI_VENC_CreateChn(chn, &attr);
-	if (ret != CVI_SUCCESS) {
-		log::error("CVI_VENC_CreateChn(%d) failed: 0x%x\n", chn, ret);
-		goto fail_pool;
-	}
-	log::info("CVI_VENC_CreateChn(%d) ok\n", chn);
-
-	memset(&venc_pool, 0, sizeof(venc_pool));
-	venc_pool.hPicVbPool = g_venc_pic_pool;
-	venc_pool.hPicInfoVbPool = VB_INVALID_POOLID;
-	ret = CVI_VENC_AttachVbPool(chn, &venc_pool);
-	if (ret != CVI_SUCCESS) {
-		log::error("CVI_VENC_AttachVbPool(%d) failed: 0x%x\n", chn, ret);
-		CVI_VENC_DestroyChn(chn);
-		goto fail_pool;
-	}
-	log::info("CVI_VENC_AttachVbPool(%d) pool=%u ok\n", chn, g_venc_pic_pool);
-
-	memset(&recv, 0, sizeof(recv));
-	recv.s32RecvPicNum = -1; /* unlimited until Stop */
-	ret = CVI_VENC_StartRecvFrame(chn, &recv);
-	if (ret != CVI_SUCCESS) {
-		log::error("CVI_VENC_StartRecvFrame(%d) failed: 0x%x\n", chn, ret);
-		CVI_VENC_DetachVbPool(chn);
-		CVI_VENC_DestroyChn(chn);
-		goto fail_pool;
-	}
-	log::info("CVI_VENC_StartRecvFrame(%d) ok\n", chn);
-	return CVI_SUCCESS;
-
-fail_pool:
-	if (g_venc_pic_pool != VB_INVALID_POOLID) {
-		CVI_VB_DestroyPool(g_venc_pic_pool);
-		g_venc_pic_pool = VB_INVALID_POOLID;
-	}
-	return ret;
-}
-
-static void venc_destroy(VENC_CHN chn)
-{
-	CVI_S32 ret;
-
-	if (g_venc_bound) {
-		ret = SAMPLE_COMM_VPSS_UnBind_VENC(kG3, kG3Ch0, chn);
-		if (ret != CVI_SUCCESS)
-			log::warn("UnBind G3-Ch0→VENC(%d): 0x%x\n", chn, ret);
-		else
-			log::info("UnBind G3-Ch0→VENC(%d) ok\n", chn);
-		g_venc_bound = false;
-	}
-
-	ret = CVI_VENC_StopRecvFrame(chn);
-	if (ret != CVI_SUCCESS)
-		log::warn("CVI_VENC_StopRecvFrame(%d): 0x%x\n", chn, ret);
-	else
-		log::info("CVI_VENC_StopRecvFrame(%d) ok\n", chn);
-
-	ret = CVI_VENC_DetachVbPool(chn);
-	if (ret != CVI_SUCCESS)
-		log::warn("CVI_VENC_DetachVbPool(%d): 0x%x\n", chn, ret);
-	else
-		log::info("CVI_VENC_DetachVbPool(%d) ok\n", chn);
-
-	ret = CVI_VENC_DestroyChn(chn);
-	if (ret != CVI_SUCCESS)
-		log::warn("CVI_VENC_DestroyChn(%d): 0x%x\n", chn, ret);
-	else
-		log::info("CVI_VENC_DestroyChn(%d) ok\n", chn);
-
-	if (g_venc_pic_pool != VB_INVALID_POOLID) {
-		ret = CVI_VB_DestroyPool(g_venc_pic_pool);
-		if (ret != CVI_SUCCESS)
-			log::warn("CVI_VB_DestroyPool(%u): 0x%x\n", g_venc_pic_pool, ret);
-		else
-			log::info("CVI_VB_DestroyPool(%u) ok\n", g_venc_pic_pool);
-		g_venc_pic_pool = VB_INVALID_POOLID;
-	}
-}
-
-/** Bind-path: depth may be 0 (no user GetChnFrame). */
-static CVI_S32 set_g3_ch0_depth(CVI_U32 depth)
-{
-	VPSS_CHN_ATTR_S attr;
-	CVI_S32 ret;
-
-	memset(&attr, 0, sizeof(attr));
-	ret = CVI_VPSS_GetChnAttr(kG3, kG3Ch0, &attr);
-	if (ret != CVI_SUCCESS) {
-		log::error("CVI_VPSS_GetChnAttr(G3,0) failed: 0x%x\n", ret);
-		return ret;
-	}
-	if (attr.u32Depth == depth)
-		return CVI_SUCCESS;
-
-	CVI_VPSS_DisableChn(kG3, kG3Ch0);
-	attr.u32Depth = depth;
-	attr.enPixelFormat = PIXEL_FORMAT_NV21;
-	ret = CVI_VPSS_SetChnAttr(kG3, kG3Ch0, &attr);
-	if (ret != CVI_SUCCESS) {
-		log::error("CVI_VPSS_SetChnAttr(G3,0) depth=%u failed: 0x%x\n", depth, ret);
-		return ret;
-	}
-	ret = CVI_VPSS_EnableChn(kG3, kG3Ch0);
-	if (ret != CVI_SUCCESS) {
-		log::error("CVI_VPSS_EnableChn(G3,0) failed: 0x%x\n", ret);
-		return ret;
-	}
-	log::info("G3-Ch0 depth set to %u\n", depth);
-	return CVI_SUCCESS;
-}
-
-/**
  * Step 2/3: feed N frames from G3-Ch0 into VENC.
  * Still Release VPSS frame after Send.
  *
@@ -603,60 +431,18 @@ static int venc_drain_stream(VENC_CHN chn, CVI_S32 timeout_ms, bool verbose,
 {
 	int drained = 0;
 	CVI_S32 deadline_slice = timeout_ms > 0 ? timeout_ms : 200;
-	VENC_PACK_S pack_slots[kVencPackSlotMax];
 
 	for (int n = 0; n < max_gets; ++n) {
-		VENC_CHN_STATUS_S status;
-		VENC_STREAM_S stream;
+		ZONHOR_MMF_VENC_STREAM_S mmf_stream;
 		CVI_S32 ret;
-		int waited = 0;
 
-		/*
-		 * Sophgo MPI: QueryStatus → pstPack slots → GetStream.
-		 * Calling GetStream with pstPack=NULL always fails / times out.
-		 */
-		memset(&status, 0, sizeof(status));
-		while (waited <= deadline_slice) {
-			ret = CVI_VENC_QueryStatus(chn, &status);
-			if (ret != CVI_SUCCESS) {
-				log::warn("QueryStatus: 0x%x\n", ret);
-				if (st)
-					++st->get_timeout;
-				return drained;
-			}
-			if (status.u32LeftStreamFrames > 0 ||
-			    (status.u32CurPacks > 0 && status.u32CurPacks < 64 &&
-			     status.u32LeftStreamBytes > 0))
-				break;
-			if (deadline_slice == 0)
-				break;
-			time::sleep_ms(1);
-			waited += 1;
-		}
-
-		if (!(status.u32LeftStreamFrames > 0 ||
-		      (status.u32CurPacks > 0 && status.u32CurPacks < 64 &&
-		       status.u32LeftStreamBytes > 0))) {
-			if (st)
-				++st->get_timeout;
-			break;
-		}
-
-		CVI_U32 pack_n = status.u32CurPacks ? status.u32CurPacks : 8;
-		if (pack_n > kVencPackSlotMax)
-			pack_n = kVencPackSlotMax;
-
-		memset(&stream, 0, sizeof(stream));
-		memset(pack_slots, 0, sizeof(VENC_PACK_S) * pack_n);
-		stream.pstPack = pack_slots;
-
-		ret = CVI_VENC_GetStream(chn, &stream, deadline_slice);
+		memset(&mmf_stream, 0, sizeof(mmf_stream));
+		ret = ZONHOR_MMF_VencGetStream(chn, &mmf_stream, deadline_slice);
 		if (ret != CVI_SUCCESS) {
 			if (ret == CVI_ERR_VENC_BUSY && drained > 0)
 				break;
-			if (verbose)
-				log::warn("GetStream failed: 0x%x (CurPacks was %u)\n",
-					  ret, status.u32CurPacks);
+			if (verbose && ret != CVI_ERR_VENC_BUSY)
+				log::warn("ZONHOR_MMF_VencGetStream failed: 0x%x\n", ret);
 			if (st)
 				++st->get_timeout;
 			break;
@@ -666,11 +452,11 @@ static int venc_drain_stream(VENC_CHN chn, CVI_S32 timeout_ms, bool verbose,
 		if (st)
 			++st->get_ok;
 		if (verbose) {
-			venc_log_stream("Step3", &stream, st);
+			venc_log_stream("Step3", &mmf_stream.stream, st);
 		} else if (st) {
-			for (CVI_U32 i = 0; i < stream.u32PackCount; ++i) {
+			for (CVI_U32 i = 0; i < mmf_stream.stream.u32PackCount; ++i) {
 				H264E_NALU_TYPE_E nalu =
-					stream.pstPack[i].DataType.enH264EType;
+					mmf_stream.stream.pstPack[i].DataType.enH264EType;
 				++st->packs;
 				if (nalu == H264E_NALU_SPS) ++st->saw_sps;
 				else if (nalu == H264E_NALU_PPS) ++st->saw_pps;
@@ -680,9 +466,9 @@ static int venc_drain_stream(VENC_CHN chn, CVI_S32 timeout_ms, bool verbose,
 			}
 		}
 
-		ret = CVI_VENC_ReleaseStream(chn, &stream);
+		ret = ZONHOR_MMF_VencReleaseStream(chn, &mmf_stream);
 		if (ret != CVI_SUCCESS)
-			log::warn("ReleaseStream: 0x%x\n", ret);
+			log::warn("ZONHOR_MMF_VencReleaseStream: 0x%x\n", ret);
 	}
 	return drained;
 }
@@ -713,22 +499,22 @@ static bool venc_send_from_g3(VENC_CHN chn, int send_count, bool verbose_stream)
 		if (i == 0)
 			log_video_frame("Step2 first G3", &frame.stVFrame);
 
-		ret = CVI_VENC_SendFrame(chn, &frame, kVencSendTimeoutMs);
+		ret = ZONHOR_MMF_VencSendFrame(chn, &frame, kVencSendTimeoutMs);
 		if (ret == CVI_ERR_VENC_BUSY) {
 			drained += venc_drain_stream(chn, 200, verbose_stream, &st, 4);
-			ret = CVI_VENC_SendFrame(chn, &frame, kVencSendTimeoutMs);
+			ret = ZONHOR_MMF_VencSendFrame(chn, &frame, kVencSendTimeoutMs);
 		}
 
 		if (ret != CVI_SUCCESS) {
 			++fail_send;
-			log::error("Step2[%d] CVI_VENC_SendFrame(%d) failed: 0x%x "
+			log::error("Step2[%d] ZONHOR_MMF_VencSendFrame(%d) failed: 0x%x "
 				   "wh=%ux%u fmt=%d (BUSY=0xc0078012)\n",
 				   i, chn, ret,
 				   frame.stVFrame.u32Width, frame.stVFrame.u32Height,
 				   (int)frame.stVFrame.enPixelFormat);
 		} else {
 			++ok;
-			log::info("Step2[%d] CVI_VENC_SendFrame(%d) ok\n", i, chn);
+			log::info("Step2[%d] ZONHOR_MMF_VencSendFrame(%d) ok\n", i, chn);
 		}
 
 		CVI_S32 rret = CVI_VPSS_ReleaseChnFrame(kG3, kG3Ch0, &frame);
@@ -790,40 +576,16 @@ static bool venc_bind_g3_and_get_stream(VENC_CHN chn, int get_count,
 					camera::Camera *cam)
 {
 	VencStreamStats st = {};
-	VENC_RECV_PIC_PARAM_S recv;
 
-	log::info("=== Step4: Bind G3-Ch0 → VENC(%d) + perf GetStream (no Send) ===\n",
-		  chn);
+	log::info("=== Step4: ZONHOR_MMF_VencBindInput(SUB_VENC) + perf GetStream ===\n");
 
-	if (set_g3_ch0_depth(0) != CVI_SUCCESS)
-		return false;
-
-	CVI_S32 ret = CVI_VENC_StopRecvFrame(chn);
+	CVI_S32 ret = ZONHOR_MMF_VencBindInput(chn, Z_CAMERA_OUTPUT_SUB_VENC);
 	if (ret != CVI_SUCCESS) {
-		log::error("Step4 StopRecvFrame(%d) failed: 0x%x\n", chn, ret);
-		return false;
-	}
-	log::info("Step4 StopRecvFrame(%d) ok (re-Start after Bind)\n", chn);
-
-	ret = SAMPLE_COMM_VPSS_Bind_VENC(kG3, kG3Ch0, chn);
-	if (ret != CVI_SUCCESS) {
-		log::error("SAMPLE_COMM_VPSS_Bind_VENC(G3,0→%d) failed: 0x%x\n", chn, ret);
-		memset(&recv, 0, sizeof(recv));
-		recv.s32RecvPicNum = -1;
-		CVI_VENC_StartRecvFrame(chn, &recv);
+		log::error("ZONHOR_MMF_VencBindInput(%d, SUB_VENC) failed: 0x%x\n", chn, ret);
 		return false;
 	}
 	g_venc_bound = true;
-	log::info("Bind G3-Ch0 → VENC(%d) ok\n", chn);
-
-	memset(&recv, 0, sizeof(recv));
-	recv.s32RecvPicNum = -1;
-	ret = CVI_VENC_StartRecvFrame(chn, &recv);
-	if (ret != CVI_SUCCESS) {
-		log::error("Step4 StartRecvFrame after Bind failed: 0x%x\n", ret);
-		return false;
-	}
-	log::info("Step4 StartRecvFrame(%d) after Bind ok\n", chn);
+	log::info("ZONHOR_MMF_VencBindInput(%d, SUB_VENC) ok\n", chn);
 
 	dump_vpss_proc("after Bind+StartRecv G3→VENC");
 
@@ -935,7 +697,7 @@ int _main(int argc, char *argv[])
 		}
 		venc_started = true;
 		dump_venc_proc("after VENC StartRecvFrame");
-		log::info("Step1 SUCCESS: VENC chn=%d Create+Start ok\n", kVencChn);
+		log::info("Step1 SUCCESS: ZONHOR_MMF_VencCreate chn=%d ok\n", kVencChn);
 	}
 
 	bool step_ok = true;
