@@ -3,6 +3,8 @@
  *
  * Step3/4 scope (2026-07):
  * - Encoder path="" + H264 CBR: ZONHOR_MMF_Venc* bare stream
+ * Step5 (2026-07):
+ * - bind_camera() + encode(NULL): G3 SUB_VENC bind path, GetStream only
  * - Other Encoder/Decoder/Video/VideoRecorder paths: explicit NOT_IMPL
  */
 
@@ -39,8 +41,58 @@ namespace maix::video {
 
     typedef struct {
         bool venc_created;
+        bool bound;
         VENC_CHN chn;
     } zonhor_enc_priv_t;
+
+    static video::Frame *_pull_venc_frame(zonhor_enc_priv_t *priv, int time_base,
+                                          bool *encode_started, uint64_t *start_encode_ms)
+    {
+        uint64_t curr_ms = time::ticks_ms();
+        if (!*encode_started) {
+            *encode_started = true;
+            *start_encode_ms = curr_ms;
+        }
+        uint64_t diff_ms = curr_ms - *start_encode_ms;
+        uint64_t pts = diff_ms * 1000 / (uint64_t)time_base;
+        uint64_t dts = pts;
+
+        ZONHOR_MMF_VENC_STREAM_S mmf_stream;
+        memset(&mmf_stream, 0, sizeof(mmf_stream));
+        CVI_S32 ret = ZONHOR_MMF_VencGetStream(priv->chn, &mmf_stream,
+                                               ZONHOR_VENC_GET_TIMEOUT_MS);
+        if (ret != CVI_SUCCESS) {
+            if (ret != CVI_ERR_VENC_BUSY)
+                log::error("ZONHOR_MMF_VencGetStream failed: 0x%x\r\n", ret);
+            return new video::Frame();
+        }
+
+        int stream_size = 0;
+        uint8_t *stream_buffer = _merge_venc_stream(&mmf_stream, &stream_size);
+        ZONHOR_MMF_VencReleaseStream(priv->chn, &mmf_stream);
+
+        return new video::Frame(stream_buffer, stream_size, pts, dts, 0, true, false);
+    }
+
+    static void _drain_bound_camera(camera::Camera *cam, image::Image **capture_out)
+    {
+        if (!cam)
+            return;
+
+        image::Image *img = cam->read();
+        if (!img)
+            return;
+
+        if (capture_out) {
+            if (*capture_out && (*capture_out)->data()) {
+                delete *capture_out;
+                *capture_out = NULL;
+            }
+            *capture_out = new image::Image(img->width(), img->height(), img->format(),
+                                            (uint8_t *)img->data(), img->data_size(), false);
+        }
+        delete img;
+    }
 
     static void zonhor_video_not_impl(const char *what)
     {
@@ -174,6 +226,8 @@ namespace maix::video {
     {
         zonhor_enc_priv_t *priv = _enc_priv(_param);
         if (priv) {
+            if (priv->bound)
+                ZONHOR_MMF_VencUnbindInput(priv->chn, Z_CAMERA_OUTPUT_SUB_VENC);
             if (priv->venc_created)
                 ZONHOR_MMF_VencDestroy(priv->chn);
             free(priv);
@@ -188,8 +242,45 @@ namespace maix::video {
 
     err::Err Encoder::bind_camera(camera::Camera *camera)
     {
-        zonhor_video_not_impl("Encoder bind_camera not migrated on Zonhor yet (Step5)");
-        return err::ERR_NOT_IMPL;
+        if (!camera)
+            return err::ERR_ARGS;
+
+        if (!ZONHOR_MMF_IsInited()) {
+            err::check_raise(err::ERR_RUNTIME,
+                             "Encoder bind_camera: zonhor graph not initialized");
+            return err::ERR_RUNTIME;
+        }
+
+        zonhor_enc_priv_t *priv = _enc_priv(_param);
+        if (!priv || !priv->venc_created) {
+            err::check_raise(err::ERR_RUNTIME, "Encoder VENC not created");
+            return err::ERR_RUNTIME;
+        }
+
+        if (priv->bound) {
+            log::warn("Encoder already bound, skip re-bind\r\n");
+            _camera = camera;
+            _bind_camera = true;
+            return err::ERR_NONE;
+        }
+
+        CVI_S32 ret = ZONHOR_MMF_EnableOutput(Z_CAMERA_OUTPUT_SUB_VENC);
+        if (ret != CVI_SUCCESS) {
+            log::error("ZONHOR_MMF_EnableOutput(SUB_VENC) failed: 0x%x\r\n", ret);
+            return err::ERR_RUNTIME;
+        }
+
+        ret = ZONHOR_MMF_VencBindInput(priv->chn, Z_CAMERA_OUTPUT_SUB_VENC);
+        if (ret != CVI_SUCCESS) {
+            log::error("ZONHOR_MMF_VencBindInput failed: 0x%x\r\n", ret);
+            return err::ERR_RUNTIME;
+        }
+
+        priv->bound = true;
+        _camera = camera;
+        _bind_camera = true;
+        log::info("Encoder bind_camera: SUB_VENC -> VENC(%d) ok\r\n", priv->chn);
+        return err::ERR_NONE;
     }
 
     video::Frame *Encoder::encode(image::Image *img, Bytes *pcm)
@@ -200,8 +291,22 @@ namespace maix::video {
         if (!priv || !priv->venc_created)
             return new video::Frame();
 
+        /* Bind path: encode(NULL) pulls bitstream only (Step5). */
         if (!img || !img->data()) {
-            zonhor_video_not_impl("Encoder encode(NULL) requires bind_camera (Step5)");
+            if (!priv->bound || !_bind_camera) {
+                log::warn("Encoder encode(NULL): bind_camera() required\r\n");
+                return new video::Frame();
+            }
+
+            if (priv->bound)
+                _drain_bound_camera(_camera, _need_capture ? &_capture_image : NULL);
+
+            return _pull_venc_frame(priv, _time_base, &_encode_started, &_start_encode_ms);
+        }
+
+        if (priv->bound) {
+            log::warn("Encoder bound to camera; ignore input image, use bind path\r\n");
+            return encode(Encoder::NoneImage, Encoder::NoneBytes);
         }
 
         if (img->format() != image::Format::FMT_YVU420SP) {
@@ -279,7 +384,21 @@ namespace maix::video {
     pipeline::Stream *Encoder::pop(int block_ms)
     {
         (void)block_ms;
-        zonhor_video_not_impl("Encoder pop not migrated on Zonhor yet");
+        zonhor_enc_priv_t *priv = _enc_priv(_param);
+        if (!priv || !priv->bound)
+            return nullptr;
+
+        _drain_bound_camera(_camera, NULL);
+        video::Frame *frame = _pull_venc_frame(priv, _time_base, &_encode_started,
+                                               &_start_encode_ms);
+        if (!frame || !frame->is_valid()) {
+            delete frame;
+            return nullptr;
+        }
+
+        /* pipeline::Stream expects mmf_stream_t-like payload — not migrated. */
+        delete frame;
+        zonhor_video_not_impl("Encoder pop pipeline wrapper not migrated on Zonhor yet");
         return nullptr;
     }
 

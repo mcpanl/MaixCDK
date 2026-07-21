@@ -14,6 +14,7 @@
 #include "z_display.hpp"
 #include "maix_camera.hpp"
 #include "z_image.hpp"
+#include "z_video.hpp"
 #include "main.h"
 
 extern "C" {
@@ -50,6 +51,7 @@ static constexpr int kDefaultStep = 4;
 static constexpr int kStep2SendCount = 10;
 static constexpr int kStep4GetCount = 15;
 static constexpr int kStep4PerfMs = 3000;
+static constexpr int kStep6EncodeCount = 30;
 static constexpr CVI_S32 kVencSendTimeoutMs = 2000;
 static constexpr CVI_S32 kVencGetStreamTimeoutMs = 200;
 
@@ -110,6 +112,7 @@ static void print_usage(const char *prog)
 	printf("  --step 2  + GetFrame(G3)→SendFrame (+silent drain)\n");
 	printf("  --step 3  + GetStream pack dump\n");
 	printf("  --step 4  + VPSS→VENC Bind (no Send)  [default]\n");
+	printf("  --step 6  + maix::video::Encoder bind_camera + encode(NULL)\n");
 	printf("  Later steps reserved (file)\n");
 }
 
@@ -647,6 +650,41 @@ static bool venc_bind_g3_and_get_stream(VENC_CHN chn, int get_count,
 	return stream_ok;
 }
 
+/** Step6: verify maix::video::Encoder bind_camera + encode(NULL) API path. */
+static bool step6_encoder_bind_test(camera::Camera *cam, CVI_U32 w, CVI_U32 h)
+{
+	int ok = 0;
+
+	log::info("=== Step6: maix::video::Encoder bind + encode(NULL) %ux%u ===\n",
+		  w, h);
+
+	video::Encoder enc("", (int)w, (int)h, image::FMT_YVU420SP,
+			   video::VIDEO_H264_CBR, 30, 30, 2000 * 1000);
+	if (enc.bind_camera(cam) != err::ERR_NONE) {
+		log::error("Step6 bind_camera failed\n");
+		return false;
+	}
+	log::info("Step6 bind_camera ok\n");
+
+	for (int i = 0; i < kStep6EncodeCount; ++i) {
+		video::Frame *f = enc.encode();
+		if (f && f->is_valid())
+			++ok;
+		delete f;
+	}
+
+	log::info("Step6 encode(NULL): valid_frames=%d/%d\n", ok, kStep6EncodeCount);
+	dump_venc_proc("after Step6 Encoder API");
+	dump_vpss_proc("after Step6 Encoder API");
+
+	bool pass = ok >= (kStep6EncodeCount * 8 / 10);
+	if (pass)
+		log::info("Step6 SUCCESS: Encoder bind path ok\n");
+	else
+		log::error("Step6 FAILED: too few valid encoded frames\n");
+	return pass;
+}
+
 int _main(int argc, char *argv[])
 {
 	const char *fb_device = kDefaultFbDevice;
@@ -689,7 +727,7 @@ int _main(int argc, char *argv[])
 		return -1;
 	}
 
-	if (step >= 1) {
+	if (step >= 1 && step != 6) {
 		CVI_S32 vret = venc_create_start(kVencChn, g3_w, g3_h);
 		if (vret != CVI_SUCCESS) {
 			log::error("Step1 VENC Create/Start FAILED: 0x%x\n", vret);
@@ -701,7 +739,9 @@ int _main(int argc, char *argv[])
 	}
 
 	bool step_ok = true;
-	if (step >= 4) {
+	if (step == 6) {
+		step_ok = step6_encoder_bind_test(&cam, g3_w, g3_h);
+	} else if (step >= 4) {
 		step_ok = venc_bind_g3_and_get_stream(kVencChn, kStep4GetCount, &cam);
 		if (step_ok)
 			log::info("Step4 SUCCESS: Bind path GetStream ok\n");
