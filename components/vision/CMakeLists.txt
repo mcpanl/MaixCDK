@@ -121,12 +121,8 @@ endif()
 # SET_SOURCE_FILES_PROPERTIES(${ADD_ASM_SRCS} PROPERTIES COMPILE_FLAGS "-x assembler-with-cpp -D BBBBB")
 ###############################################
 
-list(APPEND ADD_REQUIREMENTS basic opencv opencv_freetype peripheral omv zbar FFmpeg voice)
+list(APPEND ADD_REQUIREMENTS basic opencv opencv_freetype peripheral omv zbar FFmpeg voice zonhor_mmf)
 
-	# z_video_zonhor.cpp 依赖 sophgo_middleware.hpp 的声明（mmf_*, PAYLOAD_TYPE_E, PIXEL_*）。
-	# maixcam_lib 在 arm64 下可能缺失预置 so，因此不要把它加进 ADD_REQUIREMENTS；
-	# 仅提供 include path 让编译通过。
-	list(APPEND ADD_PRIVATE_INCLUDE "${CMAKE_CURRENT_SOURCE_DIR}/../maixcam_lib/include")
 ###### Add required/dependent components ######
 ###############################################
 

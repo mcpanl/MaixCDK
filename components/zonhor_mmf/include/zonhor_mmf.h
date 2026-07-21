@@ -147,6 +147,11 @@ CVI_S32 ZONHOR_MMF_VencUnbindInput(VENC_CHN chn, z_camera_output_id_t id);
 CVI_S32 ZONHOR_MMF_VencSendFrame(VENC_CHN chn, const VIDEO_FRAME_INFO_S *frame,
 				   CVI_S32 timeout_ms);
 
+/* Copy user NV21 buffer into VENC private VB pool block, then SendFrame. */
+CVI_S32 ZONHOR_MMF_VencSendNv21UserData(VENC_CHN chn, const CVI_U8 *data,
+					 CVI_U32 width, CVI_U32 height,
+					 CVI_S32 timeout_ms);
+
 /* QueryStatus -> GetStream. Caller should call VencReleaseStream after use. */
 CVI_S32 ZONHOR_MMF_VencGetStream(VENC_CHN chn, ZONHOR_MMF_VENC_STREAM_S *out,
 				  CVI_S32 timeout_ms);

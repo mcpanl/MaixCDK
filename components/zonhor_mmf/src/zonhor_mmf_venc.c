@@ -372,6 +372,67 @@ CVI_S32 ZONHOR_MMF_VencSendFrame(VENC_CHN chn, const VIDEO_FRAME_INFO_S *frame, 
 	return CVI_VENC_SendFrame(chn, frame, timeout_ms);
 }
 
+CVI_S32 ZONHOR_MMF_VencSendNv21UserData(VENC_CHN chn, const CVI_U8 *data,
+					 CVI_U32 width, CVI_U32 height,
+					 CVI_S32 timeout_ms)
+{
+	zonhor_venc_state_t *st;
+	VB_BLK blk;
+	VIDEO_FRAME_INFO_S frame;
+	CVI_U32 w, h, y_size, uv_size, blk_size;
+	void *vir = NULL;
+	CVI_U64 phy;
+	CVI_S32 ret;
+
+	if (!data)
+		return CVI_FAILURE;
+
+	st = get_state(chn);
+	if (!st || !st->inited || st->vb_pool == VB_INVALID_POOLID)
+		return CVI_FAILURE;
+
+	w = width ? width : st->width;
+	h = height ? height : st->height;
+	w &= ~1u;
+	h &= ~1u;
+
+	blk_size = COMMON_GetVencFrameBufferSize(st->payload, w, h);
+	if (blk_size == 0)
+		return CVI_FAILURE;
+
+	blk = CVI_VB_GetBlock(st->vb_pool, blk_size);
+	if (blk == VB_INVALID_HANDLE)
+		return CVI_FAILURE;
+
+	phy = CVI_VB_Handle2PhysAddr(blk);
+	ret = CVI_VB_GetBlockVirAddr(st->vb_pool, blk, &vir);
+	if (ret != CVI_SUCCESS || !vir) {
+		CVI_VB_ReleaseBlock(blk);
+		return ret != CVI_SUCCESS ? ret : CVI_FAILURE;
+	}
+
+	y_size = w * h;
+	uv_size = y_size / 2;
+	memcpy(vir, data, y_size + uv_size);
+
+	memset(&frame, 0, sizeof(frame));
+	frame.stVFrame.u32Width = w;
+	frame.stVFrame.u32Height = h;
+	frame.stVFrame.enPixelFormat = PIXEL_FORMAT_NV21;
+	frame.stVFrame.u32Stride[0] = w;
+	frame.stVFrame.u32Stride[1] = w;
+	frame.stVFrame.u64PhyAddr[0] = phy;
+	frame.stVFrame.u64PhyAddr[1] = phy + y_size;
+	frame.stVFrame.pu8VirAddr[0] = (CVI_U8 *)vir;
+	frame.stVFrame.pu8VirAddr[1] = (CVI_U8 *)vir + y_size;
+	frame.stVFrame.u32Length[0] = y_size;
+	frame.stVFrame.u32Length[1] = uv_size;
+
+	ret = CVI_VENC_SendFrame(chn, &frame, timeout_ms);
+	CVI_VB_ReleaseBlock(blk);
+	return ret;
+}
+
 CVI_S32 ZONHOR_MMF_VencGetStream(VENC_CHN chn, ZONHOR_MMF_VENC_STREAM_S *out, CVI_S32 timeout_ms)
 {
 	zonhor_venc_state_t *st;
