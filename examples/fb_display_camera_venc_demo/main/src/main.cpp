@@ -54,6 +54,8 @@ static constexpr int kStep4PerfMs = 3000;
 static constexpr int kStep6EncodeCount = 30;
 static constexpr int kStep7EncodeCount = 30;
 static constexpr const char *kStep7H264Path = "/tmp/step7_test.h264";
+static constexpr int kStep8EncodeCount = 30;
+static constexpr const char *kStep8Mp4Path = "/tmp/step8_test.mp4";
 static constexpr CVI_S32 kVencSendTimeoutMs = 2000;
 static constexpr CVI_S32 kVencGetStreamTimeoutMs = 200;
 
@@ -116,7 +118,7 @@ static void print_usage(const char *prog)
 	printf("  --step 4  + VPSS→VENC Bind (no Send)  [default]\n");
 	printf("  --step 6  + maix::video::Encoder bind_camera + encode(NULL)\n");
 	printf("  --step 7  + Encoder(path=.h264) bind + raw file write\n");
-	printf("  Later steps reserved (mp4/flv)\n");
+	printf("  --step 8  + Encoder(path=.mp4) bind + FFmpeg mux\n");
 }
 
 static void dump_proc_file(const char *path, const char *tag)
@@ -735,6 +737,52 @@ static bool step7_encoder_raw_file_test(camera::Camera *cam, CVI_U32 w, CVI_U32 
 	return pass;
 }
 
+/** Step8: verify Encoder(path=.mp4) bind + encode(NULL) FFmpeg mux. */
+static bool step8_encoder_mp4_test(camera::Camera *cam, CVI_U32 w, CVI_U32 h)
+{
+	int ok = 0;
+	long file_size = 0;
+
+	remove(kStep8Mp4Path);
+
+	log::info("=== Step8: Encoder .mp4 bind + encode(NULL) %ux%u ===\n", w, h);
+
+	{
+		video::Encoder enc(kStep8Mp4Path, (int)w, (int)h, image::FMT_YVU420SP,
+				   video::VIDEO_H264_CBR, 30, 30, 2000 * 1000);
+		if (enc.bind_camera(cam) != err::ERR_NONE) {
+			log::error("Step8 bind_camera failed\n");
+			return false;
+		}
+		log::info("Step8 bind_camera ok, writing %s\n", kStep8Mp4Path);
+
+		for (int i = 0; i < kStep8EncodeCount; ++i) {
+			video::Frame *f = enc.encode();
+			if (f && f->is_valid())
+				++ok;
+			delete f;
+		}
+	}
+
+	FILE *fp = fopen(kStep8Mp4Path, "rb");
+	if (fp) {
+		if (fseek(fp, 0, (int)maix::fs::SEEK_END) == 0)
+			file_size = ftell(fp);
+		fclose(fp);
+	}
+
+	log::info("Step8 encode(NULL): valid_frames=%d/%d file_size=%ld bytes\n",
+		  ok, kStep8EncodeCount, file_size);
+	dump_venc_proc("after Step8 mp4");
+
+	bool pass = ok >= (kStep8EncodeCount * 8 / 10) && file_size > 4096;
+	if (pass)
+		log::info("Step8 SUCCESS: mp4 file ok (%s)\n", kStep8Mp4Path);
+	else
+		log::error("Step8 FAILED: frames or file size below threshold\n");
+	return pass;
+}
+
 int _main(int argc, char *argv[])
 {
 	const char *fb_device = kDefaultFbDevice;
@@ -777,7 +825,7 @@ int _main(int argc, char *argv[])
 		return -1;
 	}
 
-	if (step >= 1 && step != 6 && step != 7) {
+	if (step >= 1 && step != 6 && step != 7 && step != 8) {
 		CVI_S32 vret = venc_create_start(kVencChn, g3_w, g3_h);
 		if (vret != CVI_SUCCESS) {
 			log::error("Step1 VENC Create/Start FAILED: 0x%x\n", vret);
@@ -789,7 +837,9 @@ int _main(int argc, char *argv[])
 	}
 
 	bool step_ok = true;
-	if (step == 7) {
+	if (step == 8) {
+		step_ok = step8_encoder_mp4_test(&cam, g3_w, g3_h);
+	} else if (step == 7) {
 		step_ok = step7_encoder_raw_file_test(&cam, g3_w, g3_h);
 	} else if (step == 6) {
 		step_ok = step6_encoder_bind_test(&cam, g3_w, g3_h);

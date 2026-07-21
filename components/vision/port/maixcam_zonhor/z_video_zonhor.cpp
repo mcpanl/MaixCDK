@@ -7,6 +7,8 @@
  * - bind_camera() + encode(NULL): G3 SUB_VENC bind path, GetStream only
  * Step6A (2026-07):
  * - Encoder(path=".h264"): append VENC packs to raw file via fwrite
+ * Step6B (2026-07):
+ * - Encoder(path=".mp4"/".flv"): FFmpeg mux (video only, H264)
  * - Other Encoder/Decoder/Video/VideoRecorder paths: explicit NOT_IMPL
  */
 
@@ -20,11 +22,16 @@
 extern "C" {
 #include "zonhor_mmf.h"
 #include "cvi_venc.h"
+#include <libavformat/avformat.h>
+#include <libavcodec/avcodec.h>
+#include <libavutil/imgutils.h>
+#include <libavutil/opt.h>
 }
 
 #include <cstdlib>
 #include <cstring>
 #include <cstdio>
+#include <cstdarg>
 
 #define ZONHOR_ENCODER_VENC_CHN  1
 #define ZONHOR_VENC_SEND_TIMEOUT_MS  2000
@@ -46,8 +53,24 @@ namespace maix::video {
         bool venc_created;
         bool bound;
         VENC_CHN chn;
+        int framerate;
         FILE *raw_fp;
+        AVFormatContext *fmt_ctx;
+        AVStream *video_st;
+        AVPacket *pending_pkt;
+        bool find_sps_pps;
+        int64_t mux_pts_step;
+        int64_t mux_frame_index;
     } zonhor_enc_priv_t;
+
+    static void zonhor_ffmpeg_log(void *ptr, int level, const char *fmt, va_list vargs)
+    {
+        (void)ptr;
+        (void)fmt;
+        (void)vargs;
+        if (level > AV_LOG_ERROR)
+            return;
+    }
 
     static bool _path_is_raw_h264(const std::string &path)
     {
@@ -59,6 +82,149 @@ namespace maix::video {
     {
         return path.size() >= 5 &&
                path.compare(path.size() - 5, 5, ".h265") == 0;
+    }
+
+    static bool _path_is_mux(const std::string &path)
+    {
+        if (path.size() >= 4 && path.compare(path.size() - 4, 4, ".mp4") == 0)
+            return true;
+        if (path.size() >= 4 && path.compare(path.size() - 4, 4, ".flv") == 0)
+            return true;
+        return false;
+    }
+
+    static void _mux_close(zonhor_enc_priv_t *priv);
+
+    static void _mux_init(zonhor_enc_priv_t *priv, const std::string &path,
+                          int width, int height, int framerate, int bitrate)
+    {
+        av_log_set_callback(zonhor_ffmpeg_log);
+
+        AVFormatContext *ctx = NULL;
+        if (avformat_alloc_output_context2(&ctx, NULL, NULL, path.c_str()) < 0 || !ctx) {
+            err::check_raise(err::ERR_RUNTIME, "avformat_alloc_output_context2 failed");
+        }
+
+        AVStream *st = avformat_new_stream(ctx, NULL);
+        if (!st) {
+            avformat_free_context(ctx);
+            err::check_raise(err::ERR_RUNTIME, "avformat_new_stream failed");
+        }
+
+        int fps = framerate > 0 ? framerate : 30;
+        st->codecpar->codec_type = AVMEDIA_TYPE_VIDEO;
+        st->codecpar->codec_id = AV_CODEC_ID_H264;
+        st->codecpar->width = width;
+        st->codecpar->height = height;
+        st->codecpar->format = AV_PIX_FMT_NV21;
+        st->codecpar->bit_rate = bitrate;
+        st->time_base = (AVRational){1, fps};
+
+        if (!(ctx->oformat->flags & AVFMT_NOFILE)) {
+            if (avio_open(&ctx->pb, path.c_str(), AVIO_FLAG_WRITE) < 0) {
+                avformat_free_context(ctx);
+                err::check_raise(err::ERR_RUNTIME, "avio_open failed");
+            }
+        }
+
+        if (avformat_write_header(ctx, NULL) < 0) {
+            if (!(ctx->oformat->flags & AVFMT_NOFILE))
+                avio_closep(&ctx->pb);
+            avformat_free_context(ctx);
+            err::check_raise(err::ERR_RUNTIME, "avformat_write_header failed");
+        }
+
+        priv->fmt_ctx = ctx;
+        priv->video_st = st;
+        priv->pending_pkt = av_packet_alloc();
+        if (!priv->pending_pkt) {
+            _mux_close(priv);
+            err::check_raise(err::ERR_RUNTIME, "av_packet_alloc failed");
+        }
+        priv->find_sps_pps = false;
+        priv->mux_frame_index = 0;
+        priv->mux_pts_step = av_rescale_q(1, (AVRational){1, fps}, st->time_base);
+        log::info("Encoder mux file: %s\r\n", path.c_str());
+    }
+
+    static void _mux_close(zonhor_enc_priv_t *priv)
+    {
+        if (!priv || !priv->fmt_ctx)
+            return;
+
+        if (priv->pending_pkt && priv->pending_pkt->size > 0) {
+            if (priv->pending_pkt->duration <= 0)
+                priv->pending_pkt->duration = priv->mux_pts_step;
+            av_interleaved_write_frame(priv->fmt_ctx, priv->pending_pkt);
+        }
+
+        av_write_trailer(priv->fmt_ctx);
+        if (!(priv->fmt_ctx->oformat->flags & AVFMT_NOFILE))
+            avio_closep(&priv->fmt_ctx->pb);
+        avformat_free_context(priv->fmt_ctx);
+
+        if (priv->pending_pkt) {
+            av_packet_free(&priv->pending_pkt);
+        }
+
+        priv->fmt_ctx = NULL;
+        priv->video_st = NULL;
+        priv->pending_pkt = NULL;
+    }
+
+    static void _write_mux_frame(zonhor_enc_priv_t *priv, CVI_U32 pack_count,
+                                 const uint8_t *data, int size)
+    {
+        if (!priv || !priv->fmt_ctx || !data || size <= 0)
+            return;
+
+        if (!priv->find_sps_pps) {
+            if (pack_count <= 2)
+                return;
+            priv->find_sps_pps = true;
+        }
+
+        uint8_t *frame_buffer = (uint8_t *)av_malloc((size_t)size);
+        if (!frame_buffer)
+            return;
+        memcpy(frame_buffer, data, (size_t)size);
+
+        AVPacket *pending = priv->pending_pkt;
+
+        if (pending->size == 0) {
+            pending->stream_index = priv->video_st->index;
+            pending->duration = priv->mux_pts_step;
+            pending->pts = 0;
+            pending->dts = 0;
+            pending->data = frame_buffer;
+            pending->size = size;
+            priv->mux_frame_index = 0;
+            return;
+        }
+
+        AVPacket *new_packet = av_packet_alloc();
+        if (!new_packet) {
+            av_free(frame_buffer);
+            return;
+        }
+
+        priv->mux_frame_index++;
+        int64_t pts = priv->mux_frame_index * priv->mux_pts_step;
+
+        new_packet->stream_index = priv->video_st->index;
+        new_packet->duration = priv->mux_pts_step;
+        new_packet->pts = pts;
+        new_packet->dts = pts;
+        new_packet->data = frame_buffer;
+        new_packet->size = size;
+
+        pending->duration = new_packet->pts - pending->pts;
+        if (av_interleaved_write_frame(priv->fmt_ctx, pending) < 0)
+            log::error("av_interleaved_write_frame failed\r\n");
+
+        av_packet_unref(pending);
+        av_packet_move_ref(pending, new_packet);
+        av_packet_free(&new_packet);
     }
 
     static void _write_raw_frame(zonhor_enc_priv_t *priv, const uint8_t *data, size_t size)
@@ -75,8 +241,10 @@ namespace maix::video {
 
     static uint8_t *_merge_venc_stream(const ZONHOR_MMF_VENC_STREAM_S *mmf_stream, int *out_size);
 
-    static video::Frame *_pull_venc_frame(zonhor_enc_priv_t *priv, int time_base,
-                                          bool *encode_started, uint64_t *start_encode_ms)
+    static video::Frame *_finish_venc_stream(zonhor_enc_priv_t *priv,
+                                             const ZONHOR_MMF_VENC_STREAM_S *mmf_stream,
+                                             int time_base, bool *encode_started,
+                                             uint64_t *start_encode_ms)
     {
         uint64_t curr_ms = time::ticks_ms();
         if (!*encode_started) {
@@ -87,6 +255,20 @@ namespace maix::video {
         uint64_t pts = diff_ms * 1000 / (uint64_t)time_base;
         uint64_t dts = pts;
 
+        int stream_size = 0;
+        uint8_t *stream_buffer = _merge_venc_stream(mmf_stream, &stream_size);
+        if (stream_buffer && stream_size > 0) {
+            _write_raw_frame(priv, stream_buffer, (size_t)stream_size);
+            _write_mux_frame(priv, mmf_stream->stream.u32PackCount,
+                             stream_buffer, stream_size);
+        }
+
+        return new video::Frame(stream_buffer, stream_size, pts, dts, 0, true, false);
+    }
+
+    static video::Frame *_pull_venc_frame(zonhor_enc_priv_t *priv, int time_base,
+                                          bool *encode_started, uint64_t *start_encode_ms)
+    {
         ZONHOR_MMF_VENC_STREAM_S mmf_stream;
         memset(&mmf_stream, 0, sizeof(mmf_stream));
         CVI_S32 ret = ZONHOR_MMF_VencGetStream(priv->chn, &mmf_stream,
@@ -97,11 +279,10 @@ namespace maix::video {
             return new video::Frame();
         }
 
-        int stream_size = 0;
-        uint8_t *stream_buffer = _merge_venc_stream(&mmf_stream, &stream_size);
+        video::Frame *frame = _finish_venc_stream(priv, &mmf_stream, time_base,
+                                                  encode_started, start_encode_ms);
         ZONHOR_MMF_VencReleaseStream(priv->chn, &mmf_stream);
-
-        return new video::Frame(stream_buffer, stream_size, pts, dts, 0, true, false);
+        return frame;
     }
 
     static void _drain_bound_camera(camera::Camera *cam, image::Image **capture_out)
@@ -230,8 +411,8 @@ namespace maix::video {
         if (_path.size() != 0) {
             if (_path_is_raw_h265(_path)) {
                 zonhor_video_not_impl("Encoder raw .h265 path not supported on Zonhor yet");
-            } else if (!_path_is_raw_h264(_path)) {
-                zonhor_video_not_impl("Encoder mp4/flv path not migrated on Zonhor yet");
+            } else if (!_path_is_raw_h264(_path) && !_path_is_mux(_path)) {
+                zonhor_video_not_impl("Encoder unsupported file suffix on Zonhor");
             }
         }
 
@@ -243,6 +424,7 @@ namespace maix::video {
         zonhor_enc_priv_t *priv = (zonhor_enc_priv_t *)calloc(1, sizeof(zonhor_enc_priv_t));
         err::check_null_raise(priv, "calloc failed");
         priv->chn = ZONHOR_ENCODER_VENC_CHN;
+        priv->framerate = _framerate;
 
         ZONHOR_MMF_VENC_CFG_S cfg = _make_venc_cfg(priv->chn, _width, _height,
                                                    _framerate, _gop, _bitrate, payload);
@@ -262,6 +444,8 @@ namespace maix::video {
                 err::check_raise(err::ERR_RUNTIME, "Encoder fopen raw h264 failed");
             }
             log::info("Encoder raw h264 file: %s\r\n", _path.c_str());
+        } else if (_path.size() != 0 && _path_is_mux(_path)) {
+            _mux_init(priv, _path, _width, _height, _framerate, _bitrate);
         }
 
         _param = priv;
@@ -275,6 +459,8 @@ namespace maix::video {
                 fclose(priv->raw_fp);
                 priv->raw_fp = NULL;
             }
+            if (priv->fmt_ctx)
+                _mux_close(priv);
             if (priv->bound)
                 ZONHOR_MMF_VencUnbindInput(priv->chn, Z_CAMERA_OUTPUT_SUB_VENC);
             if (priv->venc_created)
@@ -350,11 +536,7 @@ namespace maix::video {
             if (priv->bound)
                 _drain_bound_camera(_camera, _need_capture ? &_capture_image : NULL);
 
-            video::Frame *frame = _pull_venc_frame(priv, _time_base, &_encode_started,
-                                                   &_start_encode_ms);
-            if (frame && frame->is_valid())
-                _write_raw_frame(priv, frame->data(), frame->size());
-            return frame;
+            return _pull_venc_frame(priv, _time_base, &_encode_started, &_start_encode_ms);
         }
 
         if (priv->bound) {
@@ -421,10 +603,14 @@ namespace maix::video {
         }
 
         int stream_size = 0;
+        CVI_U32 pack_count = mmf_stream.stream.u32PackCount;
         uint8_t *stream_buffer = _merge_venc_stream(&mmf_stream, &stream_size);
         ZONHOR_MMF_VencReleaseStream(priv->chn, &mmf_stream);
 
-        _write_raw_frame(priv, stream_buffer, (size_t)stream_size);
+        if (stream_buffer && stream_size > 0) {
+            _write_raw_frame(priv, stream_buffer, (size_t)stream_size);
+            _write_mux_frame(priv, pack_count, stream_buffer, stream_size);
+        }
 
         return new video::Frame(stream_buffer, stream_size, pts, dts, 0, true, false);
     }
