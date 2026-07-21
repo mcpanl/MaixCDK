@@ -5,6 +5,8 @@
  * - Encoder path="" + H264 CBR: ZONHOR_MMF_Venc* bare stream
  * Step5 (2026-07):
  * - bind_camera() + encode(NULL): G3 SUB_VENC bind path, GetStream only
+ * Step6A (2026-07):
+ * - Encoder(path=".h264"): append VENC packs to raw file via fwrite
  * - Other Encoder/Decoder/Video/VideoRecorder paths: explicit NOT_IMPL
  */
 
@@ -22,6 +24,7 @@ extern "C" {
 
 #include <cstdlib>
 #include <cstring>
+#include <cstdio>
 
 #define ZONHOR_ENCODER_VENC_CHN  1
 #define ZONHOR_VENC_SEND_TIMEOUT_MS  2000
@@ -43,7 +46,32 @@ namespace maix::video {
         bool venc_created;
         bool bound;
         VENC_CHN chn;
+        FILE *raw_fp;
     } zonhor_enc_priv_t;
+
+    static bool _path_is_raw_h264(const std::string &path)
+    {
+        return path.size() >= 5 &&
+               path.compare(path.size() - 5, 5, ".h264") == 0;
+    }
+
+    static bool _path_is_raw_h265(const std::string &path)
+    {
+        return path.size() >= 5 &&
+               path.compare(path.size() - 5, 5, ".h265") == 0;
+    }
+
+    static void _write_raw_frame(zonhor_enc_priv_t *priv, const uint8_t *data, size_t size)
+    {
+        if (!priv || !priv->raw_fp || !data || size == 0)
+            return;
+
+        if (fwrite(data, 1, size, priv->raw_fp) != size) {
+            log::error("Encoder raw file fwrite failed\r\n");
+            return;
+        }
+        fflush(priv->raw_fp);
+    }
 
     static uint8_t *_merge_venc_stream(const ZONHOR_MMF_VENC_STREAM_S *mmf_stream, int *out_size);
 
@@ -200,7 +228,11 @@ namespace maix::video {
                               "Encoder only support FMT_YVU420SP format!");
 
         if (_path.size() != 0) {
-            zonhor_video_not_impl("Encoder file/mp4/flv path not migrated on Zonhor yet");
+            if (_path_is_raw_h265(_path)) {
+                zonhor_video_not_impl("Encoder raw .h265 path not supported on Zonhor yet");
+            } else if (!_path_is_raw_h264(_path)) {
+                zonhor_video_not_impl("Encoder mp4/flv path not migrated on Zonhor yet");
+            }
         }
 
         PAYLOAD_TYPE_E payload = _video_type_to_payload(type);
@@ -221,6 +253,17 @@ namespace maix::video {
         }
 
         priv->venc_created = true;
+
+        if (_path.size() != 0 && _path_is_raw_h264(_path)) {
+            priv->raw_fp = fopen(_path.c_str(), "wb");
+            if (!priv->raw_fp) {
+                ZONHOR_MMF_VencDestroy(priv->chn);
+                free(priv);
+                err::check_raise(err::ERR_RUNTIME, "Encoder fopen raw h264 failed");
+            }
+            log::info("Encoder raw h264 file: %s\r\n", _path.c_str());
+        }
+
         _param = priv;
     }
 
@@ -228,6 +271,10 @@ namespace maix::video {
     {
         zonhor_enc_priv_t *priv = _enc_priv(_param);
         if (priv) {
+            if (priv->raw_fp) {
+                fclose(priv->raw_fp);
+                priv->raw_fp = NULL;
+            }
             if (priv->bound)
                 ZONHOR_MMF_VencUnbindInput(priv->chn, Z_CAMERA_OUTPUT_SUB_VENC);
             if (priv->venc_created)
@@ -303,7 +350,11 @@ namespace maix::video {
             if (priv->bound)
                 _drain_bound_camera(_camera, _need_capture ? &_capture_image : NULL);
 
-            return _pull_venc_frame(priv, _time_base, &_encode_started, &_start_encode_ms);
+            video::Frame *frame = _pull_venc_frame(priv, _time_base, &_encode_started,
+                                                   &_start_encode_ms);
+            if (frame && frame->is_valid())
+                _write_raw_frame(priv, frame->data(), frame->size());
+            return frame;
         }
 
         if (priv->bound) {
@@ -372,6 +423,8 @@ namespace maix::video {
         int stream_size = 0;
         uint8_t *stream_buffer = _merge_venc_stream(&mmf_stream, &stream_size);
         ZONHOR_MMF_VencReleaseStream(priv->chn, &mmf_stream);
+
+        _write_raw_frame(priv, stream_buffer, (size_t)stream_size);
 
         return new video::Frame(stream_buffer, stream_size, pts, dts, 0, true, false);
     }

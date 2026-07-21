@@ -52,6 +52,8 @@ static constexpr int kStep2SendCount = 10;
 static constexpr int kStep4GetCount = 15;
 static constexpr int kStep4PerfMs = 3000;
 static constexpr int kStep6EncodeCount = 30;
+static constexpr int kStep7EncodeCount = 30;
+static constexpr const char *kStep7H264Path = "/tmp/step7_test.h264";
 static constexpr CVI_S32 kVencSendTimeoutMs = 2000;
 static constexpr CVI_S32 kVencGetStreamTimeoutMs = 200;
 
@@ -113,7 +115,8 @@ static void print_usage(const char *prog)
 	printf("  --step 3  + GetStream pack dump\n");
 	printf("  --step 4  + VPSS→VENC Bind (no Send)  [default]\n");
 	printf("  --step 6  + maix::video::Encoder bind_camera + encode(NULL)\n");
-	printf("  Later steps reserved (file)\n");
+	printf("  --step 7  + Encoder(path=.h264) bind + raw file write\n");
+	printf("  Later steps reserved (mp4/flv)\n");
 }
 
 static void dump_proc_file(const char *path, const char *tag)
@@ -685,6 +688,53 @@ static bool step6_encoder_bind_test(camera::Camera *cam, CVI_U32 w, CVI_U32 h)
 	return pass;
 }
 
+/** Step7: verify Encoder(path=.h264) bind + encode(NULL) writes raw file. */
+static bool step7_encoder_raw_file_test(camera::Camera *cam, CVI_U32 w, CVI_U32 h)
+{
+	int ok = 0;
+	long file_size = 0;
+
+	remove(kStep7H264Path);
+
+	log::info("=== Step7: Encoder raw .h264 bind + encode(NULL) %ux%u ===\n",
+		  w, h);
+
+	{
+		video::Encoder enc(kStep7H264Path, (int)w, (int)h, image::FMT_YVU420SP,
+				   video::VIDEO_H264_CBR, 30, 30, 2000 * 1000);
+		if (enc.bind_camera(cam) != err::ERR_NONE) {
+			log::error("Step7 bind_camera failed\n");
+			return false;
+		}
+		log::info("Step7 bind_camera ok, writing %s\n", kStep7H264Path);
+
+		for (int i = 0; i < kStep7EncodeCount; ++i) {
+			video::Frame *f = enc.encode();
+			if (f && f->is_valid())
+				++ok;
+			delete f;
+		}
+	}
+
+	FILE *fp = fopen(kStep7H264Path, "rb");
+	if (fp) {
+		if (fseek(fp, 0, (int)maix::fs::SEEK_END) == 0)
+			file_size = ftell(fp);
+		fclose(fp);
+	}
+
+	log::info("Step7 encode(NULL): valid_frames=%d/%d file_size=%ld bytes\n",
+		  ok, kStep7EncodeCount, file_size);
+	dump_venc_proc("after Step7 raw h264");
+
+	bool pass = ok >= (kStep7EncodeCount * 8 / 10) && file_size > 4096;
+	if (pass)
+		log::info("Step7 SUCCESS: raw h264 file ok (%s)\n", kStep7H264Path);
+	else
+		log::error("Step7 FAILED: frames or file size below threshold\n");
+	return pass;
+}
+
 int _main(int argc, char *argv[])
 {
 	const char *fb_device = kDefaultFbDevice;
@@ -727,7 +777,7 @@ int _main(int argc, char *argv[])
 		return -1;
 	}
 
-	if (step >= 1 && step != 6) {
+	if (step >= 1 && step != 6 && step != 7) {
 		CVI_S32 vret = venc_create_start(kVencChn, g3_w, g3_h);
 		if (vret != CVI_SUCCESS) {
 			log::error("Step1 VENC Create/Start FAILED: 0x%x\n", vret);
@@ -739,7 +789,9 @@ int _main(int argc, char *argv[])
 	}
 
 	bool step_ok = true;
-	if (step == 6) {
+	if (step == 7) {
+		step_ok = step7_encoder_raw_file_test(&cam, g3_w, g3_h);
+	} else if (step == 6) {
 		step_ok = step6_encoder_bind_test(&cam, g3_w, g3_h);
 	} else if (step >= 4) {
 		step_ok = venc_bind_g3_and_get_stream(kVencChn, kStep4GetCount, &cam);
