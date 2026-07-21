@@ -68,19 +68,28 @@ if (PLATFORM_MAIXCAM)
         else()
             message(WARNING "FFmpeg: MaixCAM arm64 prebuilt missing; expected lib/arm64 or downloaded package")
         endif()
+        set(_ffmpeg_dynamic_libs
+            ${src_path}/lib/libavcodec.so
+            ${src_path}/lib/libavdevice.so
+            ${src_path}/lib/libavfilter.so
+            ${src_path}/lib/libavformat.so
+            ${src_path}/lib/libavresample.so
+            ${src_path}/lib/libavutil.so
+            ${src_path}/lib/libpostproc.so
+            ${src_path}/lib/libswresample.so
+            ${src_path}/lib/libswscale.so
+        )
+        set(ffmpeg_dynamic_lib_file "")
+        foreach(_lib IN LISTS _ffmpeg_dynamic_libs)
+            if (EXISTS "${_lib}")
+                list(APPEND ffmpeg_dynamic_lib_file "${_lib}")
+            else()
+                message(STATUS "FFmpeg: missing prebuilt ${_lib}, skipping")
+            endif()
+        endforeach()
+        list(APPEND ADD_DYNAMIC_LIB ${ffmpeg_dynamic_lib_file})
+        set_property(SOURCE ${ffmpeg_dynamic_lib_file} PROPERTY GENERATED 1)
     endif()
-    set(ffmpeg_dynamic_lib_file ${src_path}/lib/libavcodec.so
-                                ${src_path}/lib/libavdevice.so
-                                ${src_path}/lib/libavfilter.so
-                                ${src_path}/lib/libavformat.so
-                                ${src_path}/lib/libavresample.so
-                                ${src_path}/lib/libavutil.so
-                                ${src_path}/lib/libpostproc.so
-                                ${src_path}/lib/libswresample.so
-                                ${src_path}/lib/libswscale.so
-                                    )
-    list(APPEND ADD_DYNAMIC_LIB ${ffmpeg_dynamic_lib_file})
-    set_property(SOURCE ${ffmpeg_dynamic_lib_file} PROPERTY GENERATED 1)
 elseif(PLATFORM_MAIXCAM2)
     set(ffmpeg_dynamic_lib_file ${src_path}/lib/libavcodec.so
                                 ${src_path}/lib/libavdevice.so

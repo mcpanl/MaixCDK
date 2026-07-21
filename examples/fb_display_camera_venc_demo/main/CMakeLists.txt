@@ -8,7 +8,7 @@ append_srcs_dir(ADD_SRCS "src")
 ###############################################
 
 ###### Add required/dependent components ######
-list(APPEND ADD_REQUIREMENTS basic vision zonhor_mmf)
+list(APPEND ADD_REQUIREMENTS basic vision zonhor_mmf FFmpeg)
 ###############################################
 
 register_component()

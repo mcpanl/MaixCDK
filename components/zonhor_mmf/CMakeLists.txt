@@ -12,6 +12,7 @@ if(PLATFORM_ZONHOR)
         "src/zonhor_graph_profile.c"
         "src/zonhor_graph_runtime.c"
         "src/zonhor_mmf.c"
+        "src/zonhor_mmf_venc.c"
         "src/zonhor_fb_lcd.c"
         "src/zonhor_sensor_mode.c"
         "src/zonhor_media_runtime.cpp"

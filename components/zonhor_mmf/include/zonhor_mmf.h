@@ -102,6 +102,57 @@ CVI_S32 ZONHOR_MMF_DisableOutput(z_camera_output_id_t id);
 CVI_S32 ZONHOR_MMF_GetVencBindInfo(z_camera_output_id_t id, VPSS_GRP *grp,
 				   VPSS_CHN *chn, z_camera_output_desc_t *desc);
 
+/* ── Minimal VENC wrapper (Step1) ───────────────────────────────────────── */
+/* Currently only supports PT_H264 + CBR (VB_SOURCE_USER + private VB pool). */
+#define ZONHOR_MMF_MAX_VENC_CHN        4
+#define ZONHOR_MMF_VENC_MAX_PACKS      16
+
+typedef struct {
+	VENC_CHN chn;
+	PAYLOAD_TYPE_E payload;
+	CVI_U32 width;
+	CVI_U32 height;
+	CVI_U32 fps;
+	CVI_U32 gop;
+	CVI_U32 bitrate_kbps;
+	CVI_BOOL cbr;
+	/* Bind input id:
+	 * - Optional convenience for callers.
+	 * - Actual binding is performed by ZONHOR_MMF_VencBindInput().
+	 */
+	CVI_BOOL bind_input;
+	z_camera_output_id_t input_id;
+} ZONHOR_MMF_VENC_CFG_S;
+
+typedef struct {
+	VENC_STREAM_S stream;
+	VENC_PACK_S packs[ZONHOR_MMF_VENC_MAX_PACKS];
+} ZONHOR_MMF_VENC_STREAM_S;
+
+/* Create + StartRecvFrame (create-only). */
+CVI_S32 ZONHOR_MMF_VencCreate(const ZONHOR_MMF_VENC_CFG_S *cfg);
+CVI_S32 ZONHOR_MMF_VencDestroy(VENC_CHN chn);
+
+/* Bind VPSS input to VENC:
+ * Order is handled inside:
+ *   StopRecvFrame -> VPSS_Bind_VENC -> StartRecvFrame
+ *
+ * Practical depth expectation on this platform:
+ * - bind时把对应 VPSS depth 设为 0，避免和用户 GetChnFrame 路径互抢。
+ */
+CVI_S32 ZONHOR_MMF_VencBindInput(VENC_CHN chn, z_camera_output_id_t id);
+CVI_S32 ZONHOR_MMF_VencUnbindInput(VENC_CHN chn, z_camera_output_id_t id);
+
+/* User SendFrame path (may be used by later z_video_zonhor steps). */
+CVI_S32 ZONHOR_MMF_VencSendFrame(VENC_CHN chn, const VIDEO_FRAME_INFO_S *frame,
+				   CVI_S32 timeout_ms);
+
+/* QueryStatus -> GetStream. Caller should call VencReleaseStream after use. */
+CVI_S32 ZONHOR_MMF_VencGetStream(VENC_CHN chn, ZONHOR_MMF_VENC_STREAM_S *out,
+				  CVI_S32 timeout_ms);
+CVI_S32 ZONHOR_MMF_VencReleaseStream(VENC_CHN chn,
+					ZONHOR_MMF_VENC_STREAM_S *stream);
+
 /* ── Framebuffer helpers (optional HW preview path) ─────────────────────── */
 
 typedef struct {
