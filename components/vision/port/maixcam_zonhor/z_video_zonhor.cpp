@@ -45,6 +45,8 @@ namespace maix::video {
         VENC_CHN chn;
     } zonhor_enc_priv_t;
 
+    static uint8_t *_merge_venc_stream(const ZONHOR_MMF_VENC_STREAM_S *mmf_stream, int *out_size);
+
     static video::Frame *_pull_venc_frame(zonhor_enc_priv_t *priv, int time_base,
                                           bool *encode_started, uint64_t *start_encode_ms)
     {
