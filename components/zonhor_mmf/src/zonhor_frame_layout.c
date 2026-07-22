@@ -151,7 +151,7 @@ bool z_extent_needs_crop(const z_frame_extent_t *extent)
 
 void z_half_extent(const z_frame_extent_t *src, z_frame_extent_t *out)
 {
-	uint32_t lw, lh;
+	uint32_t lw, lh, aligned_w, aligned_h;
 
 	if (!src || !out)
 		return;
@@ -164,7 +164,27 @@ void z_half_extent(const z_frame_extent_t *src, z_frame_extent_t *out)
 	/* Keep even dims for YUV. */
 	lw &= ~1u;
 	lh &= ~1u;
-	z_frame_layout_calc(lw, lh, out);
+
+	/*
+	 * VENC bind path encodes the full channel buffer. If logical_w is not
+	 * 64-aligned, z_frame_layout_calc() makes buffer_w > logical_w and the
+	 * right padding (often uninit / green) becomes a visible side strip —
+	 * even when PicWidth/crop is set to logical_w.
+	 *
+	 * Round width UP to 64 and scale height to preserve aspect so
+	 * logical == buffer and valid fills the frame.
+	 */
+	aligned_w = z_align_up_64(lw);
+	if (aligned_w != lw && lw > 0) {
+		aligned_h = (uint32_t)(((uint64_t)aligned_w * lh) / lw);
+		aligned_h &= ~1u;
+		if (aligned_h < 2u)
+			aligned_h = 2u;
+	} else {
+		aligned_h = lh;
+	}
+
+	z_frame_layout_calc(aligned_w, aligned_h, out);
 }
 
 void z_frame_extent_print(const char *tag, const z_frame_extent_t *e)

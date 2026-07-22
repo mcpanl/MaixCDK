@@ -121,31 +121,36 @@ CVI_S32 ZONHOR_MMF_VencCreate(const ZONHOR_MMF_VENC_CFG_S *cfg)
 	/* Even dimensions for H.264. */
 	w &= ~1u;
 	h &= ~1u;
+	/* Allow bind input whose storage width is 64-aligned (e.g. 540 -> 576). */
+	{
+		CVI_U32 max_w = ZONHOR_MMF_VPSS_ALIGN_UP(w);
+		CVI_U32 max_h = h;
 
-	blk_size = COMMON_GetVencFrameBufferSize(cfg->payload, w, h);
-	if (blk_size == 0) {
-		ZLOGE("COMMON_GetVencFrameBufferSize returned 0 for %ux%u", w, h);
-		return CVI_FAILURE;
+		blk_size = COMMON_GetVencFrameBufferSize(cfg->payload, max_w, max_h);
+		if (blk_size == 0) {
+			ZLOGE("COMMON_GetVencFrameBufferSize returned 0 for %ux%u", max_w, max_h);
+			return CVI_FAILURE;
+		}
+
+		memset(&pool_cfg, 0, sizeof(pool_cfg));
+		pool_cfg.u32BlkSize = blk_size;
+		pool_cfg.u32BlkCnt = 3;
+		pool_cfg.enRemapMode = VB_REMAP_MODE_NONE;
+
+		st->vb_pool = CVI_VB_CreatePool(&pool_cfg);
+		if (st->vb_pool == VB_INVALID_POOLID) {
+			ZLOGE("CVI_VB_CreatePool failed size=%u cnt=3", blk_size);
+			return CVI_FAILURE;
+		}
+		vb_pool = st->vb_pool;
+
+		memset(&attr, 0, sizeof(attr));
+		attr.stVencAttr.enType = cfg->payload; /* PT_H264 */
+		attr.stVencAttr.u32MaxPicWidth = max_w;
+		attr.stVencAttr.u32MaxPicHeight = max_h;
+		attr.stVencAttr.u32PicWidth = w;
+		attr.stVencAttr.u32PicHeight = h;
 	}
-
-	memset(&pool_cfg, 0, sizeof(pool_cfg));
-	pool_cfg.u32BlkSize = blk_size;
-	pool_cfg.u32BlkCnt = 3;
-	pool_cfg.enRemapMode = VB_REMAP_MODE_NONE;
-
-	st->vb_pool = CVI_VB_CreatePool(&pool_cfg);
-	if (st->vb_pool == VB_INVALID_POOLID) {
-		ZLOGE("CVI_VB_CreatePool failed size=%u cnt=3", blk_size);
-		return CVI_FAILURE;
-	}
-	vb_pool = st->vb_pool;
-
-	memset(&attr, 0, sizeof(attr));
-	attr.stVencAttr.enType = cfg->payload; /* PT_H264 */
-	attr.stVencAttr.u32MaxPicWidth = w;
-	attr.stVencAttr.u32MaxPicHeight = h;
-	attr.stVencAttr.u32PicWidth = w;
-	attr.stVencAttr.u32PicHeight = h;
 
 	/* ~0.5MB bitstream ring; enough for 540x960 substream. */
 	attr.stVencAttr.u32BufSize = 512 * 1024;
@@ -232,7 +237,9 @@ CVI_S32 ZONHOR_MMF_VencCreate(const ZONHOR_MMF_VENC_CFG_S *cfg)
 	st->cbr = CVI_TRUE;
 	st->vb_pool = vb_pool;
 
-	ZLOGI("VENC(%d) created H264 %ux%u CBR %ukbps", cfg->chn, w, h, st->bitrate_kbps);
+	ZLOGI("VENC(%d) created H264 Pic=%ux%u Max=%ux%u CBR %ukbps",
+	      cfg->chn, w, h, attr.stVencAttr.u32MaxPicWidth,
+	      attr.stVencAttr.u32MaxPicHeight, st->bitrate_kbps);
 	return CVI_SUCCESS;
 
 fail:
@@ -288,11 +295,98 @@ CVI_S32 ZONHOR_MMF_VencDestroy(VENC_CHN chn)
 	return CVI_SUCCESS;
 }
 
+CVI_S32 ZONHOR_MMF_VencSetCropFromOutput(VENC_CHN chn, z_camera_output_id_t id)
+{
+	zonhor_venc_state_t *st;
+	z_camera_output_desc_t desc;
+	VENC_CHN_PARAM_S param;
+	VENC_CHN_ATTR_S attr;
+	CVI_U32 crop_w, crop_h;
+	CVI_S32 crop_x, crop_y;
+	CVI_S32 ret;
+
+	st = get_state(chn);
+	if (!st || !st->inited)
+		return CVI_FAILURE;
+
+	memset(&desc, 0, sizeof(desc));
+	ret = ZONHOR_MMF_GetOutputDesc(id, &desc);
+	if (ret != CVI_SUCCESS)
+		return ret;
+
+	crop_w = desc.extent.valid_width ? desc.extent.valid_width
+					: desc.extent.logical_width;
+	crop_h = desc.extent.valid_height ? desc.extent.valid_height
+					: desc.extent.logical_height;
+	crop_x = (CVI_S32)desc.extent.valid_x;
+	crop_y = (CVI_S32)desc.extent.valid_y;
+	/* VENC crop X must be a multiple of 16. */
+	crop_x &= ~15;
+
+	ZLOGI("VencSetCropFromOutput chn=%d id=%d logical=%ux%u buffer=%ux%u "
+	      "valid=(%u,%u %ux%u) -> crop=(%d,%d %ux%u) venc_pic=%ux%u",
+	      chn, (int)id,
+	      desc.extent.logical_width, desc.extent.logical_height,
+	      desc.extent.buffer_width, desc.extent.buffer_height,
+	      desc.extent.valid_x, desc.extent.valid_y,
+	      desc.extent.valid_width, desc.extent.valid_height,
+	      crop_x, crop_y, crop_w, crop_h, st->width, st->height);
+
+	if (crop_w == 0 || crop_h == 0)
+		return CVI_FAILURE;
+
+	/*
+	 * No right/bottom padding in storage → crop unnecessary.
+	 * left-aligned valid inside wider buffer still needs crop when
+	 * buffer_width > valid_width (classic 540 vs align64=576 case).
+	 */
+	if (!z_extent_needs_crop(&desc.extent) &&
+	    desc.extent.buffer_width <= crop_w &&
+	    desc.extent.buffer_height <= crop_h) {
+		ZLOGI("VencSetCropFromOutput: no padding, skip crop");
+		return CVI_SUCCESS;
+	}
+
+	memset(&attr, 0, sizeof(attr));
+	ret = CVI_VENC_GetChnAttr(chn, &attr);
+	if (ret == CVI_SUCCESS) {
+		ZLOGI("VENC attr before crop: Pic=%ux%u Max=%ux%u",
+		      attr.stVencAttr.u32PicWidth, attr.stVencAttr.u32PicHeight,
+		      attr.stVencAttr.u32MaxPicWidth, attr.stVencAttr.u32MaxPicHeight);
+	}
+
+	memset(&param, 0, sizeof(param));
+	ret = CVI_VENC_GetChnParam(chn, &param);
+	if (ret != CVI_SUCCESS) {
+		ZLOGE("CVI_VENC_GetChnParam(%d) failed: 0x%x", chn, ret);
+		return ret;
+	}
+
+	param.stCropCfg.bEnable = CVI_TRUE;
+	param.stCropCfg.stRect.s32X = crop_x;
+	param.stCropCfg.stRect.s32Y = crop_y;
+	param.stCropCfg.stRect.u32Width = crop_w;
+	param.stCropCfg.stRect.u32Height = crop_h;
+
+	ret = CVI_VENC_SetChnParam(chn, &param);
+	if (ret != CVI_SUCCESS) {
+		ZLOGE("CVI_VENC_SetChnParam crop(%d,%d %ux%u) failed: 0x%x",
+		      crop_x, crop_y, crop_w, crop_h, ret);
+		return ret;
+	}
+
+	ZLOGI("VENC(%d) crop enabled (%d,%d %ux%u)", chn, crop_x, crop_y, crop_w, crop_h);
+	return CVI_SUCCESS;
+}
+
 CVI_S32 ZONHOR_MMF_VencBindInput(VENC_CHN chn, z_camera_output_id_t id)
 {
 	zonhor_venc_state_t *st;
 	VPSS_GRP grp;
 	VPSS_CHN vchn;
+	z_camera_output_desc_t desc;
+	VPSS_CHN_ATTR_S chn_attr;
+	VENC_CHN_ATTR_S venc_attr;
 	CVI_S32 ret;
 	VENC_RECV_PIC_PARAM_S recv;
 
@@ -300,9 +394,63 @@ CVI_S32 ZONHOR_MMF_VencBindInput(VENC_CHN chn, z_camera_output_id_t id)
 	if (!st || !st->inited)
 		return CVI_FAILURE;
 
+	memset(&desc, 0, sizeof(desc));
 	ret = vpss_get_bind_pos(id, &grp, &vchn);
 	if (ret != CVI_SUCCESS)
 		return ret;
+
+	(void)ZONHOR_MMF_GetOutputDesc(id, &desc);
+	ZLOGI("VencBindInput chn=%d <- grp=%d chn=%d name=%s "
+	      "logical=%ux%u buffer=%ux%u valid=(%u,%u %ux%u) venc_pic=%ux%u",
+	      chn, (int)grp, (int)vchn, desc.name ? desc.name : "?",
+	      desc.extent.logical_width, desc.extent.logical_height,
+	      desc.extent.buffer_width, desc.extent.buffer_height,
+	      desc.extent.valid_x, desc.extent.valid_y,
+	      desc.extent.valid_width, desc.extent.valid_height,
+	      st->width, st->height);
+
+	memset(&chn_attr, 0, sizeof(chn_attr));
+	if (CVI_VPSS_GetChnAttr(grp, vchn, &chn_attr) == CVI_SUCCESS) {
+		ZLOGI("VPSS G%u-Ch%u attr: %ux%u depth=%u fmt=%d",
+		      (unsigned)grp, (unsigned)vchn,
+		      chn_attr.u32Width, chn_attr.u32Height,
+		      chn_attr.u32Depth, (int)chn_attr.enPixelFormat);
+	}
+
+	/* One-shot probe of bind input frame metadata (width vs stride). */
+	{
+		VIDEO_FRAME_INFO_S probe;
+		CVI_U32 old_depth = 0;
+
+		memset(&probe, 0, sizeof(probe));
+		memset(&chn_attr, 0, sizeof(chn_attr));
+		if (CVI_VPSS_GetChnAttr(grp, vchn, &chn_attr) == CVI_SUCCESS)
+			old_depth = chn_attr.u32Depth;
+		if (old_depth == 0)
+			(void)vpss_set_depth(grp, vchn, 1);
+		if (CVI_VPSS_GetChnFrame(grp, vchn, &probe, 200) == CVI_SUCCESS) {
+			ZLOGI("bind-input probe: wh=%ux%u stride=%u/%u/%u len=%u/%u/%u fmt=%d",
+			      probe.stVFrame.u32Width, probe.stVFrame.u32Height,
+			      probe.stVFrame.u32Stride[0], probe.stVFrame.u32Stride[1],
+			      probe.stVFrame.u32Stride[2],
+			      probe.stVFrame.u32Length[0], probe.stVFrame.u32Length[1],
+			      probe.stVFrame.u32Length[2],
+			      (int)probe.stVFrame.enPixelFormat);
+			(void)CVI_VPSS_ReleaseChnFrame(grp, vchn, &probe);
+		} else {
+			ZLOGI("bind-input probe: GetChnFrame timeout/fail (ok if just enabled)");
+		}
+	}
+
+	memset(&venc_attr, 0, sizeof(venc_attr));
+	if (CVI_VENC_GetChnAttr(chn, &venc_attr) == CVI_SUCCESS) {
+		ZLOGI("VENC(%d) attr: Pic=%ux%u Max=%ux%u",
+		      chn,
+		      venc_attr.stVencAttr.u32PicWidth,
+		      venc_attr.stVencAttr.u32PicHeight,
+		      venc_attr.stVencAttr.u32MaxPicWidth,
+		      venc_attr.stVencAttr.u32MaxPicHeight);
+	}
 
 	/* Bind-path expects VPSS depth=0. */
 	ret = vpss_set_depth(grp, vchn, 0);
@@ -312,6 +460,11 @@ CVI_S32 ZONHOR_MMF_VencBindInput(VENC_CHN chn, z_camera_output_id_t id)
 	ret = CVI_VENC_StopRecvFrame(chn);
 	if (ret != CVI_SUCCESS)
 		return ret;
+
+	/* Best-effort crop; primary fix is padding-free half extent. */
+	ret = ZONHOR_MMF_VencSetCropFromOutput(chn, id);
+	if (ret != CVI_SUCCESS)
+		ZLOGE("VencSetCropFromOutput before bind failed: 0x%x (continue)", ret);
 
 	ret = SAMPLE_COMM_VPSS_Bind_VENC(grp, vchn, chn);
 	if (ret != CVI_SUCCESS) {
@@ -336,6 +489,8 @@ CVI_S32 ZONHOR_MMF_VencBindInput(VENC_CHN chn, z_camera_output_id_t id)
 		return ret;
 	}
 
+	ZLOGI("VencBindInput chn=%d ok (G%u-Ch%u -> VENC)", chn,
+	      (unsigned)grp, (unsigned)vchn);
 	return CVI_SUCCESS;
 }
 

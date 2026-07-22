@@ -22,7 +22,7 @@ Sensor/VI 1920x1080
               SetGrpCrop = valid   (e.g. 4,0,1080,1920)
               -> ChA: RGB888 display_preview  SetChnAttr 172x320
               -> ChB: RGB888 main_rgb         SetChnAttr user size
-              -> ChC: half-size YUV           -> Group3
+              -> ChC: half-size YUV (576×1024, no pad) -> Group3
   Group1 / Device0 / MEM                     create-only
 ```
 
@@ -53,9 +53,21 @@ Helper: `z_gdc_rot90_extent(sensor_w, sensor_h, Z_PAD_CENTER, &ext)`.
    Lifting MaxW to landscape `1920` while input is `1088` wide → HW RGB zipper / neon garbage.
 4. G0 GDC: `SetChnAttr` pre-rot `(sensor_w, align64(sensor_h))` + `ASPECT_RATIO_AUTO` + `ROT90`.
 
+### Hard rules for SUB_VENC / Encoder bind (board-proven 2026-07-22)
+
+5. **Half YUV used by VENC bind must have `logical_width == buffer_width`** (width already 64-aligned).
+   - Bad (old): half `logical=540`, `buffer=576` → MP4/H264 shows a **green/junk strip on the right** (~36 px).
+   - `CVI_VENC_SetChnParam` crop does **not** remove that strip on the VPSS→VENC bind path.
+   - Fix: `z_half_extent()` rounds width up to 64 and scales height to keep 9:16 → **`576×1024`**, no padding.
+6. Encoder size must come from `ZONHOR_MMF_GetOutputDesc(Z_CAMERA_OUTPUT_SUB_VENC)`, not Camera main RGB size and not a hardcoded `540×960`.
+7. Detecting the strip: check **mean RGB of the rightmost columns** (solid green has low variance — variance-only checks miss it).
+
+详见仓库根目录 `000_zonhor_fb_display_camera_venc_demo_step5_runtime_pitfalls_20260721.md` §9。
+
 ### Alignment
 
-- `buffer_width = align_up(logical_width, 64)`
+- `buffer_width = align_up(logical_width, 64)` for G0 / display-style extents that keep a smaller logical crop.
+- **Exception for VENC half**: prefer raising **logical** to the aligned size (see `z_half_extent`) so there is no right-edge pad for bind encoding.
 - After 90° rotate, width alignment is **re-checked** (sensor H becomes output W)
 
 ## Modules

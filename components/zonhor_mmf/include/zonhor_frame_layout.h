@@ -83,7 +83,13 @@ void z_apply_padding(z_frame_extent_t *extent, uint32_t valid_x, uint32_t valid_
 /** True when buffer is larger than the valid crop (GrpCrop needed). */
 bool z_extent_needs_crop(const z_frame_extent_t *extent);
 
-/** Half-size of src (integer divide), then 64-align buffer width. */
+/** Half-size of src for SUB_VENC / G3 feed.
+ * Width is rounded UP to 64 and height is adjusted to keep aspect ratio so
+ * logical_* == buffer_* (no right-edge stride padding). Board-proven: a
+ * 540-wide NV21 channel with buffer/stride 576 encodes a green/junk strip
+ * inside the right ~36 px that VENC crop does not remove on the bind path.
+ * Example: 1080x1920 → 576x1024 (not 540x960 / buffer 576x960).
+ */
 void z_half_extent(const z_frame_extent_t *src, z_frame_extent_t *out);
 
 void z_frame_extent_print(const char *tag, const z_frame_extent_t *e);

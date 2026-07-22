@@ -143,6 +143,13 @@ CVI_S32 ZONHOR_MMF_VencDestroy(VENC_CHN chn);
 CVI_S32 ZONHOR_MMF_VencBindInput(VENC_CHN chn, z_camera_output_id_t id);
 CVI_S32 ZONHOR_MMF_VencUnbindInput(VENC_CHN chn, z_camera_output_id_t id);
 
+/**
+ * Crop VENC picture to the output's valid/logical rectangle.
+ * Used when bind input has 64-aligned buffer_width > valid_width (right padding).
+ * Safe no-op when valid fills the buffer.
+ */
+CVI_S32 ZONHOR_MMF_VencSetCropFromOutput(VENC_CHN chn, z_camera_output_id_t id);
+
 /* User SendFrame path (may be used by later z_video_zonhor steps). */
 CVI_S32 ZONHOR_MMF_VencSendFrame(VENC_CHN chn, const VIDEO_FRAME_INFO_S *frame,
 				   CVI_S32 timeout_ms);
