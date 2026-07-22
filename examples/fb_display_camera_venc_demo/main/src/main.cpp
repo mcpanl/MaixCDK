@@ -204,9 +204,9 @@ static CVI_S32 enable_group3_ch0(CVI_U32 *out_w, CVI_U32 *out_h)
 	}
 	if (attr.u32Width == 0 || attr.u32Height == 0) {
 		attr.u32Width = desc.extent.logical_width ?
-				desc.extent.logical_width : 540;
+				desc.extent.logical_width : 576;
 		attr.u32Height = desc.extent.logical_height ?
-				 desc.extent.logical_height : 960;
+				 desc.extent.logical_height : 1024;
 		need_set = CVI_TRUE;
 	}
 
@@ -788,8 +788,8 @@ int _main(int argc, char *argv[])
 	const char *fb_device = kDefaultFbDevice;
 	int step = kDefaultStep;
 	bool venc_started = false;
-	CVI_U32 g3_w = 540;
-	CVI_U32 g3_h = 960;
+	CVI_U32 g3_w = 576;
+	CVI_U32 g3_h = 1024;
 
 	for (int i = 1; i < argc; ++i) {
 		if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
