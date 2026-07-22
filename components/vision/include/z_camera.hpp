@@ -117,6 +117,14 @@ namespace maix::camera
         void clear_buff();
 
         /**
+         * Timestamp of the last successful user Camera::read(), in microseconds.
+         * 0 means the application has never consumed a frame via read().
+         * Used by Encoder bind-path Auto drain (C++ only, not exported to MaixPy).
+         * @maixcdk maix.camera.Camera.last_read_us
+         */
+        uint64_t last_read_us() const { return _last_read_us; }
+
+        /**
          * Read some frames and drop, this is usually used avoid read not stable image when camera just opened.
          * @param num number of frames to read and drop
          * @maixpy maix.camera.Camera.skip_frames

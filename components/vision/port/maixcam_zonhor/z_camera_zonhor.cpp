@@ -235,7 +235,7 @@ Camera::Camera(int width, int height, image::Format format,
 	_show_colorbar = false;
 	_open_set_regs = s_regs_flag;
 	_device = "";
-	_last_read_us = time::ticks_us();
+	_last_read_us = 0;
 	_invert_flip = false;
 	_invert_mirror = false;
 	_is_opened = false;
@@ -339,6 +339,7 @@ image::Image *Camera::read(void * /*buff*/, size_t /*buff_size*/,
 	image::Image *img = _read_rgb888_frame(_width, _height, timeout);
 	if (!img)
 		return nullptr;
+	_last_read_us = time::ticks_us();
 	if (_format == image::FMT_RGB888)
 		return img;
 
